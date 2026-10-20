@@ -65,16 +65,18 @@ class ImageApiTest {
     void 여러_장을_올리고_조회_보기_삭제한다() throws Exception {
         String body = mockMvc.perform(upload(file("look1.png", PNG), file("C:\\fakepath\\look2.jpg", JPEG)))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(2))
-                // 브라우저가 경로까지 보내도 파일명만 남기고, 형식은 파일 내용으로 정한다. 저장 파일명은 내보내지 않는다
-                .andExpect(jsonPath("$[1].originalName").value("look2.jpg"))
-                .andExpect(jsonPath("$[1].contentType").value("image/jpeg"))
+                .andExpect(jsonPath("$.uploaded.length()").value(2))
+                .andExpect(jsonPath("$.duplicates.length()").value(0))
+                // 브라우저가 경로까지 보내도 파일명만 남기고, 형식은 파일 내용으로 정한다. 저장 파일명·해시는 내보내지 않는다
+                .andExpect(jsonPath("$.uploaded[1].originalName").value("look2.jpg"))
+                .andExpect(jsonPath("$.uploaded[1].contentType").value("image/jpeg"))
                 .andExpect(content().string(not(containsString("storedName"))))
+                .andExpect(content().string(not(containsString("contentHash"))))
                 // 업로드한 이미지마다 분석 문서가 생긴다(출처는 업로드 정보로 대신)
-                .andExpect(jsonPath("$[0].analysis.docId").value(org.hamcrest.Matchers.startsWith("IMG-")))
+                .andExpect(jsonPath("$.uploaded[0].analysis.docId").value(org.hamcrest.Matchers.startsWith("IMG-")))
                 .andReturn().getResponse().getContentAsString();
-        Number pngId = JsonPath.read(body, "$[0].id");
-        Number jpgId = JsonPath.read(body, "$[1].id");
+        Number pngId = JsonPath.read(body, "$.uploaded[0].id");
+        Number jpgId = JsonPath.read(body, "$.uploaded[1].id");
 
         mockMvc.perform(get("/api/images"))
                 .andExpect(jsonPath("$[*].originalName", hasItem("look1.png")))
@@ -101,6 +103,38 @@ class ImageApiTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(content().string(containsString("evil.png")));
         assertEquals(before, countImages());
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 이미_올린_이미지와_같은_요청_안의_중복은_건너뛴다() throws Exception {
+        // 다른 테스트와 겹치지 않는 내용(PNG 시그니처 뒤 바이트만 다르게)
+        byte[] a = java.util.Arrays.copyOf(PNG, PNG.length + 1);
+        a[PNG.length] = 'a';
+        byte[] b = java.util.Arrays.copyOf(PNG, PNG.length + 1);
+        b[PNG.length] = 'b';
+        mockMvc.perform(upload(file("first.png", a)))
+                .andExpect(jsonPath("$.uploaded.length()").value(1));
+        int before = countImages();
+
+        // first.png와 내용이 같은 again.png, 새 이미지 new.png, 같은 요청 안에서 new.png와 같은 copy.png
+        mockMvc.perform(upload(file("again.png", a), file("new.png", b), file("copy.png", b)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.uploaded.length()").value(1))
+                .andExpect(jsonPath("$.uploaded[0].originalName").value("new.png"))
+                .andExpect(jsonPath("$.duplicates.length()").value(2))
+                .andExpect(jsonPath("$.duplicates[0].fileName").value("again.png"))
+                .andExpect(jsonPath("$.duplicates[0].existingName").value("first.png"))
+                .andExpect(jsonPath("$.duplicates[1].fileName").value("copy.png"))
+                .andExpect(jsonPath("$.duplicates[1].existingName").value("new.png"));
+        assertEquals(before + 1, countImages());
+
+        // 전부 중복이면 아무것도 저장하지 않고 200(오류가 아니다)
+        mockMvc.perform(upload(file("again2.png", a)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.uploaded.length()").value(0))
+                .andExpect(jsonPath("$.duplicates[0].existingName").value("first.png"));
+        assertEquals(before + 1, countImages());
     }
 
     @Test

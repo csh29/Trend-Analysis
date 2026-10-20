@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -18,7 +19,7 @@ import java.time.LocalDateTime;
  * 원본 파일명은 표시용일 뿐 저장 경로에 쓰지 않는다 — 사용자가 준 이름을 경로에 쓰면 경로 조작·덮어쓰기가 된다.
  */
 @Entity
-@Table(name = "uploaded_images")
+@Table(name = "uploaded_images", indexes = @Index(columnList = "content_hash"))
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor
@@ -50,4 +51,15 @@ public class UploadedImage {
 
     @Column(name = "uploaded_at", nullable = false)
     private LocalDateTime uploadedAt;
+
+    /**
+     * 파일 내용의 SHA-256(16진수). 같은 이미지를 두 번 올리면 같은 문서가 두 번 집계되고 분석 토큰도 두 번 든다 — 업로드 때 이 값으로 거른다.
+     * 이 칸이 생기기 전에 올린 이미지는 기동 때 채운다(ImageService.fillMissingHashes). 그 전 중복이 남아 있을 수 있어 유일 제약은 두지 않는다.
+     */
+    @Column(name = "content_hash", length = 64)
+    private String contentHash;
+
+    public void assignContentHash(String contentHash) {
+        this.contentHash = contentHash;
+    }
 }

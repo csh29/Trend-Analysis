@@ -1,6 +1,7 @@
 package com.sjinc.trendanalysis.controller;
 
 import com.sjinc.trendanalysis.dto.analysis.AnalysisView;
+import com.sjinc.trendanalysis.dto.image.ImageUploadResult;
 import com.sjinc.trendanalysis.dto.image.ImageView;
 import com.sjinc.trendanalysis.security.RequiresProgram;
 import com.sjinc.trendanalysis.service.analysis.DocumentService;
@@ -42,7 +43,7 @@ public class ImageController {
 
     /** 여러 장을 한 번에 올린다(multipart의 같은 이름 "files"로 여러 개). */
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public List<ImageView> upload(@RequestParam("files") List<MultipartFile> files, Principal principal) {
+    public ImageUploadResult upload(@RequestParam("files") List<MultipartFile> files, Principal principal) {
         return imageService.upload(files, principal.getName());
     }
 

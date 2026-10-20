@@ -128,6 +128,10 @@ public class AnalysisService {
             return;
         }
         TrendCodeBook codes = TrendCodeBook.of(group -> comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(group, "Y"));
+        if (doc.isImage()) {
+            // 사진으로 구분되는 소재만 허용 값으로 보낸다 — 요청(스키마 enum)과 검증이 같은 목록을 쓴다
+            codes = codes.restrict(TrendCodes.MATERIAL, TrendCodes.IMAGE_MATERIALS);
+        }
         if (!codes.emptyGroups().isEmpty()) {
             fail(doc, "사용중인 공통코드가 없는 그룹이 있습니다: " + String.join(", ", codes.emptyGroups()));
             return;

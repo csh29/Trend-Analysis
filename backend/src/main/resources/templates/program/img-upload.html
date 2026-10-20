@@ -307,9 +307,20 @@
                     }
                     return res.json();
                 })
-                .then(function (saved) {
+                .then(function (result) {
                     clearPending();
-                    alert(saved.length + '장을 업로드했습니다. AI 분석은 뒤에서 진행되며 목록의 분석 칸에 결과가 표시됩니다.');
+                    const lines = [];
+                    if (result.uploaded.length > 0) {
+                        lines.push(result.uploaded.length + '장을 업로드했습니다. AI 분석은 뒤에서 진행되며 목록의 분석 칸에 결과가 표시됩니다.');
+                    }
+                    // 같은 이미지가 두 번 집계되지 않게 서버가 건너뛴 파일
+                    if (result.duplicates.length > 0) {
+                        lines.push('이미 올린 이미지라 ' + result.duplicates.length + '장은 건너뛰었습니다:');
+                        result.duplicates.forEach(function (d) {
+                            lines.push(' - ' + d.fileName + ' (먼저 올린 파일: ' + d.existingName + ')');
+                        });
+                    }
+                    alert(lines.join('\n'));
                     searchImages();
                 })
                 .catch(function (err) {

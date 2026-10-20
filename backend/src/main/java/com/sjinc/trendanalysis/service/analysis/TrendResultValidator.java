@@ -120,7 +120,20 @@ public final class TrendResultValidator {
         return new Garment(category, name,
                 codeValues(map.get("materials"), prefix + "materials", TrendCodes.MATERIAL, codes, errors),
                 codeValues(map.get("colors"), prefix + "colors", TrendCodes.COLOR, codes, errors),
-                codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors));
+                onePerAxis(codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors)));
+    }
+
+    /** 실루엣은 축(핏·기장·형태)마다 처음 나온 값 하나만 — 실패로 돌리면 재시도 비용만 들어서 걸러 낸다. */
+    static List<String> onePerAxis(List<String> silhouettes) {
+        Set<String> usedAxes = new java.util.HashSet<>();
+        List<String> kept = new ArrayList<>();
+        for (String code : silhouettes) {
+            String axis = TrendCodes.SILHOUETTE_AXES.get(code);
+            if (axis == null || usedAxes.add(axis)) {
+                kept.add(code);
+            }
+        }
+        return List.copyOf(kept);
     }
 
     private static List<String> codeValues(Object raw, String field, String group, TrendCodeBook codes, List<String> errors) {

@@ -5,6 +5,7 @@ import com.sjinc.trendanalysis.domain.ComCd;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 
 /**
@@ -20,6 +21,13 @@ public record TrendCodeBook(Map<String, List<ComCd>> groups) {
             groups.put(group, loader.apply(group));
         }
         return new TrendCodeBook(groups);
+    }
+
+    /** 한 그룹을 주어진 코드값만 남긴 코드 묶음(이미지 소재 허용 목록 등). 순서는 공통코드 정렬순서를 지킨다. */
+    public TrendCodeBook restrict(String group, Set<String> allowed) {
+        Map<String, List<ComCd>> restricted = new LinkedHashMap<>(groups);
+        restricted.put(group, codes(group).stream().filter(code -> allowed.contains(code.getCodeValue())).toList());
+        return new TrendCodeBook(restricted);
     }
 
     public List<ComCd> codes(String group) {

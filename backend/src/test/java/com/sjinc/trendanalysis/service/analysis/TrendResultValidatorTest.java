@@ -105,6 +105,16 @@ class TrendResultValidatorTest {
     }
 
     @Test
+    void 실루엣은_축마다_처음_값_하나만_남긴다() {
+        // 프롬프트 지시에도 오버사이즈·레귤러(둘 다 핏)를 함께 내던 실제 사례
+        assertThat(TrendResultValidator.onePerAxis(List.of("OVERSIZED", "REGULAR", "CROPPED", "BOXY", "WIDE")))
+                .containsExactly("OVERSIZED", "CROPPED", "BOXY");
+        // 축이 정해지지 않은 코드(공통코드에 새로 넣은 것)는 그대로 둔다
+        assertThat(TrendResultValidator.onePerAxis(List.of("REGULAR", "NEW_CODE", "SLIM")))
+                .containsExactly("REGULAR", "NEW_CODE");
+    }
+
+    @Test
     void 아이템은_5개까지만_남긴다() {
         Map<String, Object> raw = valid();
         List<Map<String, Object>> many = new ArrayList<>();

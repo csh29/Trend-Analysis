@@ -4,6 +4,7 @@ import com.sjinc.trendanalysis.domain.TrendItemValue;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 트렌드 항목 표준 코드(공통코드 그룹). 카테고리·소재·컬러·실루엣 값은 이 그룹들의 코드값만 저장한다 — 가죽/레더 같은
@@ -19,6 +20,24 @@ public final class TrendCodes {
 
     /** 카테고리가 맞는 것이 없을 때 LLM이 쓰는 코드(프롬프트 규칙과 같아야 한다). */
     public static final String CATEGORY_ETC = "ETC";
+
+    /**
+     * 실루엣 코드의 축(핏·기장·형태). 축마다 하나만 남긴다(TrendResultValidator) — 프롬프트로 "축마다 최대 1개"를 지시해도
+     * 오버사이즈·레귤러를 함께 내는 경우가 있었다(2026-10-20 DB 확인). 판단 기준은 ai/prompts/structure-silhouette.md.
+     * 여기 없는 코드(공통코드 관리에서 새로 넣은 것)는 축 제한 없이 둔다.
+     */
+    public static final Map<String, String> SILHOUETTE_AXES = Map.of(
+            "OVERSIZED", "FIT", "REGULAR", "FIT", "SLIM", "FIT",
+            "CROPPED", "LENGTH", "LONG", "LENGTH",
+            "BOXY", "SHAPE", "WIDE", "SHAPE", "A_LINE", "SHAPE", "H_LINE", "SHAPE", "FLARE", "SHAPE");
+
+    /**
+     * 이미지에서 고를 수 있는 소재 — 사진의 질감으로 구분되는 것만(2026-10-20 사용자 결정). 면·울·캐시미어·폴리에스터·실크·린넨·나일론은
+     * 원료라서 사진으로 가릴 수 없는데, 프롬프트로 막아도 면을 추측해 넣었다(DB 확인). 그래서 이미지 분석에는 이 코드만 허용 값으로 보낸다
+     * (스키마 enum에 없으니 고를 수 없다). 텍스트는 본문에 나오므로 전부 허용한다.
+     */
+    public static final Set<String> IMAGE_MATERIALS = Set.of(
+            "LEATHER", "SUEDE", "DENIM", "KNIT", "FUR", "FLEECE", "TWEED", "CORDUROY", "SATIN");
 
     /** 다중 값 종류 → 공통코드 그룹. */
     public static final Map<String, String> VALUE_TYPE_GROUPS = Map.of(

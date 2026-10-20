@@ -2,11 +2,14 @@ package com.sjinc.trendanalysis.service.image;
 
 import com.sjinc.trendanalysis.domain.UploadedImage;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisSummary;
+import com.sjinc.trendanalysis.dto.image.ImageUploadResult;
 import com.sjinc.trendanalysis.dto.image.ImageView;
 import com.sjinc.trendanalysis.repository.UploadedImageRepository;
 import com.sjinc.trendanalysis.service.analysis.DocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.core.io.PathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
@@ -18,8 +21,12 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -58,8 +65,11 @@ public class ImageService {
         return images.stream().map(image -> ImageView.from(image, summaries.get(image.getId()))).toList();
     }
 
-    /** 여러 장을 한 번에 올린다. 한 장이라도 이미지가 아니면 아무것도 저장하지 않고 그 파일명들을 알려준다. */
-    public List<ImageView> upload(List<MultipartFile> files, String username) {
+    /**
+     * 여러 장을 한 번에 올린다. 한 장이라도 이미지가 아니면 아무것도 저장하지 않고 그 파일명들을 알려준다.
+     * 이미 올린 이미지(파일 내용이 같은 것)와 같은 요청 안의 중복은 건너뛰고 나머지만 저장한다 — 같은 문서가 두 번 집계되지 않게.
+     */
+    public ImageUploadResult upload(List<MultipartFile> files, String username) {
         List<MultipartFile> targets = files == null ? List.of()
                 : files.stream().filter(file -> file != null && !file.isEmpty()).toList();
         if (targets.isEmpty()) {
@@ -78,13 +88,36 @@ public class ImageService {
             throw new IllegalArgumentException("이미지 파일(jpg·png·gif·webp·bmp)이 아닙니다: " + String.join(", ", rejected));
         }
 
+        // 중복 거르기: 먼저 DB의 같은 해시, 다음 같은 요청 안의 앞 파일
+        List<String> hashes = targets.stream().map(ImageService::sha256).toList();
+        Map<String, String> known = new HashMap<>();
+        uploadedImageRepository.findByContentHashIn(hashes)
+                .forEach(image -> known.putIfAbsent(image.getContentHash(), image.getOriginalName()));
+        List<ImageUploadResult.Duplicate> duplicates = new ArrayList<>();
+        List<Integer> fresh = new ArrayList<>();
+        for (int i = 0; i < targets.size(); i++) {
+            String existing = known.putIfAbsent(hashes.get(i), displayName(targets.get(i)));
+            if (existing == null) {
+                fresh.add(i);
+            } else {
+                duplicates.add(new ImageUploadResult.Duplicate(displayName(targets.get(i)), existing));
+            }
+        }
+        if (!duplicates.isEmpty()) {
+            log.info("이미 올린 이미지 {}장을 건너뜁니다: {}", duplicates.size(),
+                    duplicates.stream().map(ImageUploadResult.Duplicate::fileName).toList());
+        }
+        if (fresh.isEmpty()) {
+            return new ImageUploadResult(List.of(), duplicates);
+        }
+
         List<Path> written = new ArrayList<>();
         List<UploadedImage> saved;
         try {
             Files.createDirectories(uploadDir);
             LocalDateTime now = LocalDateTime.now();
             List<UploadedImage> images = new ArrayList<>();
-            for (int i = 0; i < targets.size(); i++) {
+            for (int i : fresh) {
                 MultipartFile file = targets.get(i);
                 ImageType type = types.get(i);
                 String storedName = UUID.randomUUID() + "." + type.getExtension();
@@ -100,6 +133,7 @@ public class ImageService {
                         .fileSize(file.getSize())
                         .uploadedBy(username)
                         .uploadedAt(now)
+                        .contentHash(hashes.get(i))
                         .build());
             }
             saved = uploadedImageRepository.saveAll(images);
@@ -112,7 +146,52 @@ public class ImageService {
         }
         // 저장이 끝난 뒤 분석(P-03·P-04) 대기열에 넣는다. 업로드 응답은 분석을 기다리지 않는다.
         documentService.registerImages(saved, username);
-        return withAnalysis(saved);
+        return new ImageUploadResult(withAnalysis(saved), duplicates);
+    }
+
+    /** 해시 칸이 생기기 전에 올린 이미지의 해시를 채운다 — 그래야 예전 이미지를 다시 올려도 중복으로 걸린다. */
+    @EventListener(ApplicationReadyEvent.class)
+    public void fillMissingHashes() {
+        List<UploadedImage> missing = uploadedImageRepository.findByContentHashIsNull();
+        int filled = 0;
+        for (UploadedImage image : missing) {
+            Path path = resolveStored(image.getStoredName());
+            if (!Files.isRegularFile(path)) {
+                continue; // 파일이 없어진 이미지 — 원본 보기에서 따로 드러난다
+            }
+            try (InputStream in = Files.newInputStream(path)) {
+                image.assignContentHash(sha256(in));
+                uploadedImageRepository.save(image);
+                filled++;
+            } catch (IOException e) {
+                log.warn("이미지 해시를 채우지 못했습니다 image={}: {}", image.getId(), e.getMessage());
+            }
+        }
+        if (filled > 0) {
+            log.info("예전에 올린 이미지 {}장의 중복 확인용 해시를 채웠습니다.", filled);
+        }
+    }
+
+    private static String sha256(MultipartFile file) {
+        try (InputStream in = file.getInputStream()) {
+            return sha256(in);
+        } catch (IOException e) {
+            throw new UncheckedIOException("이미지를 읽지 못했습니다: " + displayName(file), e);
+        }
+    }
+
+    private static String sha256(InputStream in) throws IOException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                digest.update(buffer, 0, read);
+            }
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e); // JDK에 항상 있다
+        }
     }
 
     /** 분석(AnalysisService)이 Claude에 보낼 원본. */
