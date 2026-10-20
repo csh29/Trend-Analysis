@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>사용자별 권한관리 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section>
+            <table class="grid">
+                <thead id="permissionGridHead"></thead>
+                <tbody id="permissionGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/search-form.js"></script>
+<script th:inline="javascript">
+    (function () {
+        const USERS_URL = '/api/users';
+        const PROGRAMS_URL = '/api/programs';
+        const PERMISSIONS_URL = '/api/permissions';
+
+        const gridBody = document.getElementById('permissionGridBody');
+
+        // 화면 공통 버튼 권한. 프로그램 관리에서 그 프로그램이 쓰지 않기로 한 버튼(기타는 이름이 비어 있는
+        // 버튼)은 줘도 화면에 안 나오므로 체크박스를 비활성화한다. 기타 버튼은 마우스를 올리면 이름이 보인다.
+        const BUTTONS = [
+            { id: 'searchYn', label: '조회', uses: function (p) { return p.searchYn === 'Y'; } },
+            { id: 'newYn', label: '신규', uses: function (p) { return p.newYn === 'Y'; } },
+            { id: 'saveYn', label: '저장', uses: function (p) { return p.saveYn === 'Y'; } },
+            { id: 'deleteYn', label: '삭제', uses: function (p) { return p.deleteYn === 'Y'; } },
+            { id: 'resetYn', label: '초기화', uses: function (p) { return p.resetYn === 'Y'; } }
+        ].concat([1, 2, 3, 4, 5].map(function (n) {
+            return {
+                id: 'etc' + n + 'Yn', label: '기타' + n, etcName: 'etc' + n + 'Nm',
+                uses: function (p) { return !!(p['etc' + n + 'Nm'] || '').trim(); }
+            };
+        }));
+
+        // 권한·버튼 칸은 전부 Grid의 checkbox 컬럼이라, 저장할 때 Grid.getRows로 'Y'/'N' 값을 그대로 읽는다.
+        // 체크 여부의 출처는 행 데이터(프로그램)가 아니라 이 사용자의 권한(tr._perm)이라 checked 함수로 준다.
+        const COLUMNS = [
+            {
+                id: 'granted', label: '권한', type: 'checkbox', width: 44, align: 'center',
+                checked: function (value, program, tr) { return !!tr._perm; }
+            },
+            { id: 'programId', label: '프로그램ID' },
+            { id: 'programNm', label: '프로그램명' },
+            { id: 'url', label: 'URL' }
+        ].concat(BUTTONS.map(function (button) {
+            return {
+                id: button.id, label: button.label, type: 'checkbox',
+                width: button.etcName ? 82 : 52, align: 'center',
+                title: button.etcName ? function (value, program) { return program[button.etcName] || ''; } : undefined,
+                checked: function (value, program, tr) {
+                    return button.uses(program) && !!tr._perm && tr._perm[button.id] === 'Y';
+                },
+                disabled: function (value, program) { return !button.uses(program); }
+            };
+        }));
+
+        // 권한을 주면 그 프로그램이 쓰는 버튼을 모두 켜고, 권한을 빼면 버튼도 모두 끈다.
+        // 반대로 버튼을 하나라도 주면 화면 접근 권한도 같이 준다(버튼만 있고 화면은 못 여는 상태는 의미가 없다).
+        gridBody.addEventListener('change', function (e) {
+            const tr = e.target.closest('tr');
+            if (!tr || !tr._fields || !tr._fields.granted) {
+                return;
+            }
+            if (e.target === tr._fields.granted) {
+                BUTTONS.forEach(function (button) {
+                    const chk = tr._fields[button.id];
+                    if (!chk.disabled) chk.checked = e.target.checked;
+                });
+            } else if (e.target.checked) {
+                tr._fields.granted.checked = true;
+            }
+        });
+
+        Grid.renderHeader(document.getElementById('permissionGridHead'), COLUMNS, { initialMessage: '사용자를 선택하고 조회하세요.' });
+
+        function renderMessage(message) {
+            Grid.renderMessage(gridBody, COLUMNS.length, message);
+        }
+
+        function renderPrograms(programs, permissions) {
+            if (!programs || programs.length === 0) {
+                renderMessage('등록된 프로그램이 없습니다.');
+                return;
+            }
+
+            const permByProgram = {};
+            (permissions || []).forEach(function (perm) { permByProgram[perm.programId] = perm; });
+            Grid.render(gridBody, COLUMNS, programs, {
+                buildRow: function (tr, program) {
+                    tr._perm = permByProgram[program.programId] || null;
+                }
+            });
+        }
+
+        /** 사용자 select 옵션. 실패해도 조회영역은 그려지도록 빈 목록으로 넘긴다. */
+        function loadUserOptions() {
+            return fetch(USERS_URL)
+                .then(function (res) {
+                    if (!res.ok) throw new Error('사용자 목록 조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(function (users) {
+                    return users.map(function (user) {
+                        return { value: user.id, label: user.username + ' (' + user.role + ')' };
+                    });
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                    return [];
+                });
+        }
+
+        // 사용자를 고르자마자 그 사용자의 권한을 조회한다.
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            {
+                id: 'userId', label: '사용자', type: 'select', width: 220,
+                withAll: true, allLabel: '선택하세요', options: loadUserOptions, onChange: searchPermissions
+            }
+        ]);
+
+        function searchPermissions() {
+            const userId = search.values().userId;
+            if (!userId) {
+                renderMessage('사용자를 선택하고 조회하세요.');
+                return;
+            }
+
+            Promise.all([
+                fetch(PROGRAMS_URL).then(function (res) {
+                    if (!res.ok) throw new Error('프로그램 목록 조회에 실패했습니다.');
+                    return res.json();
+                }),
+                fetch(PERMISSIONS_URL + '/' + userId).then(function (res) {
+                    if (!res.ok) throw new Error('권한 조회에 실패했습니다.');
+                    return res.json();
+                })
+            ])
+                .then(function (results) {
+                    renderPrograms(results[0], results[1]);
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function savePermissions() {
+            const userId = search.values().userId;
+            if (!userId) {
+                alert('사용자를 선택하세요.');
+                return;
+            }
+
+            // 권한을 준 행만 보낸다 — 서버는 이 목록으로 그 사용자의 권한을 통째로 교체한다.
+            const permissions = Grid.getRows(gridBody)
+                .filter(function (row) { return row.granted === 'Y'; })
+                .map(function (row) {
+                    const item = { programId: row.programId };
+                    BUTTONS.forEach(function (button) {
+                        item[button.id] = row[button.id];
+                    });
+                    return item;
+                });
+
+            fetch(PERMISSIONS_URL + '/' + userId, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ permissions: permissions })
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('저장에 실패했습니다.');
+                    alert('저장되었습니다.');
+                    searchPermissions();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        PageButtons.bind({
+            btnSearch: searchPermissions,
+            btnSave: savePermissions,
+            btnReset: searchPermissions
+        });
+
+        search.ready.then(function () {
+            renderMessage('사용자를 선택하고 조회하세요.');
+        });
+    })();
+</script>
+</body>
+</html>

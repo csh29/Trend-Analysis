@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>화면 없음 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <style>
+        /* 화면 공통 뼈대(:root, .app-shell 등)는 common-ui.css가 담당한다. */
+        .area-main{ align-items:center; justify-content:center; gap:10px; }
+        .placeholder-title{ font-size:16px; font-weight:800; color:var(--text); }
+        .placeholder-desc{ font-size:13px; color:var(--text-sub); }
+    </style>
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <div class="placeholder-title">화면 없음</div>
+        <div class="placeholder-desc">요청하신 화면을 찾을 수 없습니다.</div>
+    </main>
+</div>
+</body>
+</html>

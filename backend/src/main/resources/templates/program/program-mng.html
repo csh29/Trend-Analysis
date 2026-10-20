@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>프로그램 관리 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대(:root, .app-shell, .btn 등)는 common-ui.css가, .grid 공통 모양(패딩 포함)은
+           grid.css가 담당한다. 여기는 이 화면에서만 다른 값(정렬순서 입력창 폭)만 남긴다. */
+        .grid td input[type="number"]{ width:90px; }
+    </style>
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section class="panel-head">
+            <div class="panel-title">프로그램 목록</div>
+        </section>
+
+        <section>
+            <table class="grid">
+                <thead id="programGridHead"></thead>
+                <tbody id="programGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/com-cd.js"></script>
+<script src="/js/search-form.js"></script>
+<script th:inline="javascript">
+    (function () {
+        const API_URL = '/api/programs';
+        const gridBody = document.getElementById('programGridBody');
+
+        // 화면 공통 버튼 설정 — 이 프로그램 화면 우측 상단에 어떤 버튼을 그릴지(fragments/page-toolbar).
+        // 조회~초기화는 사용 여부(Y/N), 기타1~5는 버튼 이름이다(비우면 그 버튼은 안 쓴다).
+        // 실제로 보이는 건 여기서 쓰기로 한 버튼 중 사용자별 권한관리에서 그 사용자에게 허용한 것뿐이다.
+        const BUTTON_YN_COLUMNS = [
+            { id: 'searchYn', label: '조회' },
+            { id: 'newYn', label: '신규' },
+            { id: 'saveYn', label: '저장' },
+            { id: 'deleteYn', label: '삭제' },
+            { id: 'resetYn', label: '초기화' }
+        ].map(function (col) {
+            return Object.assign({ type: 'checkbox', width: 56, align: 'center' }, col);
+        });
+        const BUTTON_ETC_COLUMNS = [1, 2, 3, 4, 5].map(function (n) {
+            return { id: 'etc' + n + 'Nm', label: '기타' + n, type: 'text', width: 120 };
+        });
+
+        const COLUMNS = [
+            { type: 'row-select', width: 36, align: 'center' },
+            {
+                id: 'programId', label: '프로그램ID', type: 'text',
+                // program_id는 기본키라 생성 후에는 수정하지 않는다(신규 행에서만 입력).
+                // disabled면 그 input에서 click 자체가 안 떠서 행 클릭(강조 표시)이 안 먹히니 readOnly를 쓴다.
+                readOnly: function (value, program) { return !!(program && program.programId); }
+            },
+            { id: 'programNm', label: '프로그램명', type: 'text' },
+            { id: 'url', label: 'URL', type: 'text' },
+            // 사이드바 그룹(공통코드 MENU_GROUP)과 사이드바를 접었을 때 보이는 아이콘.
+            { id: 'menuGroup', label: '메뉴 그룹', type: 'select', optionsQuery: 'MENU_GROUP', defaultValue: 'MNG', width: 140 },
+            { id: 'icon', label: '아이콘', type: 'text', width: 70 },
+            { id: 'sortOrder', label: '정렬순서', type: 'number' },
+            { id: 'useYn', label: '사용여부', type: 'checkbox', width: 80, align: 'center' }
+        ].concat(BUTTON_YN_COLUMNS, BUTTON_ETC_COLUMNS);
+
+        Grid.renderHeader(document.getElementById('programGridHead'), COLUMNS);
+
+        // 이 화면 자신을 가리키는 프로그램은 그리드에서 수정/삭제하지 못하도록 숨긴다.
+        const SELF_PROGRAM_ID = 'program-mng';
+
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'programId', label: '프로그램ID', type: 'text' },
+            { id: 'programNm', label: '프로그램명', type: 'text' }
+        ], { onSearch: searchPrograms });
+
+        // 조회조건은 화면에서 거른다(search.matches) — 프로그램은 건수가 적고, /api/programs는
+        // 사용자별 권한관리 화면도 전체 목록으로 쓰므로 API는 그대로 둔다.
+        function renderRows(allPrograms) {
+            const programs = (allPrograms || []).filter(function (program) {
+                return program.programId !== SELF_PROGRAM_ID && search.matches(program);
+            }).map(function (program) {
+                // 메뉴 그룹이 비어 있으면 관리 그룹이다(Program.sidebarGroup) — select가 첫 옵션으로 보여 저장 때 바뀌지 않게.
+                return Object.assign({}, program, { menuGroup: program.menuGroup || 'MNG' });
+            });
+            Grid.render(gridBody, COLUMNS, programs, { emptyMessage: '등록된 프로그램이 없습니다.' });
+        }
+
+        function searchPrograms() {
+            fetch(API_URL)
+                .then(function (res) {
+                    if (!res.ok) throw new Error('조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(renderRows)
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function addRow() {
+            Grid.addRow(gridBody);
+        }
+
+        function saveAll() {
+            const requests = [];
+
+            for (const row of Grid.getRows(gridBody)) {
+                const programId = row.programId;
+                const programNm = row.programNm;
+                const url = row.url;
+                const sortOrder = row.sortOrder;
+
+                if (!programId && !programNm && !url) {
+                    continue;
+                }
+                if (!programId || !programNm || !url) {
+                    alert('프로그램ID, 프로그램명, URL은 필수입니다.');
+                    return;
+                }
+
+                const payload = {
+                    id: programId,
+                    programNm: programNm,
+                    url: url,
+                    sortOrder: sortOrder ? Number(sortOrder) : null,
+                    useYn: row.useYn,
+                    menuGroup: row.menuGroup,
+                    icon: row.icon
+                };
+                BUTTON_YN_COLUMNS.concat(BUTTON_ETC_COLUMNS).forEach(function (col) {
+                    payload[col.id] = row[col.id];
+                });
+
+                requests.push(fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }));
+            }
+
+            if (requests.length === 0) {
+                return;
+            }
+
+            Promise.all(requests)
+                .then(function (results) {
+                    if (results.some(function (res) { return !res.ok; })) {
+                        throw new Error('저장에 실패했습니다.');
+                    }
+                    searchPrograms();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function deleteSelected() {
+            const rows = Grid.getRows(gridBody).filter(function (row) { return row._selected; });
+            if (rows.length === 0) {
+                alert('삭제할 프로그램을 목록에서 선택하세요.');
+                return;
+            }
+            if (!confirm('선택한 프로그램을 삭제하시겠습니까?')) {
+                return;
+            }
+
+            const requests = rows
+                .filter(function (row) { return !row._isNew; })
+                .map(function (row) { return fetch(API_URL + '/' + encodeURIComponent(row.programId), { method: 'DELETE' }); });
+
+            // 저장 전 신규 행은 서버에 없으니 화면에서만 지운다.
+            Grid.removeRows(gridBody, rows.filter(function (row) { return row._isNew; }));
+
+            if (requests.length === 0) {
+                return;
+            }
+
+            Promise.all(requests)
+                .then(function (results) {
+                    if (results.some(function (res) { return !res.ok; })) {
+                        throw new Error('삭제에 실패했습니다.');
+                    }
+                    searchPrograms();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        PageButtons.bind({
+            btnSearch: searchPrograms,
+            btnAdd: addRow,
+            btnSave: saveAll,
+            btnDelete: deleteSelected,
+            btnReset: function () {
+                search.reset();
+                searchPrograms();
+            }
+        });
+
+        searchPrograms();
+    })();
+</script>
+</body>
+</html>

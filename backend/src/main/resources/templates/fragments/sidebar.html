@@ -1,0 +1,121 @@
+<aside xmlns:th="http://www.thymeleaf.org" th:fragment="sidebar" class="area-left">
+    <style>
+        .area-left{ padding:16px 18px; }
+
+        /* 사이드바 접기. 버튼(햄버거)은 상단바 로고 옆에 있고(topbar.html), 접으면 아이콘만 남는 좁은 폭
+           (--left-w-collapsed)이 되며 메뉴 이름은 마우스 오버 툴팁(title)으로 보여준다. 폭은 .app-shell의
+           grid 열(--left-w)을 바꿔서 줄인다 — 사이드바만 줄이면 main 영역이 따라 넓어지지 않는다. */
+        .app-shell{ --left-w-collapsed:64px; }
+        .app-shell.is-sidebar-collapsed{ --left-w:var(--left-w-collapsed); }
+        /* 처음 그릴 때(저장된 접힘 상태 적용)는 애니메이션 없이, 버튼을 눌렀을 때만 부드럽게 줄어든다. */
+        .app-shell.sidebar-animating{ transition:grid-template-columns .2s ease; }
+        .is-sidebar-collapsed .area-left{ padding:16px 10px; overflow-x:hidden; }
+        .is-sidebar-collapsed .nav-label,
+        .is-sidebar-collapsed .nav-group-toggle .caret,
+        .is-sidebar-collapsed .nav-group-items{ display:none; }
+        .is-sidebar-collapsed .nav a,
+        .is-sidebar-collapsed .nav-group-toggle{ justify-content:center; }
+
+        .nav{ display:flex; flex-direction:column; gap:6px; }
+        .nav a{
+            display:flex; align-items:center; gap:10px; white-space:nowrap;
+            padding:11px 14px; border-radius:var(--radius-md);
+            font-size:12.5px; color:var(--text-sub); text-decoration:none;
+        }
+        .nav a .ico{ width:16px; text-align:center; }
+        .nav a.is-active{ background:var(--accent); color:#fff; font-weight:700; }
+        /* 2뎁스 그룹(MenuRegistry의 MenuGroup). 접을 때 링크를 지우지 않고 숨기기만 한다
+           (tabs.js가 .nav a 목록을 읽어 탭으로 연다). */
+        .nav-group-toggle{
+            display:flex; align-items:center; gap:10px; width:100%;
+            padding:11px 14px; border:none; border-radius:var(--radius-md); background:none;
+            font:inherit; font-size:12.5px; color:var(--text-sub); cursor:pointer; text-align:left; white-space:nowrap;
+        }
+        .nav-group-toggle:hover{ background:#fafafd; }
+        .nav-group-toggle .ico{ width:16px; text-align:center; }
+        .nav-group-toggle .caret{ margin-left:auto; transition:transform .15s; }
+        .nav-group.is-open .nav-group-toggle .caret{ transform:rotate(90deg); }
+        /* 접혀 있어도 지금 연 화면이 이 그룹 안에 있으면 그룹 제목으로 알 수 있게 한다. */
+        .nav-group:has(a.is-active) .nav-group-toggle{ color:var(--accent); font-weight:700; }
+        /* 하위 메뉴가 2뎁스로 보이도록 대메뉴 아이콘 자리 아래에 트리 안내선(├ ─ / └ ─)을 그린다.
+           선을 항목마다 ::before(세로)·::after(가로)로 그려 마지막 항목에서 세로선을 끊을 수 있게 한다. */
+        .nav-group-items{
+            display:none; flex-direction:column; gap:2px; margin:4px 0 0 22px; padding-left:10px;
+        }
+        .nav-group-items a{ position:relative; padding:9px 14px 9px 8px; font-size:12px; }
+        .nav-group-items a::before{
+            content:''; position:absolute; left:-10px; top:-2px; bottom:0; /* top -2px: 항목 사이 gap까지 이어지게 */
+            border-left:1px solid var(--line);
+        }
+        .nav-group-items a:last-child::before{ bottom:50%; }
+        .nav-group-items a::after{
+            content:''; position:absolute; left:-10px; top:50%; width:14px; /* 글자 4px 앞까지 */
+            border-top:1px solid var(--line);
+        }
+        .nav-group.is-open .nav-group-items{ display:flex; }
+        /* 하위 메뉴 아이콘은 펼친 사이드바에서는 숨긴다(트리 안내선이 그 자리를 대신한다 — 관리 그룹과 같은 모양). */
+        .nav-group-items a .ico{ display:none; }
+
+        /* 사이드바를 접으면(아이콘만) 그룹 제목 버튼으로는 하위 메뉴를 펼쳐 볼 수 없다. 매일 쓰는 기능 그룹은
+           제목 대신 하위 메뉴 아이콘을 1뎁스처럼 바로 보여주고, 그룹 사이는 선으로 나눈다. 관리 그룹은 지금처럼 숨긴다. */
+        .is-sidebar-collapsed .nav-group--feature .nav-group-toggle{ display:none; }
+        .is-sidebar-collapsed .nav-group--feature{ border-top:1px solid var(--line); padding-top:6px; }
+        .is-sidebar-collapsed .nav-group--feature .nav-group-items{ display:flex; margin:0; padding:0; gap:6px; }
+        .is-sidebar-collapsed .nav-group--feature .nav-group-items a{ padding:11px 14px; font-size:12.5px; }
+        .is-sidebar-collapsed .nav-group--feature .nav-group-items a .ico{ display:inline; }
+        .is-sidebar-collapsed .nav-group--feature .nav-group-items a::before,
+        .is-sidebar-collapsed .nav-group--feature .nav-group-items a::after{ display:none; }
+
+        @media (max-width:760px){
+            .nav{ flex-direction:row; flex-wrap:wrap; }
+        }
+    </style>
+
+    <!--
+        tabs.js(홈에서만 로드)가 이 목록으로 메뉴를 탭으로 연다. data-menu는 사이드바 강조용 activeMenu 값,
+        data-title은 탭 라벨이며, tabs.js가 없는 단위 화면에서는 평범한 링크로 동작한다.
+    -->
+    <nav class="nav">
+        <a th:href="@{/}" class="home-link" th:classappend="${activeMenu == 'home'} ? 'is-active'"><span class="ico">▤</span><span class="nav-label">홈</span></a>
+        <!-- 메뉴 그룹은 MenuRegistry가 정한다(SidebarModelAdvice). 메뉴가 없는 그룹은 그리지 않는다.
+             기능 그룹(nav-group--feature)은 사이드바를 접었을 때 하위 메뉴 아이콘을 1뎁스처럼 바로 보여준다. -->
+        <div th:each="group : ${menuGroups}" th:if="${!#lists.isEmpty(group.programs)}"
+             class="nav-group nav-group--feature" th:id="${group.id}" th:attr="data-default-open=${group.defaultOpen ? 'Y' : 'N'}">
+            <button type="button" class="nav-group-toggle" th:attr="aria-expanded=${group.defaultOpen},aria-controls=|${group.id}Items|">
+                <span class="ico" th:text="${group.icon}">▦</span><span class="nav-label" th:text="${group.name}">그룹</span><span class="caret">›</span>
+            </button>
+            <div class="nav-group-items" th:id="|${group.id}Items|">
+                <a th:each="program : ${group.programs}" th:attr="data-menu=${program.programId},data-title=${program.programNm}" th:classappend="${activeMenu == program.programId} ? 'is-active'" th:href="@{${program.url}}"><span class="ico" th:text="${program.icon}"></span><span class="nav-label" th:text="${program.programNm}">프로그램</span></a>
+            </div>
+        </div>
+    </nav>
+
+    <script>
+        (function () {
+            // 2뎁스 그룹마다 접힘/펼침을 이 브라우저에만 기억한다(키: sidebar.<그룹 id>.open — 관리 그룹은 예전 키 그대로).
+            // 저장소를 못 쓰는 환경(사생활 보호 모드 등)이면 기억만 못 할 뿐 동작은 그대로여야 하므로 읽기/쓰기를 모두 감싼다.
+            document.querySelectorAll('.nav-group').forEach(function (group) {
+                const toggle = group.querySelector('.nav-group-toggle');
+                const storageKey = 'sidebar.' + group.id + '.open';
+
+                function setOpen(open, remember) {
+                    group.classList.toggle('is-open', open);
+                    toggle.setAttribute('aria-expanded', String(open));
+                    if (remember) {
+                        try { localStorage.setItem(storageKey, open ? 'Y' : 'N'); } catch (e) { /* 기억만 못 한다 */ }
+                    }
+                }
+
+                let saved = null;
+                try { saved = localStorage.getItem(storageKey); } catch (e) { /* 기억만 못 한다 */ }
+                // 기억된 값이 없으면 그룹의 기본값(기능 그룹은 펼침, 관리는 접힘). 지금 연 화면이 그룹 안에 있으면 무조건 펼친다.
+                const opened = saved === null ? group.dataset.defaultOpen === 'Y' : saved === 'Y';
+                setOpen(opened || !!group.querySelector('a.is-active'), false);
+
+                toggle.addEventListener('click', function () {
+                    setOpen(!group.classList.contains('is-open'), true);
+                });
+            });
+        })();
+    </script>
+</aside>

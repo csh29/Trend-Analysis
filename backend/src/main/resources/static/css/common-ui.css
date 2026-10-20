@@ -1,0 +1,259 @@
+/**
+ * 그리드 외 공통 페이지 뼈대·컴포넌트 CSS(:root 변수, 레이아웃, 버튼 등). .grid는 grid.css가 맡는다.
+ * 화면 <style>은 이 링크 뒤에 두고 화면 전용 값만 남기며, .btn 크기는 덮어쓰지 않는다.
+ * JS 주입 대신 정적 <link>로 두는 것은 스타일 적용 전 깜빡임(FOUC)을 막기 위해서다.
+ */
+
+:root{
+    --bg:            #f2f2f8;
+    --card:          #ffffff;
+    --navy:          #191940;
+    --accent:        #f43f68;
+    --accent-soft:   #ffe4ec;
+    --text:          #191940;
+    --text-sub:      #8b8ba7;
+    --line:          #e8e8f2;
+
+    --radius-md: 14px;
+    /* 그리드와 조회영역 박스의 모서리. 두 곳이 같은 값이어야 화면이 한 벌로 보인다. */
+    --radius-box: 3px;
+
+    --left-w:  220px;
+    --top-h:   44px;
+}
+
+*{ box-sizing:border-box; margin:0; padding:0; }
+html, body{ height:100%; }
+body{
+    font-family:"Pretendard","Malgun Gothic",system-ui,sans-serif;
+    background:var(--bg); color:var(--text);
+}
+
+.app-shell{
+    width:100%; height:100vh;
+    display:grid;
+    grid-template-columns: var(--left-w) 1fr;
+    grid-template-rows:    var(--top-h)  1fr;
+    grid-template-areas:
+        "top  top"
+        "left main";
+}
+
+.area-left{ grid-area:left; background:var(--card); border-right:1px solid var(--line); overflow-y:auto; }
+.area-top { grid-area:top;  background:var(--card); border-bottom:1px solid var(--line); }
+.area-main{ grid-area:main; overflow-y:auto; padding:24px; display:flex; flex-direction:column; gap:20px; }
+
+@media (max-width:760px){
+    .app-shell{
+        grid-template-columns:1fr;
+        grid-template-rows:auto auto 1fr;
+        grid-template-areas:"top" "left" "main";
+        height:auto; min-height:100vh;
+    }
+}
+
+/* 홈 화면(탭 셸)이 각 단위 화면을 탭으로 열 때 iframe 안에 ?embed=1로 이 화면을 다시 불러온다.
+   그 안에서까지 사이드바/상단바가 또 나오면 이중으로 보이니, 내용(main)만 남기고 숨긴다. */
+.app-shell--embedded{
+    grid-template-columns:1fr;
+    grid-template-rows:1fr;
+    grid-template-areas:"main";
+}
+.app-shell--embedded .area-left,
+.app-shell--embedded .area-top{ display:none; }
+
+.panel-head{ display:flex; align-items:center; justify-content:space-between; }
+.panel-title{ font-size:13px; font-weight:700; color:var(--text-sub); }
+
+/* 모든 화면의 첫 줄(fragments/page-toolbar). 좌상단에 프로그램명, 우측 상단에 화면 공통 버튼
+   (조회/추가/저장/삭제/초기화)을 둔다. 버튼이 없는 화면은 프로그램명만 남는다. */
+.page-toolbar{ display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:34px; }
+.page-toolbar .btn-group{ margin-left:auto; }
+.page-name{ font-size:16px; font-weight:800; color:var(--text); }
+
+.btn-group{ display:flex; gap:8px; }
+.btn{
+    padding:7px 16px; border-radius:3px; border:1px solid var(--line);
+    background:var(--card); font-size:12.5px; font-weight:700;
+    color:var(--text); cursor:pointer;
+}
+.btn:hover{ background:#fafafd; }
+.btn:disabled{ opacity:.5; cursor:default; }
+.btn:disabled:hover{ background:var(--card); }
+.btn.primary{ background:var(--navy); color:#fff; border-color:var(--navy); }
+.btn.primary:hover{ opacity:.9; }
+.btn.danger{ background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+.btn.danger:hover{ background:var(--accent); color:#fff; }
+
+/* 조회영역. 마크업은 화면이 직접 쓰지 않고 /js/search-form.js(SearchForm.render)가 필드 정의로
+   만든다. 필드마다 label과 입력을 한 줄로 가로 정렬하고, 필드가 많으면 다음 줄로 넘어간다.
+   입력 폭은 필드 정의의 width로 준다(화면 <style>에 min-width를 적지 않는다). */
+.search-row{
+    display:flex; gap:10px 24px; flex-wrap:wrap; align-items:center;
+    background:var(--card); border:1px solid var(--line);
+    border-radius:var(--radius-box); padding:14px 16px;
+}
+.search-field{ display:flex; flex-direction:row; align-items:center; gap:8px; font-size:12px; color:var(--text-sub); }
+.search-field label{ font-weight:700; white-space:nowrap; }
+.search-field select, .search-field input:not([type="checkbox"]):not([type="radio"]){
+    padding:5px 10px; border:1px solid var(--line); border-radius:3px; background:#fff;
+    font-size:12.5px; font-family:inherit; color:var(--text);
+}
+/* 입력 중 표시는 그리드 편집 칸(grid.css의 input:focus·cell-current)과 같은 분홍 계열. 여러 값 고르기는 목록이 열려 있는 동안도. */
+.search-field select:focus, .search-field input:not([type="checkbox"]):not([type="radio"]):focus,
+.multi-select-box:focus, .multi-select:has(.multi-select-panel:not([hidden])) .multi-select-box{
+    outline:none; border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft);
+}
+/* 조회영역 여러 값 고르기(SearchForm type 'multiselect'). 상자는 위 select와 같은 모양(오른쪽 화살표만 직접 그린다),
+   누르면 아래로 체크박스 목록이 뜬다. 고른 이름이 길면 상자 폭에서 말줄임 — 전체 목록은 툴팁. */
+/* 옵션은 label이라 위 .search-field label(굵게)보다 우선하도록 .multi-select 아래로 지정한다. */
+.multi-select{ position:relative; }
+.multi-select-box{
+    display:block; padding:5px 26px 5px 10px; border:1px solid var(--line); border-radius:3px; background:#fff;
+    font-size:12.5px; font-family:inherit; color:var(--text); text-align:left; cursor:pointer;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis; position:relative;
+}
+.multi-select-box::after{
+    content:""; position:absolute; right:10px; top:50%; margin-top:-2px;
+    border:4px solid transparent; border-top-color:var(--text-sub);
+}
+.multi-select-panel{
+    position:absolute; top:100%; left:0; z-index:30; min-width:100%; margin-top:2px; padding:4px 0;
+    background:#fff; border:1px solid var(--line); border-radius:3px; box-shadow:0 6px 16px rgba(25,25,64,.15);
+    max-height:240px; overflow-y:auto;
+}
+.multi-select .multi-select-option{ display:flex; align-items:center; gap:6px; padding:5px 10px; font-size:12.5px; color:var(--text);
+    font-weight:400; white-space:nowrap; cursor:pointer; }
+.multi-select .multi-select-option:hover{ background:var(--bg); }
+
+/* 모달(취약점 관리 상세보기, 상단바 비밀번호 변경). 백드롭에 .open을 붙이면 뜬다.
+   화면마다 모달 뼈대를 따로 적던 것을 두 번째 모달이 생기면서 여기로 올렸다. */
+.modal-backdrop{
+    display:none; position:fixed; inset:0; background:rgba(25,25,64,.45);
+    align-items:center; justify-content:center; z-index:1000;
+}
+.modal-backdrop.open{ display:flex; }
+.modal{
+    background:var(--card); border-radius:var(--radius-md); padding:22px 24px;
+    max-width:560px; width:90%; max-height:70vh; overflow-y:auto;
+    box-shadow:0 12px 32px rgba(25,25,64,.25);
+    scrollbar-width:thin; scrollbar-color:var(--line) transparent;
+}
+/* 내용이 길어 모달 자체가 스크롤되면 윈도우 크롬은 네모난 스크롤바를 오른쪽 끝까지 그려 둥근 모서리를 덮는다(오른쪽 모서리만 각져 보였다).
+   스크롤바를 얇게 하고, 스크롤바 길을 위아래로 모서리 둥근 만큼 비워 모서리에 닿지 않게 한다. */
+.modal::-webkit-scrollbar{ width:8px; }
+.modal::-webkit-scrollbar-track{ background:transparent; margin:var(--radius-md) 0; }
+.modal::-webkit-scrollbar-thumb{ background:var(--line); border-radius:4px; }
+.modal::-webkit-scrollbar-thumb:hover{ background:var(--text-sub); }
+.modal h3{ font-size:13px; font-weight:700; color:var(--text-sub); margin-bottom:10px; }
+/* 제목줄을 잡고 끌면 모달이 움직인다(/js/modal-drag.js). */
+.modal h3:first-of-type{ cursor:move; user-select:none; }
+.modal.is-dragging{ user-select:none; }
+.modal-actions{ display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+/* 모달 안의 "라벨 | 값" 상세 표(취약점 관리 상세보기, fix-plan 변경 상세). 항목이 여러 줄로 늘어나면 라벨과 값의 경계가
+   흐려져서, 표처럼 칸마다 선을 긋고 라벨 칸에 배경을 깐다. 값은 줄바꿈을 그대로 살린다(AI 판단근거가 여러 줄이다). */
+.detail-list{
+    display:grid; grid-template-columns:100px 1fr; font-size:13px;
+    border:1px solid var(--line); border-radius:var(--radius-box); overflow:hidden;
+}
+.detail-list dt, .detail-list dd{ padding:9px 12px; border-bottom:1px solid var(--line); }
+.detail-list dt:last-of-type, .detail-list dd:last-of-type{ border-bottom:none; }
+.detail-list dt{ font-weight:700; color:var(--text-sub); background:var(--bg); border-right:1px solid var(--line); }
+.detail-list dd{ line-height:1.7; white-space:pre-wrap; word-break:break-word; }
+.detail-list a{ color:var(--navy); text-decoration:underline; word-break:break-all; }
+
+/* 모달 안의 코드·원문 블록(조치안 pom.xml, 코드 점검 결과의 코드 조각). 줄 번호가 필요하면 줄마다
+   .code-line(> .code-no + .code-text)으로 감싸고, 강조할 줄에 .hit을 붙인다. */
+.code-block{
+    font-family:Consolas,"D2Coding",monospace; font-size:12px; line-height:1.6;
+    white-space:pre-wrap; word-break:break-word; margin:0;
+    padding:12px; background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-box);
+}
+/* 내용 상자 우상단 복사 버튼(.copy-box > .copy-btn). 누르면 잠깐 체크 아이콘(.copied)으로 바뀐다. */
+.copy-box{ position:relative; }
+.copy-box .code-block{ padding-right:44px; }
+.copy-btn{
+    position:absolute; top:8px; right:8px; width:28px; height:28px; padding:0;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--card); color:var(--text-sub); border:1px solid var(--line); border-radius:6px; cursor:pointer;
+}
+.copy-btn:hover{ color:var(--text); border-color:var(--text-sub); }
+.copy-btn.copied{ color:var(--accent); border-color:var(--accent); }
+/* 줄 단위 구조(코드 점검 결과): 줄 번호 칸(.code-no) | 코드(.code-text). 긴 줄이 꺾여도 코드가 줄 번호 칸 아래로
+   파고들지 않도록 flex로 나눈다. 줄 배경은 블록 좌우 여백(padding 12px)까지 꽉 차게 음수 margin으로 넓힌다. */
+.code-block .code-line{ display:flex; margin:0 -12px; padding:0 12px 0 0; }
+.code-block .code-no{
+    flex:none; min-width:52px; padding:0 10px 0 12px; margin-right:12px;
+    border-right:1px solid var(--line); color:var(--text-sub); text-align:right; user-select:none;
+}
+.code-block .code-text{ flex:1; min-width:0; }
+/* 탐지된 줄 — 노란 배경, 줄 번호 칸에 경고색 막대. */
+.code-block .code-line.hit{ background:#fff3d6; }
+.code-block .code-line.hit .code-no{ color:#b8860b; font-weight:700; box-shadow:inset 3px 0 0 var(--accent); }
+/* 마우스를 올린 줄 — IDE의 현재 줄 강조처럼 줄 전체와 줄 번호를 진하게 보여준다. 탐지된 줄은 노란색을 조금 진하게. */
+.code-block .code-line:hover{ background:#e8e8f4; }
+.code-block .code-line:hover .code-no{ color:var(--navy); font-weight:700; }
+.code-block .code-line.hit:hover{ background:#ffe7ad; }
+/* 구문 색(/js/code-highlight.js가 붙이는 .tok-*) — IntelliJ 기본 라이트 테마 색에 맞췄다. 탐지 줄의 노란 배경 위에서도 읽히는 진한 색들. */
+.code-block{ color:#080808; }
+.code-block .tok-keyword{ color:#0033b3; font-weight:600; }
+.code-block .tok-string{ color:#067d17; }
+.code-block .tok-comment{ color:#8c8c8c; font-style:italic; }
+.code-block .tok-number{ color:#1750eb; }
+.code-block .tok-annotation{ color:#9e880d; }
+/* 클래스 이름(String·HttpServletRequest 등). IntelliJ 라이트 테마는 검정이라 일반 글자와 구분이 안 돼 청록으로 둔다. */
+.code-block .tok-type{ color:#0e7c86; }
+.code-block .tok-function{ color:#00627a; }
+.code-block .tok-tag{ color:#0033b3; }
+.code-block .tok-attr{ color:#174ad4; }
+.code-block .tok-cdata{ color:#8c8c8c; }
+.code-block .tok-key{ color:#871094; }
+.code-block .tok-value{ color:#067d17; }
+.code-block .tok-constant{ color:#871094; font-style:italic; }
+.code-block .tok-param{ color:#871094; }
+/* 이름을 누르면 같은 이름을 모두 칠한다(CodeHighlight.enableUsages — IntelliJ의 사용처 강조). */
+.code-block .tok-ident, .code-block .tok-type, .code-block .tok-constant, .code-block .tok-function,
+.code-block .tok-param, .code-block .tok-danger{ cursor:pointer; }
+/* MyBatis ${} — 점검 규칙이 잡는 위험 패턴이라 눈에 띄게. */
+.code-block .tok-danger{ color:#c7254e; font-weight:700; background:var(--accent-soft); border-radius:2px; }
+/* 사용처 강조는 ${} 강조보다 뒤에 둬야 배경이 덮이지 않는다. */
+.code-block .tok-usage{ background:#d9d4fb; border-radius:2px; box-shadow:0 0 0 1px #b8aef5; }
+
+/* 그리드 셀 안의 상태 뱃지. 클래스는 코드값을 소문자로 쓴다 — 처리여부(OPEN/RESOLVED)·심각도는 취약점 관리,
+   스캔 결과(RUNNING/SUCCESS/FAILED)는 스캔 이력 화면. */
+/* nowrap: 컬럼이 좁아지면 "마이/너"처럼 뱃지 글자가 두 줄로 꺾여 행 높이(32px 고정)를 넘쳤다. */
+.badge{ display:inline-block; padding:3px 10px; border-radius:999px; font-size:11px; font-weight:700; white-space:nowrap; }
+.badge.open{ background:#fff3d6; color:#b8860b; }
+.badge.resolved{ background:#e6f4ea; color:#2e7d32; }
+.badge.critical{ background:var(--accent-soft); color:var(--accent); }
+.badge.high{ background:#ffe4ec; color:#d6285a; }
+.badge.medium{ background:#fff3d6; color:#b8860b; }
+.badge.low{ background:#e6f4ea; color:#2e7d32; }
+.badge.running{ background:#e3ecff; color:#2f5bd3; }
+.badge.success{ background:#e6f4ea; color:#2e7d32; }
+.badge.failed{ background:var(--accent-soft); color:var(--accent); }
+/* fix-plan 화면: 버전 점프 폭(PATCH/MINOR/MAJOR/UNKNOWN)과 영향 분석 상태. 위험도는 심각도와 같은 high/medium/low를 쓴다.
+   분석 상태 색 규칙 — 노랑: 사람이 확인해야 함(no_source, 분석 상태의 unknown), 파랑: 기다리면 배치가 알아서 처리함(pending, fetch_failed).
+   "근거 없음"을 회색으로 두었더니 "문제될 근거가 없다(안전)"로 읽혔다 — 실제로는 영향을 모른다는 뜻이라 주의색을 쓴다. */
+.badge.patch{ background:#e6f4ea; color:#2e7d32; }
+.badge.minor{ background:#fff3d6; color:#b8860b; }
+.badge.major{ background:var(--accent-soft); color:var(--accent); }
+.badge.unknown{ background:#ececf4; color:var(--text-sub); }
+.badge.analyzed{ background:#e6f4ea; color:#2e7d32; }
+.badge.no_source{ background:#fff3d6; color:#8a6400; }
+.badge.fetch_failed{ background:#e3ecff; color:#2f5bd3; }
+.badge.pending{ background:#e3ecff; color:#2f5bd3; }
+.badge.needs_check{ background:#fff3d6; color:#8a6400; }
+/* 조치안 "우리 코드" 대조 결과. "import에 없음"을 초록으로 칠하면 안전하다는 뜻으로 읽혀서 판단 불가와 같은 회색으로 둔다. */
+.badge.code_used{ background:var(--accent-soft); color:var(--accent); }
+.badge.code_possible{ background:#fff3d6; color:#8a6400; }
+.badge.code_not_found{ background:#ececf4; color:var(--text-sub); }
+.badge.code_unknown{ background:#ececf4; color:var(--text-sub); }
+/* 코드 점검 처리여부(공통코드 SC_STATUS). OPEN/RESOLVED는 위의 처리여부 뱃지를 같이 쓴다. */
+.badge.false_positive{ background:#ececf4; color:var(--text-sub); }
+.badge.accepted{ background:#e3ecff; color:#2f5bd3; }
+/* 코드 점검 화면 "추적 규칙 초안" 처리 상태. 확인 대기(PENDING)는 위 pending을 같이 쓴다. 무시·근거 없어짐은 끝난 일이라 회색. */
+.badge.applied{ background:#e6f4ea; color:#2e7d32; }
+.badge.auto_applied{ background:#e6f4ea; color:#2e7d32; }
+.badge.dismissed{ background:#ececf4; color:var(--text-sub); }
+.badge.obsolete{ background:#ececf4; color:var(--text-sub); }

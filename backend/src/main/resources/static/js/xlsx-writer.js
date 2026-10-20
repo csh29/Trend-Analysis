@@ -1,0 +1,133 @@
+/**
+ * 표 데이터를 .xlsx로 만들어 내려받게 하는 최소 구현(외부 라이브러리 없음, zip은 zip-writer.js 사용).
+ * CSV는 엑셀이 버전 "1.10"을 숫자로 바꾸는 등 값을 추측 변환하므로, 모든 셀을 문자열(inlineStr)로 넣는다.
+ *
+ * 사용법:
+ *   XlsxWriter.download('파일명.xlsx', { sheetName, headers: [...], widths: [px...](선택), rows: [[...], ...] });
+ */
+(function (global) {
+    const MAX_CELL_LENGTH = 32767; // 엑셀 셀 한 칸의 최대 글자 수
+    const HEADER_FILL = 'FF1F3864'; // 헤더 배경 RGB(31,56,100). 엑셀 색은 ARGB(앞 FF = 불투명)
+
+    // ── xlsx ─────────────────────────────────────────────────────
+    /** XML 특수문자 이스케이프 + XML에 들어갈 수 없는 제어문자 제거(NVD 설명 등에 섞여 오면 파일이 안 열린다). */
+    function escapeXml(value) {
+        return String(value)
+            .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    /** 0 → A, 25 → Z, 26 → AA */
+    function columnName(index) {
+        let name = '';
+        for (let n = index + 1; n > 0; n = Math.floor((n - 1) / 26)) {
+            name = String.fromCharCode(65 + ((n - 1) % 26)) + name;
+        }
+        return name;
+    }
+
+    /** 엑셀 시트 이름 규칙: 31자 이하, []:*?/\ 불가, 빈 이름 불가. */
+    function safeSheetName(name) {
+        const cleaned = String(name || '').replace(/[\[\]:*?\/\\]/g, ' ').trim().slice(0, 31);
+        return cleaned || 'Sheet1';
+    }
+
+    function cellXml(value, rowNumber, colIndex, styleIndex) {
+        let text = (value === null || value === undefined) ? '' : String(value);
+        if (text.length > MAX_CELL_LENGTH) {
+            text = text.slice(0, MAX_CELL_LENGTH);
+        }
+        const style = styleIndex ? ' s="' + styleIndex + '"' : '';
+        return '<c r="' + columnName(colIndex) + rowNumber + '" t="inlineStr"' + style + '>'
+            + '<is><t xml:space="preserve">' + escapeXml(text) + '</t></is></c>';
+    }
+
+    function sheetXml(table) {
+        const widths = table.widths || [];
+        const cols = table.headers.map(function (_, i) {
+            // 화면 px를 엑셀 열 너비(기본 글꼴 글자 수)로 대략 환산. 폭 정보가 없으면 15글자.
+            const px = typeof widths[i] === 'number' ? widths[i] : 105;
+            const width = Math.max(8, Math.min(80, Math.round(px / 7)));
+            return '<col min="' + (i + 1) + '" max="' + (i + 1) + '" width="' + width + '" customWidth="1"/>';
+        }).join('');
+
+        const header = '<row r="1">' + table.headers.map(function (h, i) {
+            return cellXml(h, 1, i, 1); // 스타일 1 = 굵은 글꼴
+        }).join('') + '</row>';
+        const body = table.rows.map(function (row, r) {
+            return '<row r="' + (r + 2) + '">' + row.map(function (v, i) {
+                return cellXml(v, r + 2, i, 0);
+            }).join('') + '</row>';
+        }).join('');
+
+        return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            + '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            // 첫 행(헤더) 고정
+            + '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+            + '<cols>' + cols + '</cols>'
+            + '<sheetData>' + header + body + '</sheetData>'
+            + '</worksheet>';
+    }
+
+    function buildXlsx(table) {
+        const encoder = new TextEncoder();
+        const xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+        const files = {
+            '[Content_Types].xml': xml
+                + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+                + '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+                + '<Default Extension="xml" ContentType="application/xml"/>'
+                + '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+                + '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+                + '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+                + '</Types>',
+            '_rels/.rels': xml
+                + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+                + '</Relationships>',
+            'xl/workbook.xml': xml
+                + '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+                + 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+                + '<sheets><sheet name="' + escapeXml(safeSheetName(table.sheetName)) + '" sheetId="1" r:id="rId1"/></sheets>'
+                + '</workbook>',
+            'xl/_rels/workbook.xml.rels': xml
+                + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+                + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+                + '</Relationships>',
+            // 스타일 0 = 기본, 1 = 헤더(흰 굵은 글꼴 + 배경 HEADER_FILL + 가운데 정렬 — 화면 그리드 헤더와 같다). fills의 none/gray125 두 개는 엑셀이 요구하는
+            // 기본값이라 헤더 배경은 세 번째(fillId=2)에 둔다.
+            'xl/styles.xml': xml
+                + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                + '<fonts count="2"><font><sz val="11"/><name val="맑은 고딕"/></font>'
+                + '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="맑은 고딕"/></font></fonts>'
+                + '<fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>'
+                + '<fill><patternFill patternType="solid"><fgColor rgb="' + HEADER_FILL + '"/><bgColor indexed="64"/></patternFill></fill></fills>'
+                + '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+                + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+                + '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+                + '<xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1">'
+                + '<alignment horizontal="center" vertical="center"/></xf></cellXfs>'
+                + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+                + '</styleSheet>',
+            'xl/worksheets/sheet1.xml': sheetXml(table)
+        };
+
+        return global.ZipWriter.storedBlob(Object.keys(files).map(function (name) {
+            return { name: name, data: encoder.encode(files[name]) };
+        }), 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    }
+
+    function download(filename, table) {
+        const url = URL.createObjectURL(buildXlsx(table));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    global.XlsxWriter = { download: download, build: buildXlsx };
+})(window);

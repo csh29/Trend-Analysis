@@ -1,0 +1,103 @@
+# trend-analysis backend
+패션 트렌드 분석 시스템 — Spring Boot 서버 + 화면(Thymeleaf).
+
+## 개발 환경
+
+| 구분 | 내용 |
+| --- | --- |
+| Language | Java 17 |
+| Framework | Spring Boot 3.3.4 |
+| Build Tool | Maven (Maven Wrapper 포함, `./mvnw` \| `mvnw.cmd`) |
+| Group / Artifact | `org.example` / `trend-analysis` |
+| 기본 패키지 | `com.sjinc.trendanalysis` |
+| View | Thymeleaf (서버 렌더링) |
+| DB | H2 파일 DB (`backend/data/trendAnalysis.mv.db`, `ddl-auto=update`) |
+
+### 주요 의존성
+
+| 의존성 | 용도 |
+| --- | --- |
+| `spring-boot-starter-web` | REST API + 화면 서빙 |
+| `spring-boot-starter-data-jpa` | 엔티티 / Repository |
+| `spring-boot-starter-thymeleaf` | 화면 템플릿 |
+| `spring-boot-starter-validation` | 요청 값 검증 |
+| `spring-boot-starter-security` | 폼 로그인, 프로그램별 권한 검사, 비밀번호 BCrypt 해시 |
+| `h2` *(runtime)* | 파일 DB |
+| `spring-boot-devtools` *(runtime, optional)* | 로컬 자동 재시작 |
+| `lombok` *(optional)* | 보일러플레이트 코드 축소 |
+| `spring-boot-starter-test` *(test)* | JUnit 5 / Mockito / AssertJ |
+| `spring-security-test` *(test)* | `@WithMockUser`, `csrf()` |
+
+## 빌드 & 실행
+
+```bash
+./mvnw clean package
+```
+
+```bash
+./mvnw spring-boot:run
+```
+
+실행 후 http://localhost:8080 으로 접속한다.
+
+## 화면 프레임워크
+
+security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
+
+| 위치 | 역할 |
+| --- | --- |
+| `templates/home.html` | 홈 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
+| `templates/fragments/sidebar.html` | 사이드바. 메뉴는 프로그램 관리(DB)와 공통코드 `MENU_GROUP`이 정한다(`SidebarModelAdvice`) |
+| `templates/login.html` | 로그인 화면 |
+| `templates/fragments/topbar.html` | 상단바(로고·사이드바 접기·탭 목록·로그인 사용자·비밀번호 변경·로그아웃) |
+| `templates/fragments/page-toolbar.html` | 화면 첫 줄(프로그램명 + 공통 버튼) |
+| `templates/fragments/loading-overlay.html` | 공통 fetch 래퍼(로딩 스피너) + 공통 스크립트 로드 |
+| `static/css/common-ui.css`, `grid.css` | 공통 레이아웃·그리드 모양 |
+| `static/js/grid.js`, `search-form.js` | 그리드·조회영역 렌더러 |
+| `static/js/page-buttons.js`, `hotkeys.js` | 공통 버튼 핸들러, 펑션키(F3 조회/F4 신규/F5 삭제/F9 저장/F12 초기화) |
+| `static/js/xlsx-writer.js`, `zip-writer.js` | 그리드 우클릭 엑셀 다운로드 |
+| `static/js/com-cd.js` | 공통코드 select 채우기(`/api/com-cds`) |
+
+## 트렌드 분석 화면
+
+| 화면 | 템플릿 | API |
+| --- | --- | --- |
+| 이미지 업로드 | `program/img-upload.html` | `/api/images` |
+
+이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
+파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
+
+## 관리 화면
+
+사이드바 "관리" 그룹. 기동 시 `DataInitializer`가 없을 때만 심는다.
+
+| 화면 | 템플릿 | API |
+| --- | --- | --- |
+| 프로그램 관리 | `program/program-mng.html` | `/api/programs` |
+| 사용자 관리 | `program/user-mng.html` | `/api/users` |
+| 사용자별 권한관리 | `program/user-permission-mng.html` | `/api/permissions/{userId}` |
+| 공통코드마스터 관리 | `program/com-cd-master-mng.html` | `/api/com-cd-groups` |
+| 공통코드 관리 | `program/com-cd-mng.html` | `/api/com-cds` |
+
+초기 관리자(`admin`)의 비밀번호는 최초 기동 때 무작위로 만들어 서버 로그에 한 번만 찍는다.
+잃어버렸으면 `backend/data/`를 지우고 다시 기동한다(데이터가 모두 초기화된다).
+
+### 화면 추가
+
+1. `templates/program/<화면id>.html`을 만든다(`program/com-cd-master-mng.html`처럼 조회영역+그리드+공통 버튼 구조).
+2. 프로그램 관리 화면에서 같은 프로그램ID로 등록한다(메뉴 그룹·아이콘·사용 버튼 지정).
+
+3. 사용자별 권한관리에서 쓸 사용자에게 그 프로그램 권한을 준다.
+
+`/program/<화면id>`로 열리며, `ViewController`는 고치지 않는다. 새 API는 컨트롤러에 `@RequiresProgram("<화면id>")`을 붙인다.
+
+## 로그인·권한
+
+security-monitoring의 로그인 프로세스를 그대로 따른다.
+
+- **로그인:** Spring Security 폼 로그인(`/login`). 계정은 `users` 테이블, 비밀번호는 BCrypt(`CustomUserDetailsService`). 사용여부 N 계정은 로그인할 수 없다.
+- **메뉴·버튼:** 사이드바에는 로그인 사용자가 권한을 가진 프로그램만, 툴바에는 "프로그램이 쓰는 버튼 ∩ 사용자에게 허용된 버튼"만 보인다(사용자별 권한관리).
+- **화면 접근:** 프로그램으로 등록된 화면은 그 권한이 없으면 403(`ViewController`).
+- **API 접근:** 허용 목록(`/login`, 정적 파일, `/error`) 외 요청은 `RequiresProgramAuthorizationManager`가 로그인과 `@RequiresProgram` 권한으로 판단한다. 미로그인 API는 401, 화면은 로그인 페이지로 보낸다.
+- **CSRF:** `XSRF-TOKEN` 쿠키를 공통 fetch 래퍼(`loading-overlay.html`)가 `X-XSRF-TOKEN` 헤더로 실어 보낸다.
+- **사용자 관리 제한:** 자기 자신은 비밀번호만 바꿀 수 있고 삭제할 수 없다. 자신보다 높은 역할(공통코드 `ROLE` 정렬순서)의 계정은 저장·삭제할 수 없고, 그런 역할을 줄 수도 없다.

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>공통코드마스터 관리 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대(:root, .app-shell, .btn 등)는 common-ui.css가, .grid 공통 모양(패딩 포함)은
+           grid.css가 담당한다. 여기는 이 화면에서만 다른 값만 남긴다. */
+        .grid td input[type="number"]{ width:80px; }
+    </style>
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section class="panel-head">
+            <div class="panel-title">그룹 목록</div>
+        </section>
+
+        <section>
+            <table class="grid">
+                <thead id="groupGridHead"></thead>
+                <tbody id="groupGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/search-form.js"></script>
+<script th:inline="javascript">
+    (function () {
+        const API_URL = '/api/com-cd-groups';
+        const gridBody = document.getElementById('groupGridBody');
+
+        const COLUMNS = [
+            { type: 'row-select', width: 36, align: 'center' },
+            {
+                id: 'codeGroup', label: '그룹코드', type: 'text',
+                // 그룹코드는 자연키(디테일 코드와 다른 화면의 select가 이 값으로 그룹을 찾는다)라
+                // 생성 후에는 수정하지 않는다 — 신규 행에서만 입력한다.
+                readOnly: function (value, group) { return !!(group && group.codeGroup); }
+            },
+            { id: 'groupName', label: '그룹명', type: 'text' },
+            { id: 'sortOrder', label: '정렬순서', type: 'number', width: 90 },
+            { id: 'useYn', label: '사용', type: 'checkbox', width: 70, align: 'center' },
+            { id: 'remark', label: '비고', type: 'text' }
+        ];
+
+        Grid.renderHeader(document.getElementById('groupGridHead'), COLUMNS);
+
+        // 이 화면의 "코드"는 그룹코드, "코드명"은 그룹명이다. 필드 id를 행 데이터 키와 맞춰
+        // search.matches로 화면에서 거른다(그룹은 건수가 적고 API는 공통코드 관리 화면도 같이 쓴다).
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'codeGroup', label: '코드', type: 'text' },
+            { id: 'groupName', label: '코드명', type: 'text' }
+        ], { onSearch: searchGroups });
+
+        function renderRows(groups) {
+            Grid.render(gridBody, COLUMNS, (groups || []).filter(search.matches), { emptyMessage: '등록된 그룹이 없습니다.' });
+        }
+
+        function searchGroups() {
+            fetch(API_URL)
+                .then(function (res) {
+                    if (!res.ok) throw new Error('조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(renderRows)
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function addRow() {
+            Grid.addRow(gridBody);
+        }
+
+        function saveAll() {
+            const requests = [];
+
+            for (const row of Grid.getRows(gridBody)) {
+                const codeGroup = row.codeGroup;
+                const groupName = row.groupName;
+
+                if (!codeGroup && !groupName) {
+                    continue;
+                }
+                if (!codeGroup || !groupName) {
+                    alert('그룹코드, 그룹명은 필수입니다.');
+                    return;
+                }
+
+                const payload = {
+                    codeGroup: codeGroup,
+                    groupName: groupName,
+                    sortOrder: row.sortOrder ? Number(row.sortOrder) : null,
+                    useYn: row.useYn,
+                    remark: row.remark
+                };
+
+                requests.push(fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }));
+            }
+
+            if (requests.length === 0) {
+                return;
+            }
+
+            Promise.all(requests)
+                .then(function (results) {
+                    if (results.some(function (res) { return !res.ok; })) {
+                        throw new Error('저장에 실패했습니다.');
+                    }
+                    searchGroups();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function deleteSelected() {
+            const rows = Grid.getRows(gridBody).filter(function (row) { return row._selected; });
+            if (rows.length === 0) {
+                alert('삭제할 그룹을 목록에서 선택하세요.');
+                return;
+            }
+            // 서버가 그룹에 딸린 디테일 코드까지 함께 지운다(ComCdGroupService.deleteGroup).
+            if (!confirm('선택한 그룹을 삭제하시겠습니까? 그룹에 속한 상세 코드도 함께 삭제됩니다.')) {
+                return;
+            }
+
+            const requests = rows
+                .filter(function (row) { return !row._isNew; })
+                .map(function (row) { return fetch(API_URL + '/' + encodeURIComponent(row.codeGroup), { method: 'DELETE' }); });
+
+            // 저장 전 신규 행은 서버에 없으니 화면에서만 지운다.
+            Grid.removeRows(gridBody, rows.filter(function (row) { return row._isNew; }));
+
+            if (requests.length === 0) {
+                return;
+            }
+
+            Promise.all(requests)
+                .then(function (results) {
+                    if (results.some(function (res) { return !res.ok; })) {
+                        throw new Error('삭제에 실패했습니다.');
+                    }
+                    searchGroups();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        PageButtons.bind({
+            btnSearch: searchGroups,
+            btnAdd: addRow,
+            btnSave: saveAll,
+            btnDelete: deleteSelected,
+            btnReset: function () {
+                search.reset();
+                searchGroups();
+            }
+        });
+
+        searchGroups();
+    })();
+</script>
+</body>
+</html>

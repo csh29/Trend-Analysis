@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>이미지 업로드 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css가 담당한다. 여기는 업로드 영역과 미리보기만. */
+        .drop-zone{
+            display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+            min-height:110px; padding:16px; cursor:pointer;
+            background:var(--card); border:2px dashed var(--line); border-radius:var(--radius-box);
+            font-size:12.5px; color:var(--text-sub); text-align:center;
+        }
+        .drop-zone:hover, .drop-zone.is-over{ border-color:var(--accent); background:#fff8fa; }
+        .drop-zone strong{ font-size:13px; color:var(--text); }
+        .drop-zone input[type="file"]{ display:none; }
+
+        .pending-head{ display:flex; align-items:center; justify-content:space-between; font-size:12px; color:var(--text-sub); }
+        .pending-head .btn{ padding:4px 10px; font-size:11.5px; }
+        .pending-list{ display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; }
+        .pending-item{
+            position:relative; width:96px; background:var(--card); border:1px solid var(--line);
+            border-radius:var(--radius-box); padding:6px; font-size:11px; color:var(--text-sub);
+        }
+        .pending-item img{ display:block; width:100%; height:72px; object-fit:cover; border-radius:2px; background:var(--bg); }
+        .pending-item .name{ margin-top:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--text); }
+        .pending-item .remove{
+            position:absolute; top:2px; right:2px; width:20px; height:20px; border:none; border-radius:50%;
+            background:rgba(25,25,64,.65); color:#fff; font-size:12px; line-height:20px; cursor:pointer;
+        }
+        .pending-item .remove:hover{ background:var(--accent); }
+
+        /* 그리드 행 높이(32px)에 맞춘 썸네일. 누르면 원본 미리보기. */
+        .grid-thumb{ display:block; width:40px; height:26px; margin:0 auto; object-fit:cover; border-radius:2px; cursor:zoom-in; }
+
+        .preview-modal{ max-width:900px; max-height:90vh; text-align:center; }
+        .preview-modal img{ max-width:100%; max-height:70vh; object-fit:contain; }
+        .preview-meta{ margin-top:8px; font-size:12px; color:var(--text-sub); }
+    </style>
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <!-- 업로드할 이미지 고르기 — 눌러서 고르거나 끌어다 놓는다. 고른 이미지는 아래 대기 목록에 쌓였다가 "업로드"로 한 번에 올라간다. -->
+        <label class="drop-zone" id="dropZone">
+            <strong>이미지를 끌어다 놓거나 눌러서 선택하세요</strong>
+            <span>여러 장 선택 가능 · jpg, png, gif, webp, bmp · 한 장 20MB, 한 번에 50장까지</span>
+            <input type="file" id="fileInput" multiple accept=".jpg,.jpeg,.png,.gif,.webp,.bmp,image/jpeg,image/png,image/gif,image/webp,image/bmp">
+        </label>
+
+        <section id="pendingArea" hidden>
+            <div class="pending-head">
+                <span id="pendingSummary"></span>
+                <button type="button" class="btn" id="btnClearPending">선택 비우기</button>
+            </div>
+            <div class="pending-list" id="pendingList"></div>
+        </section>
+
+        <section class="panel-head">
+            <div class="panel-title">업로드한 이미지</div>
+        </section>
+
+        <section>
+            <table class="grid">
+                <thead id="imageGridHead"></thead>
+                <tbody id="imageGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<div class="modal-backdrop" id="previewBackdrop">
+    <div class="modal preview-modal">
+        <h3 id="previewTitle">미리보기</h3>
+        <img id="previewImage" alt="">
+        <div class="preview-meta" id="previewMeta"></div>
+        <div class="modal-actions">
+            <a class="btn" id="previewOpen" target="_blank" rel="noopener">새 창으로 열기</a>
+            <button type="button" class="btn" id="previewClose">닫기</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/search-form.js"></script>
+<script>
+    (function () {
+        const API_URL = '/api/images';
+        // 서버 상한(ImageUploadConfig·ImageService)과 같은 값. 넘으면 보내기 전에 막는다 — 큰 요청은 서버가 연결을 끊어 사유를 못 보여준다.
+        const MAX_FILE_BYTES = 20 * 1024 * 1024;
+        const MAX_REQUEST_BYTES = 200 * 1024 * 1024;
+        const MAX_FILES = 50;
+        const ALLOWED_EXT = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'];
+
+        const gridBody = document.getElementById('imageGridBody');
+        const fileInput = document.getElementById('fileInput');
+        const dropZone = document.getElementById('dropZone');
+        const pendingArea = document.getElementById('pendingArea');
+        const pendingList = document.getElementById('pendingList');
+        const pendingSummary = document.getElementById('pendingSummary');
+
+        let pending = []; // { file, url } — url은 미리보기용 object URL(비울 때 해제한다)
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function formatDateTime(value) {
+            return value ? String(value).replace('T', ' ').substring(0, 19) : '';
+        }
+
+        const COLUMNS = [
+            { type: 'row-select', width: 36, align: 'center' },
+            {
+                label: '미리보기', width: 70, align: 'center',
+                render: function (value, row) {
+                    const img = document.createElement('img');
+                    img.className = 'grid-thumb';
+                    img.src = row.url;
+                    img.alt = row.originalName;
+                    img.loading = 'lazy';
+                    img.addEventListener('click', function (e) {
+                        e.stopPropagation();
+                        openPreview(row);
+                    });
+                    return img;
+                }
+            },
+            { id: 'originalName', label: '파일명', title: true },
+            { id: 'contentType', label: '형식', width: 100, align: 'center' },
+            { id: 'fileSizeText', label: '크기', width: 90, align: 'right' },
+            { id: 'uploadedBy', label: '업로더', width: 100, align: 'center' },
+            { id: 'uploadedAtText', label: '업로드일시', width: 150, align: 'center' }
+        ];
+
+        Grid.renderHeader(document.getElementById('imageGridHead'), COLUMNS);
+
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'originalName', label: '파일명', type: 'text' }
+        ], { onSearch: searchImages });
+
+        function renderRows(images) {
+            const rows = (images || []).map(function (image) {
+                return Object.assign({}, image, {
+                    fileSizeText: formatSize(image.fileSize),
+                    uploadedAtText: formatDateTime(image.uploadedAt)
+                });
+            }).filter(search.matches);
+            Grid.render(gridBody, COLUMNS, rows, { emptyMessage: '업로드한 이미지가 없습니다.' });
+        }
+
+        function searchImages() {
+            fetch(API_URL)
+                .then(function (res) {
+                    if (!res.ok) throw new Error('조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(renderRows)
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        // ── 업로드 대기 목록 ─────────────────────────────────────────
+
+        function extensionOf(name) {
+            const dot = name.lastIndexOf('.');
+            return dot < 0 ? '' : name.substring(dot + 1).toLowerCase();
+        }
+
+        function addFiles(fileList) {
+            const rejected = [];
+            Array.from(fileList).forEach(function (file) {
+                if (ALLOWED_EXT.indexOf(extensionOf(file.name)) === -1) {
+                    rejected.push(file.name + '(형식)');
+                } else if (file.size > MAX_FILE_BYTES) {
+                    rejected.push(file.name + '(20MB 초과)');
+                } else {
+                    pending.push({ file: file, url: URL.createObjectURL(file) });
+                }
+            });
+            if (rejected.length) {
+                alert('다음 파일은 제외했습니다.\n' + rejected.join('\n'));
+            }
+            renderPending();
+        }
+
+        function removePending(index) {
+            URL.revokeObjectURL(pending[index].url);
+            pending.splice(index, 1);
+            renderPending();
+        }
+
+        function clearPending() {
+            pending.forEach(function (p) { URL.revokeObjectURL(p.url); });
+            pending = [];
+            renderPending();
+        }
+
+        function renderPending() {
+            pendingList.innerHTML = '';
+            pending.forEach(function (p, index) {
+                const item = document.createElement('div');
+                item.className = 'pending-item';
+                item.title = p.file.name + ' (' + formatSize(p.file.size) + ')';
+
+                const img = document.createElement('img');
+                img.src = p.url;
+                img.alt = p.file.name;
+                const name = document.createElement('div');
+                name.className = 'name';
+                name.textContent = p.file.name;
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.className = 'remove';
+                remove.textContent = '×';
+                remove.setAttribute('aria-label', p.file.name + ' 빼기');
+                remove.addEventListener('click', function () { removePending(index); });
+
+                item.append(img, name, remove);
+                pendingList.appendChild(item);
+            });
+            const total = pending.reduce(function (sum, p) { return sum + p.file.size; }, 0);
+            pendingSummary.textContent = '업로드 대기 ' + pending.length + '장 · ' + formatSize(total);
+            pendingArea.hidden = pending.length === 0;
+        }
+
+        fileInput.addEventListener('change', function () {
+            addFiles(fileInput.files);
+            fileInput.value = ''; // 같은 파일을 빼고 다시 고를 수 있게 비운다
+        });
+        ['dragenter', 'dragover'].forEach(function (type) {
+            dropZone.addEventListener(type, function (e) {
+                e.preventDefault();
+                dropZone.classList.add('is-over');
+            });
+        });
+        ['dragleave', 'drop'].forEach(function (type) {
+            dropZone.addEventListener(type, function (e) {
+                e.preventDefault();
+                dropZone.classList.remove('is-over');
+            });
+        });
+        dropZone.addEventListener('drop', function (e) {
+            if (e.dataTransfer && e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+        });
+        document.getElementById('btnClearPending').addEventListener('click', clearPending);
+
+        function uploadPending() {
+            if (pending.length === 0) {
+                alert('업로드할 이미지를 먼저 선택하세요.');
+                return;
+            }
+            if (pending.length > MAX_FILES) {
+                alert('한 번에 ' + MAX_FILES + '장까지 올릴 수 있습니다. 대기 목록에서 줄여 주세요.');
+                return;
+            }
+            const total = pending.reduce(function (sum, p) { return sum + p.file.size; }, 0);
+            if (total > MAX_REQUEST_BYTES) {
+                alert('한 번에 합계 200MB까지 올릴 수 있습니다. 나눠서 올려 주세요.');
+                return;
+            }
+
+            const form = new FormData();
+            pending.forEach(function (p) { form.append('files', p.file, p.file.name); });
+            // Content-Type은 지정하지 않는다 — 브라우저가 multipart 경계(boundary)를 넣어 직접 단다.
+            fetch(API_URL, { method: 'POST', body: form })
+                .then(function (res) {
+                    if (!res.ok) {
+                        return res.text().then(function (msg) { throw new Error(msg || '업로드에 실패했습니다.'); });
+                    }
+                    return res.json();
+                })
+                .then(function (saved) {
+                    clearPending();
+                    alert(saved.length + '장을 업로드했습니다.');
+                    searchImages();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        function deleteSelected() {
+            const ids = Grid.getRows(gridBody)
+                .filter(function (row) { return row._selected; })
+                .map(function (row) { return row.id; });
+            if (ids.length === 0) {
+                alert('삭제할 이미지를 목록에서 선택하세요.');
+                return;
+            }
+            if (!confirm('선택한 이미지 ' + ids.length + '장을 삭제하시겠습니까? 파일도 함께 지워집니다.')) {
+                return;
+            }
+            fetch(API_URL, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ids)
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('삭제에 실패했습니다.');
+                    searchImages();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        // ── 원본 미리보기 ───────────────────────────────────────────
+
+        const previewBackdrop = document.getElementById('previewBackdrop');
+
+        function openPreview(row) {
+            document.getElementById('previewTitle').textContent = row.originalName;
+            document.getElementById('previewImage').src = row.url;
+            document.getElementById('previewMeta').textContent =
+                row.contentType + ' · ' + formatSize(row.fileSize) + ' · ' + row.uploadedBy + ' · ' + formatDateTime(row.uploadedAt);
+            document.getElementById('previewOpen').href = row.url;
+            previewBackdrop.classList.add('open');
+        }
+
+        function closePreview() {
+            previewBackdrop.classList.remove('open');
+            document.getElementById('previewImage').removeAttribute('src');
+        }
+
+        document.getElementById('previewClose').addEventListener('click', closePreview);
+        previewBackdrop.addEventListener('click', function (e) {
+            if (e.target === previewBackdrop) closePreview();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && previewBackdrop.classList.contains('open')) closePreview();
+        });
+
+        PageButtons.bind({
+            btnSearch: searchImages,
+            btnDelete: deleteSelected,
+            btnEtc1: uploadPending,
+            btnReset: function () {
+                search.reset();
+                clearPending();
+                searchImages();
+            }
+        });
+
+        searchImages();
+    })();
+</script>
+</body>
+</html>

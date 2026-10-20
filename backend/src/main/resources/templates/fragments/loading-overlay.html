@@ -1,0 +1,106 @@
+<th:block xmlns:th="http://www.thymeleaf.org" th:fragment="overlay">
+    <div id="globalLoadingOverlay" class="global-loading-overlay">
+        <style>
+            .global-loading-overlay{
+                display:none; position:fixed; inset:0; z-index:9999;
+                background:rgba(255,255,255,0.6);
+                align-items:center; justify-content:center;
+                cursor:wait;
+            }
+            .global-loading-overlay.active{ display:flex; }
+            .global-loading-overlay .spinner{
+                width:44px; height:44px;
+                border:5px solid #e8e8f2; border-top-color:#f43f68;
+                border-radius:50%;
+                animation:global-loading-spin .8s linear infinite;
+            }
+            @keyframes global-loading-spin{ to{ transform:rotate(360deg); } }
+        </style>
+        <div class="spinner"></div>
+    </div>
+
+    <!-- 화면 공통 펑션키(F3 조회/F4 신규/F5 삭제/F9 저장/F12 초기화). 모든 화면이 이 조각을 포함하므로 여기서 싣는다. -->
+    <script src="/js/hotkeys.js"></script>
+    <!-- 권한에 따라 있을 수도 없을 수도 있는 공통 버튼에 핸들러를 거는 헬퍼(PageButtons.bind). -->
+    <script src="/js/page-buttons.js"></script>
+    <!-- 그리드 우클릭 "엑셀 다운로드"가 쓰는 xlsx 작성기(grid.js는 누를 때 XlsxWriter를 찾는다). -->
+    <script src="/js/zip-writer.js"></script>
+    <script src="/js/xlsx-writer.js"></script>
+    <!-- 공통 모달(.modal)을 제목줄로 끌어 옮기기. 화면 코드는 할 일 없음. -->
+    <script src="/js/modal-drag.js"></script>
+    <script>
+        (function () {
+            const overlay = document.getElementById('globalLoadingOverlay');
+            if (!overlay || overlay.dataset.wired) return;
+            overlay.dataset.wired = 'true';
+
+            let pending = 0;
+
+            function show() {
+                pending++;
+                overlay.classList.add('active');
+            }
+
+            function hide() {
+                pending = Math.max(0, pending - 1);
+                if (pending === 0) {
+                    overlay.classList.remove('active');
+                }
+            }
+
+            // CSRF 쿠키(XSRF-TOKEN)를 읽어 상태 변경 요청에 X-XSRF-TOKEN 헤더로 실어 보낸다.
+            // 화면마다 챙기지 않도록 아래 공통 fetch 래퍼 한 곳에서 처리한다.
+            const CSRF_COOKIE_NAME = 'XSRF-TOKEN';
+            const CSRF_HEADER_NAME = 'X-XSRF-TOKEN';
+            const STATE_CHANGING_METHODS = ['POST', 'PUT', 'PATCH', 'DELETE'];
+
+            function readCsrfCookie() {
+                const match = document.cookie.match(new RegExp('(?:^|; )' + CSRF_COOKIE_NAME + '=([^;]*)'));
+                return match ? decodeURIComponent(match[1]) : null;
+            }
+
+            function withCsrfHeader(input, init) {
+                const isRequestObject = typeof Request !== 'undefined' && input instanceof Request;
+                const method = ((init && init.method) || (isRequestObject ? input.method : 'GET') || 'GET').toUpperCase();
+                if (STATE_CHANGING_METHODS.indexOf(method) === -1) {
+                    return init;
+                }
+                const token = readCsrfCookie();
+                if (!token) {
+                    return init;
+                }
+                const headers = new Headers((init && init.headers) || (isRequestObject ? input.headers : undefined));
+                headers.set(CSRF_HEADER_NAME, token);
+                return Object.assign({}, init, { headers: headers });
+            }
+
+            // fetch를 감싸 API 호출 중에는 전체 화면 스피너로 입력을 막는다. 로그인이 풀려 401을 받으면
+            // 화면별 오류 처리로 가지 않고 여기서 멈춰, 탭(iframe) 안이더라도 창 전체를 로그인 페이지로 보낸다.
+            const LOGIN_URL = '/login';
+            let redirectingToLogin = false;
+
+            function redirectToLogin() {
+                if (!redirectingToLogin) {
+                    redirectingToLogin = true;
+                    window.top.location.href = LOGIN_URL;
+                }
+                return new Promise(function () {}); // 끝나지 않는 Promise — 화면의 then/catch가 실행되지 않는다
+            }
+
+            // init.silent === true면 스피너를 띄우지 않는다 — 홈 자동 새로고침처럼 사용자가 누르지 않은 백그라운드 갱신이
+            // 주기마다 화면 전체를 덮어 클릭을 막으면 안 된다. CSRF·401 처리는 똑같이 한다.
+            const originalFetch = window.fetch;
+            window.fetch = function (input, init) {
+                const silent = !!(init && init.silent);
+                if (!silent) show();
+                return originalFetch.call(window, input, withCsrfHeader(input, init))
+                    .then(function (res) {
+                        return res.status === 401 ? redirectToLogin() : res;
+                    })
+                    .finally(function () {
+                        if (!silent) hide();
+                    });
+            };
+        })();
+    </script>
+</th:block>

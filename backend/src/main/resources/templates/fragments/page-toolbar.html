@@ -1,0 +1,12 @@
+<!--
+    모든 화면의 첫 줄(프로그램명 + 공통 버튼). programNm·pageButtons(프로그램 사용 버튼 ∩ 사용자 허용 버튼)는
+    ViewController가 넣고, 화면 JS는 PageButtons.bind로 핸들러를 건다. 사용: th:replace="~{fragments/page-toolbar :: toolbar}"
+-->
+<section th:fragment="toolbar" class="page-toolbar">
+    <div class="page-name" th:text="${programNm}">프로그램명</div>
+    <div class="btn-group">
+        <button th:each="button : ${pageButtons}" type="button"
+                th:id="${button.id}" th:class="|btn ${button.cssClass}|"
+                th:attr="data-hotkey=${button.hotkey}" th:text="${button.label}">조회</button>
+    </div>
+</section>
