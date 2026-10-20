@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>트렌드 분석 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css, 차트는 line-chart.js가 담당한다. 여기는 요약 카드·증감률 색만. */
+        .summary-cards{ display:grid; grid-template-columns:repeat(4, minmax(140px, 1fr)); gap:10px; }
+        .summary-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-box); padding:12px 14px; }
+        .summary-card .label{ font-size:11.5px; font-weight:700; color:var(--text-sub); }
+        .summary-card .value{ margin-top:4px; font-size:18px; font-weight:800; color:var(--text); }
+        .summary-card .value.small{ font-size:13px; font-weight:700; }
+        .chart-box{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-box); padding:12px 14px; }
+        .rate-up{ color:var(--accent); font-weight:700; }
+        .rate-down{ color:#2f5bd3; font-weight:700; }
+        .form-hint{ font-size:11.5px; color:var(--text-sub); }
+        .evidence-modal{ max-width:960px; width:96%; }
+        .evidence-hint{ font-size:12px; color:var(--text-sub); margin-bottom:8px; }
+        @media (max-width: 720px){ .summary-cards{ grid-template-columns:repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+<!-- P-05 트렌드 집계 결과: 기준 주의 값별 언급량·전주/전월 대비·급상승, 주별 추이 차트, 값별 근거 원문. -->
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section class="summary-cards">
+            <div class="summary-card"><div class="label">기준 주</div><div class="value small" id="sumWeek">-</div></div>
+            <div class="summary-card"><div class="label">급상승 (전주 대비 기준 이상)</div><div class="value" id="sumSurge">-</div></div>
+            <div class="summary-card"><div class="label">신규 (전주 0건)</div><div class="value" id="sumNew">-</div></div>
+            <div class="summary-card"><div class="label">마지막 집계</div><div class="value small" id="sumAggregated">-</div></div>
+        </section>
+
+        <section class="panel-head">
+            <div class="panel-title">주별 언급량 추이 (기간 합계 상위 5)</div>
+        </section>
+        <section class="chart-box" id="trendChart"></section>
+
+        <section class="panel-head">
+            <div class="panel-title" id="rowsTitle">기준 주 집계</div>
+            <div class="form-hint">행을 누르면 근거 원문을 봅니다.</div>
+        </section>
+        <section>
+            <table class="grid">
+                <thead id="trendGridHead"></thead>
+                <tbody id="trendGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<div class="modal-backdrop" id="evidenceBackdrop">
+    <div class="modal evidence-modal">
+        <h3 id="evidenceTitle">근거 원문</h3>
+        <div class="evidence-hint" id="evidenceHint"></div>
+        <table class="grid">
+            <thead id="evidenceGridHead"></thead>
+            <tbody id="evidenceGridBody"></tbody>
+        </table>
+        <div class="modal-actions">
+            <button type="button" class="btn" id="evidenceClose">닫기</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/com-cd.js"></script>
+<script src="/js/search-form.js"></script>
+<script src="/js/line-chart.js"></script>
+<script>
+    (function () {
+        const API_URL = '/api/trends';
+        const TYPES = [
+            { value: 'KEYWORD', label: '키워드' },
+            { value: 'ITEM', label: '아이템' },
+            { value: 'MATERIAL', label: '소재' },
+            { value: 'COLOR', label: '컬러' },
+            { value: 'SILHOUETTE', label: '실루엣' },
+            { value: 'SEASON', label: '시즌' },
+            { value: 'CATEGORY', label: '카테고리' }
+        ];
+        const gridBody = document.getElementById('trendGridBody');
+        let current = null; // 마지막 조회 결과 — 근거 원문 기간에 쓴다
+
+        // ── 날짜(로컬 기준 — toISOString은 UTC라 한국 시간 오전 9시 전에 하루 밀린다) ──
+        function iso(d) {
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        function parse(s) {
+            const p = s.split('-').map(Number);
+            return new Date(p[0], p[1] - 1, p[2]);
+        }
+        function addDays(d, n) {
+            const r = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+            r.setDate(r.getDate() + n);
+            return r;
+        }
+        function mmdd(d) {
+            return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+        }
+        function thisMonday() {
+            const t = new Date();
+            return addDays(t, -((t.getDay() + 6) % 7));
+        }
+
+        /** 기준 주 선택지: 이번 주(진행 중)부터 26주 전까지. 기본은 지난주(마감된 주). */
+        function weekOptions() {
+            const monday = thisMonday();
+            const options = [];
+            for (let i = 0; i < 26; i++) {
+                const start = addDays(monday, -7 * i);
+                const label = i === 0 ? '이번 주 ' + mmdd(start) + '~ (진행 중)' : mmdd(start) + ' ~ ' + mmdd(addDays(start, 6));
+                options.push({ value: iso(start), label: label });
+            }
+            return options;
+        }
+        const WEEK_OPTIONS = weekOptions();
+
+        // ── 조회영역 ───────────────────────────────────────────────
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'type', label: '유형', type: 'select', options: TYPES, defaultValue: 'KEYWORD', width: 110, onChange: searchTrend },
+            { id: 'category', label: '카테고리', type: 'select', optionsQuery: 'TREND_CATEGORY', withAll: true, width: 130, onChange: searchTrend },
+            { id: 'baseWeek', label: '기준 주', type: 'select', options: WEEK_OPTIONS, defaultValue: WEEK_OPTIONS[1].value, width: 190, onChange: searchTrend },
+            {
+                id: 'weeks', label: '기간', type: 'select', width: 90, defaultValue: '8', onChange: searchTrend,
+                options: [{ value: '4', label: '4주' }, { value: '8', label: '8주' }, { value: '12', label: '12주' }, { value: '26', label: '26주' }]
+            }
+        ], { onSearch: searchTrend });
+
+        // ── 기준 주 집계 그리드 ─────────────────────────────────────
+        function rateCell(value) {
+            const span = document.createElement('span');
+            if (value === null || value === undefined) {
+                span.textContent = '-';
+                return span;
+            }
+            span.textContent = (value > 0 ? '+' : '') + value.toFixed(1) + '%';
+            if (value > 0) span.className = 'rate-up';
+            if (value < 0) span.className = 'rate-down';
+            return span;
+        }
+
+        function judgeCell(value, row) {
+            if (!row.surge && !row.isNew) return '';
+            const span = document.createElement('span');
+            span.className = 'badge ' + (row.surge ? 'high' : 'running');
+            span.textContent = row.surge ? '급상승' : '신규';
+            return span;
+        }
+
+        const COLUMNS = [
+            { id: 'rank', label: '순위', width: 50, align: 'center' },
+            { id: 'label', label: '값', title: true },
+            { id: 'count', label: '이번 주', width: 80, align: 'right' },
+            { id: 'prevCount', label: '전주', width: 70, align: 'right' },
+            { id: 'prevRate', label: '전주 대비', width: 100, align: 'right', render: rateCell },
+            { id: 'monthAvg', label: '직전 4주 평균', width: 110, align: 'right' },
+            { id: 'monthRate', label: '전월 대비', width: 100, align: 'right', render: rateCell },
+            { id: 'judge', label: '판정', width: 80, align: 'center', render: judgeCell }
+        ];
+        Grid.renderHeader(document.getElementById('trendGridHead'), COLUMNS);
+
+        function render(view) {
+            current = view;
+            const base = parse(view.baseWeek);
+            document.getElementById('sumWeek').textContent = view.baseWeek + ' ~ ' + iso(addDays(base, 6));
+            document.getElementById('sumSurge').textContent = view.surgeCount + '건';
+            document.getElementById('sumNew').textContent = view.newCount + '건';
+            document.getElementById('sumAggregated').textContent = view.aggregatedAt
+                ? String(view.aggregatedAt).replace('T', ' ').substring(0, 16) : '집계 전';
+            document.getElementById('rowsTitle').textContent = '기준 주 집계 (' + mmdd(base) + ' ~ ' + mmdd(addDays(base, 6)) + ')';
+
+            LineChart.render(document.getElementById('trendChart'), {
+                labels: view.weeks.map(function (w) { return mmdd(parse(w)); }),
+                series: view.series.map(function (s) { return { name: s.label, values: s.counts }; }),
+                emptyMessage: '기간 안에 집계된 값이 없습니다. 분석이 끝난 뒤 "집계"를 누르세요.'
+            });
+
+            const rows = view.rows.map(function (row, i) { return Object.assign({ rank: i + 1 }, row); });
+            Grid.render(gridBody, COLUMNS, rows, {
+                emptyMessage: '기준 주에 집계된 값이 없습니다.',
+                onRowClick: function (tr, row) { openEvidence(row); }
+            });
+        }
+
+        function searchTrend() {
+            const v = search.values();
+            const params = new URLSearchParams({ type: v.type, baseWeek: v.baseWeek, weeks: v.weeks });
+            if (v.category) params.set('category', v.category);
+            fetch(API_URL + '?' + params.toString())
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '조회에 실패했습니다.'); });
+                    return res.json();
+                })
+                .then(render)
+                .catch(function (err) { alert(err.message); });
+        }
+
+        // ── 근거 원문 ──────────────────────────────────────────────
+        const evidenceBackdrop = document.getElementById('evidenceBackdrop');
+        const EVIDENCE_COLUMNS = [
+            { id: 'statDate', label: '집계일', width: 100, align: 'center' },
+            { id: 'docId', label: '문서 ID', width: 170, align: 'center' },
+            { id: 'title', label: '제목', width: 200, title: true },
+            { id: 'summary', label: '요약', title: true },
+            { id: 'media', label: '매체', width: 120, align: 'center' },
+            {
+                id: 'url', label: '원문', width: 60, align: 'center',
+                render: function (value) {
+                    if (!value) return '';
+                    const a = document.createElement('a');
+                    a.href = value;
+                    a.target = '_blank';
+                    a.rel = 'noopener noreferrer';
+                    a.textContent = '열기';
+                    a.addEventListener('click', function (e) { e.stopPropagation(); });
+                    return a;
+                }
+            }
+        ];
+        Grid.renderHeader(document.getElementById('evidenceGridHead'), EVIDENCE_COLUMNS);
+
+        function openEvidence(row) {
+            if (!current) return;
+            const v = search.values();
+            const from = current.weeks[0];
+            const to = iso(addDays(parse(current.baseWeek), 6));
+            const params = new URLSearchParams({ type: v.type, value: row.value, from: from, to: to });
+            if (v.category) params.set('category', v.category);
+            fetch(API_URL + '/evidence?' + params.toString())
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '근거 원문을 읽지 못했습니다.'); });
+                    return res.json();
+                })
+                .then(function (docs) {
+                    document.getElementById('evidenceTitle').textContent = '근거 원문 — ' + row.label;
+                    document.getElementById('evidenceHint').textContent =
+                        from + ' ~ ' + to + ' 사이에 이 값이 나온 분석 완료 문서 ' + docs.length + '건 (최신순)';
+                    Grid.render(document.getElementById('evidenceGridBody'), EVIDENCE_COLUMNS, docs, {
+                        emptyMessage: '기간 안에 근거 원문이 없습니다. 집계 후 문서가 삭제·재분석됐을 수 있습니다.'
+                    });
+                    evidenceBackdrop.classList.add('open');
+                })
+                .catch(function (err) { alert(err.message); });
+        }
+
+        function closeEvidence() {
+            evidenceBackdrop.classList.remove('open');
+        }
+        document.getElementById('evidenceClose').addEventListener('click', closeEvidence);
+        evidenceBackdrop.addEventListener('click', function (e) { if (e.target === evidenceBackdrop) closeEvidence(); });
+        document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeEvidence(); });
+
+        // ── 집계(기타1) ─────────────────────────────────────────────
+        function aggregateNow() {
+            fetch(API_URL + '/aggregate', { method: 'POST' })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('집계에 실패했습니다.');
+                    return res.json();
+                })
+                .then(function (result) {
+                    alert('집계했습니다. 분석 완료 문서 ' + result.documents + '건 → 집계 ' + result.rows + '행 (급상승 ' + result.surges + '행)');
+                    searchTrend();
+                })
+                .catch(function (err) { alert(err.message); });
+        }
+
+        PageButtons.bind({
+            btnSearch: searchTrend,
+            btnEtc1: aggregateNow,
+            btnReset: function () {
+                search.reset();
+                searchTrend();
+            }
+        });
+
+        // 창 크기가 바뀌면 차트 폭을 다시 맞춘다
+        let resizeTimer = null;
+        window.addEventListener('resize', function () {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(function () { if (current) render(current); }, 200);
+        });
+
+        search.ready.then(searchTrend);
+    })();
+</script>
+</body>
+</html>

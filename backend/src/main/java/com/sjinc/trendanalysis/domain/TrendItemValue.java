@@ -15,7 +15,11 @@ import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
-/** 트렌드 항목의 다중 값 한 개(키워드·소재·컬러·실루엣). 한 행씩 둬야 P-05가 값별 문서 수를 바로 센다. */
+/**
+ * 트렌드 항목의 다중 값 한 개. 한 행씩 둬야 P-05가 값별 문서 수를 바로 센다.
+ * 키워드는 문서 단위(garmentNo·category 없음), 아이템명(ITEM)·소재·컬러·실루엣은 의류 아이템 단위다 —
+ * 같은 garmentNo끼리 한 아이템이고 category는 그 아이템의 카테고리다(코디 사진의 상의·하의 속성이 섞이지 않게).
+ */
 @Entity
 @Table(name = "trend_item_values", indexes = @Index(columnList = "value_type, item_value"))
 @Getter
@@ -25,6 +29,10 @@ import lombok.NoArgsConstructor;
 public class TrendItemValue {
 
     public static final String KEYWORD = "KEYWORD";
+    /** 시즌(공통코드 TREND_SEASON). 키워드처럼 문서 단위다. */
+    public static final String SEASON = "SEASON";
+    /** 의류 아이템 이름(예: "니트 카디건"). LLM이 쓴 문자열이다. */
+    public static final String ITEM = "ITEM";
     public static final String MATERIAL = "MATERIAL";
     public static final String COLOR = "COLOR";
     public static final String SILHOUETTE = "SILHOUETTE";
@@ -46,4 +54,12 @@ public class TrendItemValue {
 
     @Column(name = "sort_order", nullable = false)
     private int sortOrder;
+
+    /** 몇 번째 의류 아이템의 값인지(0부터). 키워드면 null. 아이템 배열 도입 전 결과도 null이다. */
+    @Column(name = "garment_no")
+    private Integer garmentNo;
+
+    /** 그 아이템의 카테고리 코드. 키워드면 null. */
+    @Column(length = 30)
+    private String category;
 }

@@ -16,6 +16,7 @@ import config
 import embedding
 import image_prep
 import indexer
+import prompt_loader
 import vector_store
 from structurer import CodeOption, StructureInput, StructuringError, build_content, build_schema, structure
 
@@ -29,6 +30,7 @@ def sample_input(doc_type="TEXT") -> StructureInput:
         materials=[CodeOption("LEATHER", "레더(가죽)")],
         colors=[CodeOption("BROWN", "브라운")],
         silhouettes=[CodeOption("OVERSIZED", "오버사이즈")],
+        seasons=[CodeOption("FALL", "가을"), CodeOption("WINTER", "겨울")],
     )
 
 
@@ -127,15 +129,38 @@ class ImagePrepTest(unittest.TestCase):
 class StructurerTest(unittest.TestCase):
     def test_schema_limits_values_to_codes(self):
         schema = build_schema(sample_input())
-        self.assertEqual(["OUTER", "ETC"], schema["properties"]["category"]["enum"])
-        self.assertEqual(["LEATHER"], schema["properties"]["materials"]["items"]["enum"])
+        item = schema["properties"]["items"]["items"]  # 의류 아이템마다 카테고리·속성을 따로 받는다
+        self.assertEqual(["OUTER", "ETC"], item["properties"]["category"]["enum"])
+        self.assertEqual(["LEATHER"], item["properties"]["materials"]["items"]["enum"])
+        self.assertFalse(item["additionalProperties"])
+        self.assertEqual({"category", "item", "materials", "colors", "silhouettes"}, set(item["required"]))
         self.assertFalse(schema["additionalProperties"])
+        self.assertNotIn("category", schema["properties"])  # 문서 단위 카테고리는 없다
+        self.assertEqual(["FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])  # 시즌은 문서 단위
+        self.assertIn("seasons", schema["required"])
         self.assertNotIn("source", schema["properties"])  # 출처는 LLM이 만들지 않는다
 
     def test_image_content_puts_image_first(self):
         content = build_content(sample_input("IMAGE"))
         self.assertEqual("image", content[0]["type"])
         self.assertIn("LEATHER=레더(가죽)", content[-1]["text"])
+
+    def _system_for(self, doc_type):
+        messages = FakeMessages(fake_response())
+        structure(sample_input(doc_type), "k", client=SimpleNamespace(messages=messages))
+        return messages.calls[0]["system"]
+
+    def test_each_type_gets_only_its_own_rules(self):
+        # 이미지로 소재를 짐작하면 오판이 많다(그레이 데님 → 면) — 질감이 분명할 때만, 텍스트는 본문에 나온 것만.
+        # 유형별 기준은 그 유형에만 보낸다(이미지 분석에 텍스트 기준이 섞이지 않게)
+        image, text = self._system_for("IMAGE"), self._system_for("TEXT")
+        for system in (image, text):
+            self.assertIn("materials는 특히 엄격하게", system)  # 공통 규칙
+            self.assertIn("축마다 최대 1개", system)            # 실루엣 기준은 양쪽 모두
+        self.assertIn("질감이 사진에서 분명할 때만", image)
+        self.assertNotIn("본문에 그 아이템의 소재가 직접 나온 것만", image)
+        self.assertIn("본문에 그 아이템의 소재가 직접 나온 것만", text)
+        self.assertNotIn("질감이 사진에서 분명할 때만", text)
 
     def test_successful_call_uses_structured_output(self):
         messages = FakeMessages(fake_response())
@@ -180,9 +205,11 @@ class FakeCollection:
 
 
 class IndexerTest(unittest.TestCase):
-    structured = {"category": "OUTER", "keywords": ["레더 재킷"], "materials": ["LEATHER"],
-                  "colors": [], "silhouettes": [], "summary": "레더 아우터가 주목받는다."}
-    names = {"OUTER": "아우터", "LEATHER": "레더(가죽)"}
+    structured = {"items": [
+        {"category": "OUTER", "item": "레더 재킷", "materials": ["LEATHER"], "colors": ["BROWN"], "silhouettes": []},
+        {"category": "BOTTOM", "item": "미니스커트", "materials": [], "colors": ["BLACK"], "silhouettes": []},
+    ], "keywords": ["레더 재킷"], "seasons": ["FALL"], "summary": "레더 아우터가 주목받는다."}
+    names = {"OUTER": "아우터", "BOTTOM": "하의", "LEATHER": "레더(가죽)", "BROWN": "브라운", "BLACK": "블랙", "FALL": "가을"}
 
     def test_image_gets_one_summary_chunk_with_code_names(self):
         collection = FakeCollection()
@@ -191,8 +218,14 @@ class IndexerTest(unittest.TestCase):
         self.assertEqual(1, count)
         ids, docs, metas = collection.added[0]
         self.assertEqual(["IMG-1#0"], ids)
-        self.assertIn("소재: 레더(가죽)", docs[0])  # 코드값이 아니라 이름으로 — 한국어 질문과 맞아야 한다
+        # 코드값이 아니라 이름으로(한국어 질문과 맞게), 속성은 그 아이템 줄에만
+        self.assertIn("아이템: 레더 재킷(아우터) — 소재 레더(가죽), 컬러 브라운", docs[0])
+        self.assertIn("아이템: 미니스커트(하의) — 컬러 블랙", docs[0])
         self.assertEqual("업로드", metas[0]["media"])
+        self.assertEqual("OUTER", metas[0]["category"])
+        self.assertEqual("OUTER,BOTTOM", metas[0]["categories"])
+        self.assertIn("시즌: 가을", docs[0])
+        self.assertEqual("FALL", metas[0]["seasons"])
         self.assertEqual([{"doc_id": "IMG-1"}], collection.deleted)  # 재분석이면 이전 청크를 지운다
 
     def test_text_adds_body_chunks(self):
@@ -226,6 +259,35 @@ class EmbeddingFunctionTest(unittest.TestCase):
         func = embedding.QwenVLEmbeddingFunction("Qwen/Qwen3-VL-Embedding-2B")
         self.assertEqual("Qwen/Qwen3-VL-Embedding-2B",
                          embedding.QwenVLEmbeddingFunction.build_from_config(func.get_config()).model_name)
+
+
+class PromptLoaderTest(unittest.TestCase):
+    """Claude가 읽는 글은 prompts/*.md — 구역(## 키)으로 나누고 주석은 보내지 않는다."""
+
+    def test_sections_without_comments(self):
+        sections = prompt_loader.parse_sections("<!-- 개발자용 -->\n## a\n\n첫 줄\n둘째 줄\n\n## b\n끝\n")
+        self.assertEqual({"a": "첫 줄\n둘째 줄", "b": "끝"}, sections)
+
+    def test_missing_section_fails_at_load(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(prompt_loader, "PROMPT_DIR", Path(tmp)):
+            Path(tmp, "x.md").write_text("## system\n규칙\n", encoding="utf-8")
+            with self.assertRaises(RuntimeError):
+                prompt_loader.load("x", ["system", "task_text"])
+
+    def test_prompt_files_are_what_claude_gets(self):
+        common = prompt_loader.load("structure-common", ["system"])
+        silhouette = prompt_loader.load("structure-silhouette", ["system"])
+        text_rules = prompt_loader.load("structure-text", ["system"])
+        messages = FakeMessages(fake_response())
+        structure(sample_input("TEXT"), "k", client=SimpleNamespace(messages=messages))
+        call = messages.calls[0]
+        # 공통 → 실루엣 기준 → 자료 유형 기준 순서로 붙는다
+        self.assertEqual("\n\n".join([common["system"], silhouette["system"], text_rules["system"]]), call["system"])
+        self.assertNotIn("<!--", call["system"])  # md 주석은 보내지 않는다
+        texts = [b["text"] for b in call["messages"][0]["content"] if b["type"] == "text"]
+        self.assertTrue(any(text_rules["task"] in t for t in texts))
+        self.assertTrue(any(t.startswith("<document>\n" + text_rules["title_label"]) for t in texts))
+        self.assertTrue(any(t.startswith(common["allowed_values_header"]) for t in texts))
 
 
 if __name__ == "__main__":

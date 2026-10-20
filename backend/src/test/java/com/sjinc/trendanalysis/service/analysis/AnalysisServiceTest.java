@@ -61,14 +61,24 @@ class AnalysisServiceTest {
 
     private static Map<String, Object> validResult() {
         Map<String, Object> result = new HashMap<>();
-        result.put("category", "OUTER");
+        result.put("items", List.of(
+                garment("OUTER", "레더 재킷", List.of("LEATHER"), List.of("BROWN")),
+                garment("BOTTOM", "미니스커트", List.of(), List.of("BLACK"))));
         result.put("keywords", List.of("레더 재킷"));
-        result.put("materials", List.of("LEATHER"));
-        result.put("colors", List.of("BROWN"));
-        result.put("silhouettes", List.of());
+        result.put("seasons", List.of("FALL"));
         result.put("sentiment", "positive");
         result.put("summary", "레더 아우터가 주목받는다.");
         return result;
+    }
+
+    private static Map<String, Object> garment(String category, String name, List<String> materials, List<String> colors) {
+        Map<String, Object> garment = new HashMap<>();
+        garment.put("category", category);
+        garment.put("item", name);
+        garment.put("materials", materials);
+        garment.put("colors", colors);
+        garment.put("silhouettes", List.of());
+        return garment;
     }
 
     @Test
@@ -81,8 +91,16 @@ class AnalysisServiceTest {
         SourceDocument done = sourceDocumentRepository.findById(doc.getId()).orElseThrow();
         assertThat(done.getStatus()).isEqualTo(SourceDocument.DONE);
         TrendItem item = trendItemRepository.findByDocumentId(doc.getId()).orElseThrow();
-        assertThat(item.getCategory()).isEqualTo("OUTER");
-        assertThat(item.valuesOf(TrendItemValue.MATERIAL)).containsExactly("LEATHER");
+        assertThat(item.getCategory()).isEqualTo("OUTER"); // 대표(첫) 아이템
+        // 아이템마다 카테고리·속성이 따로 저장된다
+        assertThat(item.garments()).extracting(TrendItem.Garment::category, TrendItem.Garment::name)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("OUTER", "레더 재킷"),
+                        org.assertj.core.groups.Tuple.tuple("BOTTOM", "미니스커트"));
+        assertThat(item.garments().get(0).colors()).containsExactly("BROWN");
+        assertThat(item.garments().get(1).colors()).containsExactly("BLACK");
+        assertThat(item.valuesOf(TrendItemValue.SEASON)).containsExactly("FALL");
+        assertThat(item.garments()).allSatisfy(g -> assertThat(g.name()).isNotBlank()); // 시즌은 아이템에 섞이지 않는다
+        assertThat(item.getResultJson()).contains("\"items\"").contains("\"item\" : \"미니스커트\"");
         // 정형 JSON에는 원문 문서의 출처가 붙는다(LLM이 만들지 않는다)
         assertThat(item.getResultJson()).contains("\"media\" : \"보그코리아\"").contains("\"doc_id\" : \"" + done.getDocId() + "\"");
         verify(aiClient).index(any());
@@ -92,7 +110,7 @@ class AnalysisServiceTest {
     void 스키마_검증에_실패하면_다시_시도한다() {
         SourceDocument doc = textDocument();
         Map<String, Object> wrong = validResult();
-        wrong.put("category", "UNKNOWN");
+        wrong.put("items", List.of(garment("UNKNOWN", "재킷", List.of(), List.of())));
         when(aiClient.structure(any(), any())).thenReturn(response(wrong), response(validResult()));
 
         analysisService.analyze(doc.getId());

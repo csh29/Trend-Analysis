@@ -185,7 +185,8 @@ public class AnalysisService {
         }
         doc.markDone();
         sourceDocumentRepository.save(doc);
-        log.info("분석 완료 doc={} category={} keywords={} 토큰 {} | {}", doc.getDocId(), validated.category(),
+        log.info("분석 완료 doc={} 아이템={} keywords={} 토큰 {} | {}", doc.getDocId(),
+                validated.items().stream().map(g -> g.category() + ":" + g.item()).toList(),
                 validated.keywords(), docUsage, totalsText());
     }
 
@@ -210,7 +211,8 @@ public class AnalysisService {
     private AiClient.StructureRequest buildRequest(SourceDocument doc, TrendCodeBook codes) {
         AiClient.AllowedCodes allowed = new AiClient.AllowedCodes(
                 options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.MATERIAL)),
-                options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)));
+                options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)),
+                options(codes.codes(TrendCodes.SEASON)));
         if (doc.isImage()) {
             ImageService.ImageBytes image = imageService.readBytes(doc.getImageId());
             return new AiClient.StructureRequest(doc.getDocId(), doc.getDocType(), model, doc.getTitle(), null,
@@ -234,28 +236,40 @@ public class AnalysisService {
             });
             TrendItem item = TrendItem.builder()
                     .documentId(doc.getId())
-                    .category(v.category())
+                    .category(v.mainCategory()) // 대표(첫) 아이템 — 목록 표시용
                     .sentiment(v.sentiment())
                     .summary(v.summary())
                     .resultJson(resultJson)
                     .model(model)
                     .createdAt(LocalDateTime.now())
                     .build();
-            addValues(item, TrendItemValue.KEYWORD, v.keywords());
-            addValues(item, TrendItemValue.MATERIAL, v.materials());
-            addValues(item, TrendItemValue.COLOR, v.colors());
-            addValues(item, TrendItemValue.SILHOUETTE, v.silhouettes());
+            for (int i = 0; i < v.keywords().size(); i++) {
+                item.addValue(TrendItemValue.KEYWORD, v.keywords().get(i), i);
+            }
+            for (int i = 0; i < v.seasons().size(); i++) {
+                item.addValue(TrendItemValue.SEASON, v.seasons().get(i), i);
+            }
+            for (int no = 0; no < v.items().size(); no++) {
+                TrendResultValidator.Garment g = v.items().get(no);
+                item.addGarmentValue(TrendItemValue.ITEM, g.item(), 0, no, g.category());
+                addGarmentValues(item, TrendItemValue.MATERIAL, g.materials(), no, g.category());
+                addGarmentValues(item, TrendItemValue.COLOR, g.colors(), no, g.category());
+                addGarmentValues(item, TrendItemValue.SILHOUETTE, g.silhouettes(), no, g.category());
+            }
             trendItemRepository.save(item);
         });
     }
 
-    private static void addValues(TrendItem item, String type, List<String> values) {
+    private static void addGarmentValues(TrendItem item, String type, List<String> values, int garmentNo, String category) {
         for (int i = 0; i < values.size(); i++) {
-            item.addValue(type, values.get(i), i);
+            item.addGarmentValue(type, values.get(i), i + 1, garmentNo, category); // 0은 아이템명
         }
     }
 
-    /** 프로세스 정의서 10번 슬라이드의 정형 JSON — 문서 한 건당 하나, source는 원문 문서 값. */
+    /**
+     * 프로세스 정의서 10번 슬라이드의 정형 JSON — 문서 한 건당 하나, source는 원문 문서 값.
+     * 정의서와 달리 category·소재·컬러·실루엣을 의류 아이템 배열(items)로 둔다(2026-10-20 사용자 결정).
+     */
     private String toResultJson(SourceDocument doc, TrendResultValidator.Validated v) {
         Map<String, Object> json = new LinkedHashMap<>();
         json.put("doc_id", doc.getDocId());
@@ -273,11 +287,17 @@ public class AnalysisService {
 
     private static Map<String, Object> structuredMap(TrendResultValidator.Validated v) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("category", v.category());
+        map.put("items", v.items().stream().map(g -> {
+            Map<String, Object> garment = new LinkedHashMap<>();
+            garment.put("category", g.category());
+            garment.put("item", g.item());
+            garment.put("materials", g.materials());
+            garment.put("colors", g.colors());
+            garment.put("silhouettes", g.silhouettes());
+            return garment;
+        }).toList());
         map.put("keywords", v.keywords());
-        map.put("materials", v.materials());
-        map.put("colors", v.colors());
-        map.put("silhouettes", v.silhouettes());
+        map.put("seasons", v.seasons());
         map.put("sentiment", v.sentiment());
         map.put("summary", v.summary());
         return map;

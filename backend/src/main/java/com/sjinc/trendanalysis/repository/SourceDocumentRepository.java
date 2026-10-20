@@ -18,6 +18,9 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     /** 서버가 분석 도중 내려갔으면 대기·처리 중으로 남는다 — 기동 시 다시 맡긴다. */
     List<SourceDocument> findByStatusIn(Collection<String> statuses);
 
+    /** 샘플 데이터(SampleDataLoader)를 이미 넣었는지. */
+    boolean existsByTitleStartingWith(String prefix);
+
     /** 분석 로그의 대기·처리 중 건수. */
     long countByStatus(String status);
 }

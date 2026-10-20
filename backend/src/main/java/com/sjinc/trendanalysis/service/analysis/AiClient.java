@@ -49,7 +49,7 @@ public class AiClient {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AllowedCodes(List<CodeOption> categories, List<CodeOption> materials, List<CodeOption> colors,
-                               List<CodeOption> silhouettes) {
+                               List<CodeOption> silhouettes, List<CodeOption> seasons) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)

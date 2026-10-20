@@ -15,7 +15,11 @@ public record AnalysisView(Long documentId, String docId, String docType, String
     public record Code(String value, String name) {
     }
 
-    public record Result(Code category, List<String> keywords, List<Code> materials, List<Code> colors,
-                         List<Code> silhouettes, String sentiment, String summary, String model, String json) {
+    /** 의류 아이템 하나. */
+    public record Item(Code category, String name, List<Code> materials, List<Code> colors, List<Code> silhouettes) {
+    }
+
+    public record Result(List<Item> items, List<String> keywords, List<Code> seasons, String sentiment, String summary,
+                         String model, String json) {
     }
 }

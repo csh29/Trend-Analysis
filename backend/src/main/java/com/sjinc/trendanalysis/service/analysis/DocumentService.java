@@ -196,19 +196,22 @@ public class DocumentService {
                 .stream().collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
         return docs.stream().collect(Collectors.toMap(SourceDocument::getId, doc -> {
             TrendItem item = items.get(doc.getId());
-            return AnalysisSummary.of(doc, item, item == null ? null : codes.name(TrendCodes.CATEGORY, item.getCategory()));
+            // 코디 사진은 아이템이 여럿이다 — 카테고리 이름을 나온 순서로 이어 보여 준다(예: "상의, 하의")
+            return AnalysisSummary.of(doc, item, item == null ? null : item.garmentCategories().stream()
+                    .map(c -> codes.name(TrendCodes.CATEGORY, c)).collect(Collectors.joining(", ")));
         }));
     }
 
     private AnalysisView toView(SourceDocument doc) {
         AnalysisView.Result result = trendItemRepository.findByDocumentId(doc.getId()).map(item -> {
             TrendCodeBook codes = codeBook();
-            return new AnalysisView.Result(
-                    code(codes, TrendCodes.CATEGORY, item.getCategory()),
-                    item.valuesOf(TrendItemValue.KEYWORD),
-                    codesOf(codes, TrendCodes.MATERIAL, item.valuesOf(TrendItemValue.MATERIAL)),
-                    codesOf(codes, TrendCodes.COLOR, item.valuesOf(TrendItemValue.COLOR)),
-                    codesOf(codes, TrendCodes.SILHOUETTE, item.valuesOf(TrendItemValue.SILHOUETTE)),
+            List<AnalysisView.Item> garments = item.garments().stream().map(g -> new AnalysisView.Item(
+                    code(codes, TrendCodes.CATEGORY, g.category()), g.name(),
+                    codesOf(codes, TrendCodes.MATERIAL, g.materials()),
+                    codesOf(codes, TrendCodes.COLOR, g.colors()),
+                    codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()))).toList();
+            return new AnalysisView.Result(garments, item.valuesOf(TrendItemValue.KEYWORD),
+                    codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
                     item.getSentiment(), item.getSummary(), item.getModel(), item.getResultJson());
         }).orElse(null);
         return new AnalysisView(doc.getId(), doc.getDocId(), doc.getDocType(), doc.getTitle(), doc.getStatus(),

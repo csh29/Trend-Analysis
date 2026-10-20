@@ -15,6 +15,7 @@ public final class TrendCodes {
     public static final String MATERIAL = "TREND_MATERIAL";
     public static final String COLOR = "TREND_COLOR";
     public static final String SILHOUETTE = "TREND_SILHOUETTE";
+    public static final String SEASON = "TREND_SEASON";
 
     /** 카테고리가 맞는 것이 없을 때 LLM이 쓰는 코드(프롬프트 규칙과 같아야 한다). */
     public static final String CATEGORY_ETC = "ETC";
@@ -23,14 +24,17 @@ public final class TrendCodes {
     public static final Map<String, String> VALUE_TYPE_GROUPS = Map.of(
             TrendItemValue.MATERIAL, MATERIAL,
             TrendItemValue.COLOR, COLOR,
-            TrendItemValue.SILHOUETTE, SILHOUETTE);
+            TrendItemValue.SILHOUETTE, SILHOUETTE,
+            TrendItemValue.SEASON, SEASON);
 
-    /** 기본 데이터 초안(DataInitializer가 그룹이 없을 때만 넣는다). 이름의 괄호는 LLM이 같은 뜻의 다른 표기를 이 코드로 옮기게 하는 힌트다. */
+    /**
+     * 기본 데이터 초안(DataInitializer가 그룹이 없을 때만 넣는다). 이름의 괄호는 LLM이 같은 뜻의 다른 표기를 이 코드로 옮기게 하는 힌트다.
+     * 카테고리는 의류만 둔다(신발·가방·액세서리 제외, 2026-10-20 사용자 결정). 이미 넣은 DB는 공통코드 관리에서 사용 안 함으로 바꾼다.
+     */
     public static final Map<String, List<String[]>> SEED = Map.of(
             CATEGORY, List.of(
                     new String[]{"OUTER", "아우터"}, new String[]{"TOP", "상의"}, new String[]{"BOTTOM", "하의"},
-                    new String[]{"DRESS", "원피스"}, new String[]{"SETUP", "셋업·수트"}, new String[]{"SHOES", "신발"},
-                    new String[]{"BAG", "가방"}, new String[]{"ACC", "액세서리"}, new String[]{"ETC", "기타"}),
+                    new String[]{"DRESS", "원피스"}, new String[]{"SETUP", "셋업·수트"}, new String[]{"ETC", "기타"}),
             MATERIAL, List.of(
                     new String[]{"COTTON", "면(코튼)"}, new String[]{"LINEN", "린넨(마)"}, new String[]{"WOOL", "울"},
                     new String[]{"CASHMERE", "캐시미어"}, new String[]{"LEATHER", "레더(가죽)"}, new String[]{"SUEDE", "스웨이드"},
@@ -49,7 +53,11 @@ public final class TrendCodes {
                     new String[]{"OVERSIZED", "오버사이즈"}, new String[]{"REGULAR", "레귤러"}, new String[]{"SLIM", "슬림"},
                     new String[]{"BOXY", "박시"}, new String[]{"WIDE", "와이드"}, new String[]{"CROPPED", "크롭"},
                     new String[]{"LONG", "롱"}, new String[]{"A_LINE", "A라인"}, new String[]{"H_LINE", "H라인"},
-                    new String[]{"FLARE", "플레어"}));
+                    new String[]{"FLARE", "플레어"}),
+            // 여러 개를 고른다(간절기 = 봄·가을). SS/FW는 이 값들을 묶어 본다
+            SEASON, List.of(
+                    new String[]{"SPRING", "봄"}, new String[]{"SUMMER", "여름"}, new String[]{"FALL", "가을"},
+                    new String[]{"WINTER", "겨울"}));
 
     private TrendCodes() {
     }

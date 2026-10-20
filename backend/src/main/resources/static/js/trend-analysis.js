@@ -1,5 +1,5 @@
 /**
- * 분석(P-03 정형화·P-04 색인) 상태 표시와 결과 모달. 이미지 업로드·텍스트 등록 화면이 같이 쓴다.
+ * 분석(P-03 정형화·P-04 색인) 상태 표시와 결과 모달. 이미지 업로드·텍스트 등록 화면이 같이 쓴다(grid.js가 먼저 실려 있어야 한다).
  *
  * 사용법:
  *   TrendAnalysis.badge(status)                       // 상태 뱃지 엘리먼트(대기·분석 중·완료·실패)
@@ -14,6 +14,13 @@
         FAILED: { label: '실패', css: 'failed' }
     };
     const SENTIMENT = { positive: '긍정', neutral: '중립', negative: '부정' };
+    const ITEM_COLUMNS = [
+        { id: 'category', label: '카테고리', width: 90, align: 'center' },
+        { id: 'name', label: '아이템', width: 140 },
+        { id: 'materials', label: '소재', title: true },
+        { id: 'colors', label: '컬러', title: true },
+        { id: 'silhouettes', label: '실루엣', title: true }
+    ];
     const POLL_MS = 5000;
 
     function badge(status) {
@@ -92,16 +99,36 @@
 
         const r = view.result;
         if (r) {
-            addRow(dl, '카테고리', r.category ? r.category.name : '');
-            addRow(dl, '키워드', (r.keywords || []).join(', '));
-            addRow(dl, '소재', names(r.materials));
-            addRow(dl, '컬러', names(r.colors));
-            addRow(dl, '실루엣', names(r.silhouettes));
-            addRow(dl, '감성', SENTIMENT[r.sentiment] || r.sentiment);
             addRow(dl, '요약', r.summary);
+            addRow(dl, '키워드', (r.keywords || []).join(', '));
+            addRow(dl, '시즌', names(r.seasons));
+            addRow(dl, '감성', SENTIMENT[r.sentiment] || r.sentiment);
             addRow(dl, '모델', r.model);
         }
         body.appendChild(dl);
+
+        // 의류 아이템마다 카테고리·소재·컬러·실루엣이 따로 있다(코디 사진의 상의·하의 속성이 섞이지 않게)
+        if (r && r.items && r.items.length) {
+            const title = document.createElement('h3');
+            title.textContent = '의류 아이템 ' + r.items.length + '개';
+            title.style.marginTop = '16px';
+            const table = document.createElement('table');
+            table.className = 'grid';
+            const thead = document.createElement('thead');
+            const tbody = document.createElement('tbody');
+            table.append(thead, tbody);
+            Grid.renderHeader(thead, ITEM_COLUMNS);
+            Grid.render(tbody, ITEM_COLUMNS, r.items.map(function (item) {
+                return {
+                    category: item.category ? item.category.name : '',
+                    name: item.name || '-',
+                    materials: names(item.materials),
+                    colors: names(item.colors),
+                    silhouettes: names(item.silhouettes)
+                };
+            }));
+            body.append(title, table);
+        }
 
         if (r && r.json) {
             const title = document.createElement('h3');

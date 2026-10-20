@@ -64,6 +64,7 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 | --- | --- | --- |
 | 이미지 업로드 | `program/img-upload.html` | `/api/images` |
 | 텍스트 등록 | `program/text-upload.html` | `/api/texts` |
+| 트렌드 분석 | `program/trend-analysis.html` | `/api/trends` |
 
 이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
 파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
@@ -92,6 +93,19 @@ AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끈다(더블
 
 임베딩은 `Qwen/Qwen3-VL-Embedding-2B`(CPU, RAM 약 4.5GB)이고 첫 색인 때 모델(약 4GB)을 내려받는다.
 Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.env`의 `CHROMA_MODE=http`와 `CHROMA_HOST`만 바꾸면 서버형으로 전환된다.
+
+### 트렌드 집계 (P-05)
+
+트렌드 분석 화면에서 주별 언급량 추이(차트), 전주·전월 대비 증감률, 급상승(전주 대비 +20% 이상)·신규를 보고, 행을 누르면 근거 원문을 본다.
+집계는 매일 새벽 3시와 기동 직후에 돌고, 바로 보려면 화면의 "집계"를 누른다.
+
+| 키 | 용도 |
+| --- | --- |
+| `trend.surge.rate` | 급상승 기준(전주 대비 %), 기본 20 |
+| `trend.surge.min-count` | 급상승 최소 언급량, 기본 1 |
+| `trend.aggregate.cron` | 집계 시각, 기본 `0 0 3 * * *` |
+
+확인용 샘플(6주 분량 텍스트 37건, 실제 Claude 분석을 거친다)은 `--trend.sample.load=true`로 한 번 띄우면 들어간다.
 
 ## 관리 화면
 

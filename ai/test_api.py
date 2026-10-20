@@ -16,6 +16,7 @@ ALLOWED = {
     "materials": [{"value": "LEATHER", "name": "레더"}],
     "colors": [{"value": "BROWN", "name": "브라운"}],
     "silhouettes": [{"value": "OVERSIZED", "name": "오버사이즈"}],
+    "seasons": [{"value": "FALL", "name": "가을"}],
 }
 
 
@@ -80,6 +81,25 @@ class ApiTest(unittest.TestCase):
             self.assertEqual(1, res.json()["chunks"])
             self.assertEqual(200, self.client.delete("/index/IMG-1").status_code)
         self.assertEqual({"doc_id": "IMG-1"}, collection.deleted[-1])
+
+    def test_index_stats_and_chunks_are_read_only_views(self):
+        collection = mock.Mock(metadata={"embedding_model": "Qwen/Qwen3-VL-Embedding-2B"})
+        collection.count.return_value = 1
+        collection.get.return_value = {
+            "ids": ["IMG-1#0"], "documents": ["요약"], "metadatas": [{"doc_id": "IMG-1", "chunk_index": 0}],
+            "embeddings": [[0.1] * 2048],
+        }
+        with mock.patch("vector_store.get_collection", return_value=collection):
+            stats = self.client.get("/index/stats").json()
+            items = self.client.get("/index/chunks", params={"doc_id": "IMG-1", "with_embedding": "true"}).json()
+        self.assertEqual(1, stats["chunks"])
+        self.assertEqual("Qwen/Qwen3-VL-Embedding-2B", stats["embedding_model"])
+        self.assertEqual("요약", items[0]["document"])
+        self.assertEqual(2048, items[0]["embedding_dim"])
+        self.assertEqual(8, len(items[0]["embedding_preview"]))  # 벡터 전체는 싣지 않는다
+        self.assertEqual({"doc_id": "IMG-1"}, collection.get.call_args.kwargs["where"])
+        collection.add.assert_not_called()
+        collection.delete.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -1,6 +1,7 @@
 """트렌드 분석 AI 서비스(FastAPI). Spring이 호출한다 — P-03 정형화(/structure), P-04 색인(/index).
 
-실행(ai 폴더에서):  .venv\\Scripts\\python -m uvicorn main:app --host 127.0.0.1 --port 8001
+실행: ai/start-ai.cmd (직접 띄우면 ai 폴더에서 .venv\\Scripts\\python -m uvicorn main:app --host 127.0.0.1 --port 8001)
+색인 데이터 확인: 브라우저에서 http://127.0.0.1:8001/docs → GET /index/stats, GET /index/chunks (읽기 전용)
 - 127.0.0.1에만 연다. 내장형 Chroma는 한 프로세스만 열어야 하므로 워커는 1개로 띄운다(--workers를 주지 않는다).
 - Claude API 키는 Spring의 claude.api.key를 X-Claude-Api-Key 헤더로 받는다. 키를 로그·응답에 남기지 않는다.
 """
@@ -9,7 +10,7 @@ import binascii
 import logging
 import time
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 import image_prep
@@ -34,6 +35,7 @@ class AllowedCodes(BaseModel):
     materials: list[CodeOptionModel] = Field(min_length=1)
     colors: list[CodeOptionModel] = Field(min_length=1)
     silhouettes: list[CodeOptionModel] = Field(min_length=1)
+    seasons: list[CodeOptionModel] = Field(min_length=1)
 
 
 class StructureRequest(BaseModel):
@@ -95,6 +97,7 @@ def structure_document(req: StructureRequest, x_claude_api_key: str | None = Hea
         materials=[CodeOption(o.value, o.name) for o in req.allowed.materials],
         colors=[CodeOption(o.value, o.name) for o in req.allowed.colors],
         silhouettes=[CodeOption(o.value, o.name) for o in req.allowed.silhouettes],
+        seasons=[CodeOption(o.value, o.name) for o in req.allowed.seasons],
     )
     log.info("정형화 시작 doc_id=%s type=%s model=%s 판단 후보: %s", req.doc_id, req.doc_type, req.model,
              candidate_counts(data))
@@ -118,6 +121,25 @@ def index_document(req: IndexRequest):
                                    req.structured, req.names, req.meta)
     log.info("색인 완료 doc_id=%s 청크 %d개 임베딩 소요=%.1fs", req.doc_id, count, time.monotonic() - started)
     return {"doc_id": req.doc_id, "chunks": count}
+
+
+@app.get("/index/stats")
+def index_stats():
+    """색인 현황(확인용). 브라우저에서 http://127.0.0.1:8001/docs 로 열어 본다."""
+    collection = vector_store.get_collection()
+    return {
+        "collection": settings.chroma_collection,
+        "chroma_mode": settings.chroma_mode,
+        "embedding_model": (collection.metadata or {}).get("embedding_model"),
+        "chunks": collection.count(),
+    }
+
+
+@app.get("/index/chunks")
+def index_chunks(doc_id: str | None = None, limit: int = Query(default=20, ge=1, le=200), offset: int = Query(default=0, ge=0),
+                 with_embedding: bool = False):
+    """저장된 청크 조회(읽기 전용). doc_id로 거르고, with_embedding=true면 벡터 차원·앞부분을 같이 준다."""
+    return indexer.list_chunks(vector_store.get_collection(), doc_id, limit, offset, with_embedding)
 
 
 @app.delete("/index/{doc_id}")

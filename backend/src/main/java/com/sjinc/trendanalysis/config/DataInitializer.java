@@ -15,6 +15,8 @@ import com.sjinc.trendanalysis.service.program.ProgramService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -27,6 +29,7 @@ import java.util.List;
  * 사람이 고쳤을 수 있으므로 덮어쓰지 않는다. 비밀번호는 소스에 두지 않고 최초 생성 때 무작위로 만들어 로그로만 알린다.
  */
 @Component
+@Order(Ordered.HIGHEST_PRECEDENCE) // 다른 기동 작업(샘플 등록 등)이 공통코드·프로그램을 쓰기 전에 먼저 심는다
 @RequiredArgsConstructor
 @Slf4j
 public class DataInitializer implements CommandLineRunner {
@@ -88,8 +91,9 @@ public class DataInitializer implements CommandLineRunner {
 
     /** 트렌드 항목 표준 코드(카테고리·소재·컬러·실루엣) 초안. 그룹 단위로 없을 때만 넣는다 — 화면에서 고친 값을 덮어쓰지 않는다. */
     private void seedTrendCodesIfAbsent() {
-        List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE);
-        List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣");
+        List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE,
+                TrendCodes.SEASON);
+        List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣", "트렌드 시즌");
         for (int g = 0; g < groups.size(); g++) {
             String group = groups.get(g);
             if (comCdGroupRepository.existsById(group)) continue;
@@ -122,6 +126,15 @@ public class DataInitializer implements CommandLineRunner {
                     .searchYn("Y").newYn("Y").saveYn("N").deleteYn("Y").resetYn("Y")
                     .build()));
             log.info("프로그램 text-upload(텍스트 등록)를 등록했습니다.");
+        }
+        // P-05 트렌드 분석. "집계"(기타1)는 일 1회 배치를 기다리지 않고 바로 다시 집계한다.
+        if (!programRepository.existsById("trend-analysis")) {
+            added.add(programRepository.save(Program.builder()
+                    .programId("trend-analysis").programNm("트렌드 분석").url("/program/trend-analysis").sortOrder(3).useYn("Y")
+                    .menuGroup(Program.GROUP_TREND).icon("📈")
+                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("N").resetYn("Y").etc1Nm("집계")
+                    .build()));
+            log.info("프로그램 trend-analysis(트렌드 분석)를 등록했습니다.");
         }
     }
 

@@ -46,6 +46,19 @@ New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 $outLog = Join-Path $logDir "ai-server.log"
 $errLog = Join-Path $logDir "ai-server.err.log"
 
+# 리다이렉트는 파일을 새로 쓰므로, 이전 기동의 로그(토큰 사용량 등)를 날짜를 붙여 보관한다. 최근 20개만 둔다
+$archiveDir = Join-Path $logDir "archive"
+$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+foreach ($log in @($outLog, $errLog)) {
+    if ((Test-Path -LiteralPath $log) -and (Get-Item -LiteralPath $log).Length -gt 0) {
+        New-Item -ItemType Directory -Force -Path $archiveDir | Out-Null
+        $name = [IO.Path]::GetFileNameWithoutExtension($log) + ".$stamp.log"
+        Move-Item -LiteralPath $log -Destination (Join-Path $archiveDir $name) -Force
+    }
+}
+Get-ChildItem -LiteralPath $archiveDir -Filter "*.log" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -Skip 20 | Remove-Item -Force
+
 $env:PYTHONIOENCODING = "utf-8"  # 한글 로그가 시스템 인코딩(MS949)으로 깨지지 않게
 # 워커는 1개(--workers 없음) — 내장형 Chroma 폴더는 한 프로세스만 열어야 안전하다
 $proc = Start-Process -FilePath $python `

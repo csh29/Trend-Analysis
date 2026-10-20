@@ -96,7 +96,7 @@
                 title: function (value, row) { return row.analysis && row.analysis.failReason; },
                 render: function (value, row) { return TrendAnalysis.badge(row.analysis && row.analysis.status); }
             },
-            { id: 'categoryName', label: '카테고리', width: 100, align: 'center' },
+            { id: 'categoryName', label: '카테고리', width: 120, align: 'center', title: true },
             { id: 'keywordsText', label: '키워드', title: true },
             { id: 'media', label: '매체', width: 100, align: 'center' },
             { id: 'publishedAt', label: '게시일', width: 100, align: 'center' },
