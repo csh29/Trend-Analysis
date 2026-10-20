@@ -1,7 +1,9 @@
 package com.sjinc.trendanalysis.controller;
 
+import com.sjinc.trendanalysis.dto.analysis.AnalysisView;
 import com.sjinc.trendanalysis.dto.image.ImageView;
 import com.sjinc.trendanalysis.security.RequiresProgram;
+import com.sjinc.trendanalysis.service.analysis.DocumentService;
 import com.sjinc.trendanalysis.service.image.ImageService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -31,6 +33,7 @@ import java.util.List;
 public class ImageController {
 
     private final ImageService imageService;
+    private final DocumentService documentService;
 
     @GetMapping
     public List<ImageView> getImages() {
@@ -57,5 +60,17 @@ public class ImageController {
     @DeleteMapping
     public void delete(@RequestBody List<Long> ids) {
         imageService.delete(ids);
+    }
+
+    /** 분석(P-03) 결과 보기 — 정형 결과·출처·상태. */
+    @GetMapping("/{id}/analysis")
+    public AnalysisView getAnalysis(@PathVariable Long id) {
+        return documentService.getImageAnalysis(id);
+    }
+
+    /** 실패했거나 결과가 마음에 들지 않을 때 다시 분석한다(대기열에 넣고 바로 돌아간다). */
+    @PostMapping("/{id}/reanalyze")
+    public void reanalyze(@PathVariable Long id) {
+        documentService.reanalyzeImage(id);
     }
 }

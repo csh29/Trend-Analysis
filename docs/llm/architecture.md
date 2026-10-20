@@ -56,6 +56,29 @@
 - 상태 변경 요청(POST/PUT/PATCH/DELETE)에 `X-XSRF-TOKEN` 헤더를 붙인다.
 - 401 응답이면 창 전체(`window.top`)를 `/login`으로 보낸다.
 
+### 분석 (P-03 AI 정형화 · P-04 저장·색인)
+
+```
+업로드/등록 ─▶ DocumentService: source_documents(PENDING) 저장 ─▶ AnalysisRequestedEvent
+                                                                    │ (analysisExecutor, 동시 2건)
+AnalysisService.analyze ─▶ AiClient POST /structure ─▶ FastAPI ─▶ Claude Structured Output
+        │  (X-Claude-Api-Key 헤더, 공통코드 허용값, 이미지는 base64)
+        ├─ TrendResultValidator 검증 실패 / 일시 오류 → 재시도(최대 ai.analysis.max-attempts, 기본 3)
+        ├─ 재시도 불가(키 오류·거절·형식 오류 400) → FAILED + 사유
+        ├─ 통과 → trend_items·trend_item_values 저장(짧은 트랜잭션, 재분석이면 갈아끼움)
+        └─ AiClient POST /index ─▶ FastAPI ─▶ Chroma(문서 ID 단위 갈아끼움) → DONE (실패면 FAILED "색인 실패")
+```
+
+- 업로드·등록 요청은 분석을 기다리지 않는다. 문서 저장이 커밋된 뒤 이벤트를 내야 분석 스레드가 읽을 수 있어서, `DocumentService`의 등록은 트랜잭션으로 감싸지 않는다.
+- 외부 호출(AI 서비스)은 트랜잭션 밖에서 하고, 트렌드 항목 저장만 `TransactionTemplate`으로 짧게 묶는다.
+- 서버가 분석 도중 내려가면 PENDING·PROCESSING이 남는다. 기동이 끝나면(`ApplicationReadyEvent`) 다시 대기열에 넣는다.
+- **Claude API 키**는 Spring `claude.api.key` 한 곳에만 있다. 요청마다 헤더로 넘기고 AI 서비스는 저장하지 않는다. 키가 비어 있으면 AI 서비스를 부르지 않고 바로 실패 사유를 남긴다.
+- **표준 코드:** 카테고리·소재·컬러·실루엣은 공통코드 값만 저장한다. 분석할 때마다 사용중 코드를 읽어 Claude 스키마의 enum으로 넘기므로, 공통코드 관리에서 값을 바꾸면 재기동 없이 다음 분석부터 적용된다. 코드 이름의 괄호(예: "레더(가죽)")는 같은 뜻의 다른 표기를 그 코드로 옮기게 하는 힌트다.
+- **출처(source)**는 LLM이 만들지 않는다. Spring이 원문 문서 값으로 정형 JSON에 붙인다(프로세스 정의서 10번 슬라이드 형식).
+- **색인 청크:** 문서마다 정형 결과를 문장으로 만든 요약 청크 1개(코드값 대신 이름 — 한국어 질문과 맞추기 위해), 텍스트는 본문 청크(500자, 80자 겹침)를 더 넣는다.
+- **Chroma 전환:** `ai/vector_store.py`의 `create_client`만 클라이언트를 만든다. `CHROMA_MODE=embedded`(로컬 폴더) ↔ `http`(Chroma 서버)는 `ai/.env` 값만 바꾼다. 컬렉션 메타데이터에 임베딩 모델을 남기고, 다른 모델로 열면 기동을 막는다(섞이면 검색이 조용히 틀린다).
+- **임베딩:** `ai/embedding.py`의 `create_embedding_function`이 `EMBEDDING_MODEL` 이름으로 구현을 고른다. Qwen3-VL-Embedding은 문서는 그대로, 검색 질의에만 영어 지시문을 붙인다(Chroma가 질의 때 `embed_query`를 부른다). 지금은 텍스트만 넣는다 — 이미지 자체 임베딩은 아직 안 한다.
+
 ## 3. 모듈 관계
 
 ### 메뉴·권한 데이터
@@ -95,4 +118,5 @@ programs (program_id = 화면 id = 템플릿 이름)
 | `tabs.js` | — | 홈 탭 셸 |
 | `modal-drag.js` | — | `.modal` 제목줄 드래그 |
 | `xlsx-writer.js`, `zip-writer.js` | `XlsxWriter`, `ZipWriter` | 엑셀 다운로드 |
+| `trend-analysis.js` | `TrendAnalysis` | 분석 상태 뱃지, 결과 모달(재분석 포함), 끝나지 않은 행 자동 새로고침 |
 | `code-highlight.js` | `CodeHighlight` | 코드 강조(참조 프로젝트에서 가져왔고, 아직 쓰는 화면이 없다) |

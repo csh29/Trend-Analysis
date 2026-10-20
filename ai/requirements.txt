@@ -1,0 +1,17 @@
+# 버전을 고정한다 — Chroma는 서버형으로 전환할 때 서버와 같은 버전이어야 하고(chroma-embedded-then-server),
+# 임베딩 결과가 라이브러리 버전에 따라 달라지면 기존 색인과 검색이 어긋난다.
+# torch는 CPU 빌드다(이 PC GPU는 VRAM 2GB라 모델이 안 올라간다). GPU 서버면 이 줄과 torch 버전을 CUDA 빌드로 바꾼다.
+--extra-index-url https://download.pytorch.org/whl/cpu
+anthropic==1.15.0
+chromadb==1.5.9
+fastapi==0.150.0
+fastembed==0.9.0
+pillow==12.3.0
+pydantic==2.14.1
+uvicorn[standard]==0.54.0
+# 임베딩 Qwen/Qwen3-VL-Embedding-2B (sentence-transformers 경유, torchvision은 Qwen3-VL 프로세서가 요구)
+torch==2.14.1
+torchvision==0.29.1
+transformers==5.20.2
+sentence-transformers==6.1.0
+qwen-vl-utils==0.0.14

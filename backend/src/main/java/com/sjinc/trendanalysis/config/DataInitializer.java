@@ -10,6 +10,7 @@ import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.ProgramRepository;
 import com.sjinc.trendanalysis.repository.UserProgramPermissionRepository;
 import com.sjinc.trendanalysis.repository.UserRepository;
+import com.sjinc.trendanalysis.service.analysis.TrendCodes;
 import com.sjinc.trendanalysis.service.program.ProgramService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -45,6 +46,7 @@ public class DataInitializer implements CommandLineRunner {
         seedRoleIfAbsent();
         seedMenuGroupIfAbsent();
         seedTrendMenuGroupIfAbsent();
+        seedTrendCodesIfAbsent();
         List<Program> added = seedManagementProgramsIfAbsent();
         seedTrendProgramsIfAbsent(added);
         if (seedAdminIfAbsent()) return; // 새 관리자는 이미 모든 프로그램 권한을 받았다
@@ -84,15 +86,43 @@ public class DataInitializer implements CommandLineRunner {
         log.info("메뉴 그룹 {}(트렌드 분석)을 추가했습니다.", Program.GROUP_TREND);
     }
 
-    /** 트렌드 분석 그룹 화면. 이미지 업로드는 "업로드"를 기타1 버튼으로 쓴다(저장과 동작이 달라서). */
+    /** 트렌드 항목 표준 코드(카테고리·소재·컬러·실루엣) 초안. 그룹 단위로 없을 때만 넣는다 — 화면에서 고친 값을 덮어쓰지 않는다. */
+    private void seedTrendCodesIfAbsent() {
+        List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE);
+        List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣");
+        for (int g = 0; g < groups.size(); g++) {
+            String group = groups.get(g);
+            if (comCdGroupRepository.existsById(group)) continue;
+            comCdGroupRepository.save(ComCdGroup.builder()
+                    .codeGroup(group).groupName(names.get(g)).sortOrder(10 + g).useYn("Y")
+                    .remark("AI 정형화(P-03)가 이 코드값 중에서만 고른다. 이름의 괄호는 같은 뜻의 다른 표기 힌트").build());
+            int sort = 1;
+            for (String[] code : TrendCodes.SEED.get(group)) {
+                comCdRepository.save(ComCd.builder().codeGroup(group)
+                        .codeValue(code[0]).codeName(code[1]).sortOrder(sort++).useYn("Y").build());
+            }
+            log.info("공통코드 {}({})를 추가했습니다.", group, names.get(g));
+        }
+    }
+
+    /** 트렌드 분석 그룹 화면. 이미지 업로드는 "업로드"를 기타1 버튼으로 쓴다(저장과 동작이 달라서). 화면별로 없을 때만 넣는다. */
     private void seedTrendProgramsIfAbsent(List<Program> added) {
-        if (programRepository.existsById("img-upload")) return;
-        added.add(programRepository.save(Program.builder()
-                .programId("img-upload").programNm("이미지 업로드").url("/program/img-upload").sortOrder(1).useYn("Y")
-                .menuGroup(Program.GROUP_TREND).icon("🖼")
-                .searchYn("Y").newYn("N").saveYn("N").deleteYn("Y").resetYn("Y").etc1Nm("업로드")
-                .build()));
-        log.info("프로그램 img-upload(이미지 업로드)를 등록했습니다.");
+        if (!programRepository.existsById("img-upload")) {
+            added.add(programRepository.save(Program.builder()
+                    .programId("img-upload").programNm("이미지 업로드").url("/program/img-upload").sortOrder(1).useYn("Y")
+                    .menuGroup(Program.GROUP_TREND).icon("🖼")
+                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("Y").resetYn("Y").etc1Nm("업로드")
+                    .build()));
+            log.info("프로그램 img-upload(이미지 업로드)를 등록했습니다.");
+        }
+        if (!programRepository.existsById("text-upload")) {
+            added.add(programRepository.save(Program.builder()
+                    .programId("text-upload").programNm("텍스트 등록").url("/program/text-upload").sortOrder(2).useYn("Y")
+                    .menuGroup(Program.GROUP_TREND).icon("📝")
+                    .searchYn("Y").newYn("Y").saveYn("N").deleteYn("Y").resetYn("Y")
+                    .build()));
+            log.info("프로그램 text-upload(텍스트 등록)를 등록했습니다.");
+        }
     }
 
     /** 관리 그룹 화면 5종. 없을 때만 넣어 사람이 고친 이름·순서를 덮어쓰지 않는다. */

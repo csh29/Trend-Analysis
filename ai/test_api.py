@@ -1,0 +1,86 @@
+"""FastAPI 엔드포인트 테스트 — Claude 호출과 Chroma는 가짜로 바꿔 끼운다. 실행: .venv\\Scripts\\python -m unittest"""
+import base64
+import io
+import unittest
+from unittest import mock
+
+from fastapi.testclient import TestClient
+from PIL import Image
+
+import main
+from structurer import StructuringError
+from test_core import FakeCollection
+
+ALLOWED = {
+    "categories": [{"value": "OUTER", "name": "아우터"}],
+    "materials": [{"value": "LEATHER", "name": "레더"}],
+    "colors": [{"value": "BROWN", "name": "브라운"}],
+    "silhouettes": [{"value": "OVERSIZED", "name": "오버사이즈"}],
+}
+
+
+def png_base64() -> str:
+    buffer = io.BytesIO()
+    Image.new("RGB", (20, 20)).save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode()
+
+
+class ApiTest(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(main.app)
+
+    def test_health(self):
+        self.assertEqual("ok", self.client.get("/health").json()["status"])
+
+    def test_structure_without_api_key_is_401(self):
+        res = self.client.post("/structure", json={"doc_id": "T", "doc_type": "TEXT", "model": "m", "text": "a",
+                                                   "allowed": ALLOWED})
+        self.assertEqual(401, res.status_code)
+        self.assertFalse(res.json()["detail"]["retryable"])
+
+    def test_structure_passes_key_and_returns_result(self):
+        with mock.patch.object(main, "structure", return_value=({"category": "OUTER"}, {"input_tokens": 1, "output_tokens": 1})) as s:
+            res = self.client.post("/structure", headers={"X-Claude-Api-Key": "secret"},
+                                   json={"doc_id": "IMG-1", "doc_type": "IMAGE", "model": "claude-sonnet-5",
+                                         "image_base64": png_base64(), "image_media_type": "image/png", "allowed": ALLOWED})
+        self.assertEqual(200, res.status_code)
+        self.assertEqual("OUTER", res.json()["result"]["category"])
+        self.assertEqual("secret", s.call_args.args[1])
+        self.assertNotIn("secret", res.text)
+
+    def test_structuring_error_keeps_retryable_flag(self):
+        with mock.patch.object(main, "structure", side_effect=StructuringError("일시 오류", retryable=True)):
+            res = self.client.post("/structure", headers={"X-Claude-Api-Key": "k"},
+                                   json={"doc_id": "T", "doc_type": "TEXT", "model": "m", "text": "본문", "allowed": ALLOWED})
+        self.assertEqual(502, res.status_code)
+        self.assertTrue(res.json()["detail"]["retryable"])
+        self.assertNotIn("usage", res.json()["detail"])  # Claude 응답 전 실패면 사용량이 없다
+
+    def test_structuring_error_passes_usage_when_tokens_were_spent(self):
+        error = StructuringError("거절", retryable=False, status_code=422, usage={"input_tokens": 7, "output_tokens": 3})
+        with mock.patch.object(main, "structure", side_effect=error):
+            res = self.client.post("/structure", headers={"X-Claude-Api-Key": "k"},
+                                   json={"doc_id": "T", "doc_type": "TEXT", "model": "m", "text": "본문", "allowed": ALLOWED})
+        self.assertEqual(422, res.status_code)
+        self.assertEqual(7, res.json()["detail"]["usage"]["input_tokens"])
+
+    def test_empty_text_and_broken_image_are_400(self):
+        headers = {"X-Claude-Api-Key": "k"}
+        self.assertEqual(400, self.client.post("/structure", headers=headers, json={
+            "doc_id": "T", "doc_type": "TEXT", "model": "m", "text": "  ", "allowed": ALLOWED}).status_code)
+        self.assertEqual(400, self.client.post("/structure", headers=headers, json={
+            "doc_id": "I", "doc_type": "IMAGE", "model": "m", "image_base64": base64.b64encode(b"not image").decode(),
+            "image_media_type": "image/png", "allowed": ALLOWED}).status_code)
+
+    def test_index_and_delete(self):
+        collection = FakeCollection()
+        with mock.patch("vector_store.get_collection", return_value=collection):
+            res = self.client.post("/index", json={"doc_id": "IMG-1", "doc_type": "IMAGE",
+                                                   "structured": {"summary": "요약", "keywords": ["k"]}})
+            self.assertEqual(1, res.json()["chunks"])
+            self.assertEqual(200, self.client.delete("/index/IMG-1").status_code)
+        self.assertEqual({"doc_id": "IMG-1"}, collection.deleted[-1])
+
+
+if __name__ == "__main__":
+    unittest.main()

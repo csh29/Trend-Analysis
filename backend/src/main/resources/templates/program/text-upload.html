@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>텍스트 등록 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css가 담당한다. 여기는 등록 모달 입력칸만. */
+        .text-modal{ max-width:720px; }
+        .form-grid{ display:grid; grid-template-columns:90px 1fr; gap:10px 12px; align-items:center; font-size:12.5px; }
+        .form-grid label{ font-weight:700; color:var(--text-sub); }
+        .form-grid input, .form-grid textarea{
+            width:100%; padding:7px 10px; border:1px solid var(--line); border-radius:3px;
+            font-size:12.5px; font-family:inherit; color:var(--text);
+        }
+        .form-grid textarea{ min-height:260px; resize:vertical; line-height:1.6; }
+        .form-grid input:focus, .form-grid textarea:focus{ outline:none; border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+        .form-grid .full{ grid-column:1 / -1; }
+        .form-hint{ font-size:11.5px; color:var(--text-sub); }
+        .body-tools{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .body-tools input[type="file"]{ display:none; }
+    </style>
+</head>
+<body>
+<!-- 텍스트 원문(기사·리포트 본문 등)을 붙여넣거나 .txt로 등록하면 AI 분석(P-03 정형화·P-04 색인)이 뒤에서 돈다. -->
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section class="panel-head">
+            <div class="panel-title">등록한 텍스트</div>
+        </section>
+
+        <section>
+            <table class="grid">
+                <thead id="textGridHead"></thead>
+                <tbody id="textGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<div class="modal-backdrop" id="textBackdrop">
+    <form class="modal text-modal" id="textForm" autocomplete="off">
+        <h3>텍스트 등록</h3>
+        <div class="form-grid">
+            <label for="fldTextTitle">제목</label>
+            <input type="text" id="fldTextTitle" maxlength="200" placeholder="비우면 본문 앞부분으로 채웁니다">
+            <label for="fldTextMedia">매체명</label>
+            <input type="text" id="fldTextMedia" maxlength="100" placeholder="비우면 '직접 등록'">
+            <label for="fldTextPublished">게시일</label>
+            <input type="date" id="fldTextPublished">
+            <label for="fldTextUrl">원문 URL</label>
+            <input type="text" id="fldTextUrl" maxlength="500" placeholder="https://...">
+            <div class="full body-tools">
+                <span class="form-hint" id="bodyCount">0자 / 최대 50,000자</span>
+                <label class="btn" for="txtFile">.txt 불러오기</label>
+                <input type="file" id="txtFile" accept=".txt,text/plain">
+            </div>
+            <textarea class="full" id="fldTextBody" placeholder="분석할 본문을 붙여넣으세요"></textarea>
+        </div>
+        <div class="modal-actions">
+            <button type="submit" class="btn primary">등록</button>
+            <button type="button" class="btn" id="textCancel">취소</button>
+        </div>
+    </form>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/search-form.js"></script>
+<script src="/js/trend-analysis.js"></script>
+<script>
+    (function () {
+        const API_URL = '/api/texts';
+        const MAX_BODY = 50000;
+        const gridBody = document.getElementById('textGridBody');
+
+        function formatDateTime(value) {
+            return value ? String(value).replace('T', ' ').substring(0, 19) : '';
+        }
+
+        const COLUMNS = [
+            { type: 'row-select', width: 36, align: 'center' },
+            { id: 'docId', label: '문서 ID', width: 170, align: 'center' },
+            { id: 'title', label: '제목', title: true },
+            {
+                id: 'statusText', label: '분석', width: 80, align: 'center',
+                title: function (value, row) { return row.analysis && row.analysis.failReason; },
+                render: function (value, row) { return TrendAnalysis.badge(row.analysis && row.analysis.status); }
+            },
+            { id: 'categoryName', label: '카테고리', width: 100, align: 'center' },
+            { id: 'keywordsText', label: '키워드', title: true },
+            { id: 'media', label: '매체', width: 100, align: 'center' },
+            { id: 'publishedAt', label: '게시일', width: 100, align: 'center' },
+            { id: 'registeredBy', label: '등록자', width: 90, align: 'center' },
+            { id: 'registeredAtText', label: '등록일시', width: 150, align: 'center' }
+        ];
+
+        Grid.renderHeader(document.getElementById('textGridHead'), COLUMNS);
+
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'title', label: '제목', type: 'text' },
+            { id: 'keywordsText', label: '키워드', type: 'text' }
+        ], { onSearch: searchTexts });
+
+        function renderRows(texts) {
+            const rows = (texts || []).map(function (text) {
+                const analysis = text.analysis || {};
+                return Object.assign({}, text, {
+                    statusText: analysis.status || '',
+                    categoryName: analysis.categoryName || '',
+                    keywordsText: (analysis.keywords || []).join(', '),
+                    registeredAtText: formatDateTime(text.registeredAt)
+                });
+            }).filter(search.matches);
+            Grid.render(gridBody, COLUMNS, rows, {
+                emptyMessage: '등록한 텍스트가 없습니다.',
+                onRowClick: function (tr, row) {
+                    TrendAnalysis.openResult({
+                        analysisUrl: API_URL + '/' + row.id + '/analysis',
+                        reanalyzeUrl: API_URL + '/' + row.id + '/reanalyze',
+                        onChanged: searchTexts
+                    });
+                }
+            });
+            TrendAnalysis.pollWhilePending(rows.map(function (r) { return r.statusText; }), searchTexts);
+        }
+
+        /** silent면 스피너 없이 — 분석 진행 상황을 자동으로 다시 읽을 때. */
+        function searchTexts(silent) {
+            fetch(API_URL, { silent: silent === true })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(renderRows)
+                .catch(function (err) {
+                    if (silent !== true) alert(err.message);
+                });
+        }
+
+        // ── 등록 모달 ───────────────────────────────────────────────
+
+        const backdrop = document.getElementById('textBackdrop');
+        const form = document.getElementById('textForm');
+        const bodyField = document.getElementById('fldTextBody');
+        const bodyCount = document.getElementById('bodyCount');
+
+        function updateCount() {
+            bodyCount.textContent = bodyField.value.length.toLocaleString() + '자 / 최대 50,000자';
+            bodyCount.style.color = bodyField.value.length > MAX_BODY ? 'var(--accent)' : '';
+        }
+
+        function openForm() {
+            form.reset();
+            // toISOString은 UTC라 한국 시간 오전 9시 전에는 어제가 된다 — 로컬 날짜로 만든다
+            const now = new Date();
+            document.getElementById('fldTextPublished').value = now.getFullYear() + '-'
+                + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+            updateCount();
+            backdrop.classList.add('open');
+            bodyField.focus();
+        }
+
+        function closeForm() {
+            backdrop.classList.remove('open');
+        }
+
+        bodyField.addEventListener('input', updateCount);
+        document.getElementById('textCancel').addEventListener('click', closeForm);
+        backdrop.addEventListener('click', function (e) { if (e.target === backdrop) closeForm(); });
+        form.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeForm(); });
+
+        // .txt는 브라우저에서 읽어 본문 칸에 넣는다 — 서버로 파일을 보내지 않고 등록 전에 내용을 확인·수정할 수 있게.
+        document.getElementById('txtFile').addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            e.target.value = '';
+            if (!file) return;
+            file.text().then(function (text) {
+                bodyField.value = text;
+                if (!document.getElementById('fldTextTitle').value) {
+                    document.getElementById('fldTextTitle').value = file.name.replace(/\.txt$/i, '');
+                }
+                updateCount();
+            });
+        });
+
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            const body = bodyField.value.trim();
+            if (!body) {
+                alert('본문을 입력하세요.');
+                bodyField.focus();
+                return;
+            }
+            if (body.length > MAX_BODY) {
+                alert('본문은 50,000자까지 등록할 수 있습니다.');
+                return;
+            }
+            const payload = {
+                title: document.getElementById('fldTextTitle').value.trim(),
+                body: body,
+                media: document.getElementById('fldTextMedia').value.trim(),
+                publishedAt: document.getElementById('fldTextPublished').value || null,
+                url: document.getElementById('fldTextUrl').value.trim()
+            };
+            fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '등록에 실패했습니다.'); });
+                    closeForm();
+                    alert('등록했습니다. AI 분석은 뒤에서 진행되며 목록의 분석 칸에 결과가 표시됩니다.');
+                    searchTexts();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        });
+
+        function deleteSelected() {
+            const ids = Grid.getRows(gridBody)
+                .filter(function (row) { return row._selected; })
+                .map(function (row) { return row.id; });
+            if (ids.length === 0) {
+                alert('삭제할 텍스트를 목록에서 선택하세요.');
+                return;
+            }
+            if (!confirm('선택한 텍스트 ' + ids.length + '건을 삭제하시겠습니까? 분석 결과와 색인도 함께 지워집니다.')) {
+                return;
+            }
+            fetch(API_URL, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ids)
+            })
+                .then(function (res) {
+                    if (!res.ok) throw new Error('삭제에 실패했습니다.');
+                    searchTexts();
+                })
+                .catch(function (err) {
+                    alert(err.message);
+                });
+        }
+
+        PageButtons.bind({
+            btnSearch: searchTexts,
+            btnAdd: openForm,
+            btnDelete: deleteSelected,
+            btnReset: function () {
+                search.reset();
+                searchTexts();
+            }
+        });
+
+        searchTexts();
+    })();
+</script>
+</body>
+</html>

@@ -9,6 +9,8 @@ import org.springframework.http.MediaType;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import com.sjinc.trendanalysis.service.analysis.AiClient;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.List;
@@ -41,6 +43,10 @@ class ImageApiTest {
     @Autowired
     private MockMvc mockMvc;
 
+    /** 업로드하면 분석 대기열에 들어간다 — 실제 AI 서비스를 부르지 않게 가짜로 바꿔 끼운다. */
+    @MockBean
+    private AiClient aiClient;
+
     /** "files"라는 같은 이름으로 여러 파일을 담은 업로드 요청(CSRF 포함). */
     private static MockHttpServletRequestBuilder upload(MockMultipartFile... files) {
         var builder = multipart("/api/images");
@@ -64,6 +70,8 @@ class ImageApiTest {
                 .andExpect(jsonPath("$[1].originalName").value("look2.jpg"))
                 .andExpect(jsonPath("$[1].contentType").value("image/jpeg"))
                 .andExpect(content().string(not(containsString("storedName"))))
+                // 업로드한 이미지마다 분석 문서가 생긴다(출처는 업로드 정보로 대신)
+                .andExpect(jsonPath("$[0].analysis.docId").value(org.hamcrest.Matchers.startsWith("IMG-")))
                 .andReturn().getResponse().getContentAsString();
         Number pngId = JsonPath.read(body, "$[0].id");
         Number jpgId = JsonPath.read(body, "$[1].id");

@@ -10,6 +10,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnDefault;
 
 /** 테이블명을 "user"로 두면 H2 등 다수 DB의 예약어와 충돌해서 DDL이 깨지므로 "users"로 분리. */
 @Entity
@@ -40,9 +41,13 @@ public class User {
     @Column(nullable = false)
     private String role;
 
-    /** 사용여부(Y/N). N이면 로그인할 수 없다. */
+    /**
+     * 사용여부(Y/N). N이면 로그인할 수 없다. 기본값은 @ColumnDefault로 준다 — columnDefinition에 "default 'Y' not null"까지
+     * 넣으면 ddl-auto=update가 컬럼 타입을 맞출 때 그 문자열을 "set data type" 뒤에 그대로 붙여 H2 문법 오류가 났다.
+     */
     @Builder.Default
-    @Column(name = "use_yn", nullable = false, columnDefinition = "varchar(1) default 'Y' not null")
+    @ColumnDefault("'Y'")
+    @Column(name = "use_yn", nullable = false, length = 1)
     private String useYn = "Y";
 
     public boolean isActive() {

@@ -1,8 +1,10 @@
 package com.sjinc.trendanalysis.service.image;
 
 import com.sjinc.trendanalysis.domain.UploadedImage;
+import com.sjinc.trendanalysis.dto.analysis.AnalysisSummary;
 import com.sjinc.trendanalysis.dto.image.ImageView;
 import com.sjinc.trendanalysis.repository.UploadedImageRepository;
+import com.sjinc.trendanalysis.service.analysis.DocumentService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.PathResource;
@@ -19,6 +21,7 @@ import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -34,16 +37,25 @@ public class ImageService {
     private static final int MAX_NAME_LENGTH = 200;
 
     private final UploadedImageRepository uploadedImageRepository;
+    private final DocumentService documentService;
     private final Path uploadDir;
 
-    public ImageService(UploadedImageRepository uploadedImageRepository,
+    public ImageService(UploadedImageRepository uploadedImageRepository, DocumentService documentService,
                         @Value("${image.upload.dir:./uploads/images}") String uploadDir) {
         this.uploadedImageRepository = uploadedImageRepository;
+        this.documentService = documentService;
         this.uploadDir = Path.of(uploadDir).toAbsolutePath().normalize();
     }
 
+    /** 목록 — 이미지마다 분석(P-03) 상태와 요약을 붙인다. */
     public List<ImageView> getImages() {
-        return uploadedImageRepository.findAllByOrderByUploadedAtDescIdDesc().stream().map(ImageView::from).toList();
+        return withAnalysis(uploadedImageRepository.findAllByOrderByUploadedAtDescIdDesc());
+    }
+
+    private List<ImageView> withAnalysis(List<UploadedImage> images) {
+        Map<Long, AnalysisSummary> summaries = documentService.summariesByImageIds(
+                images.stream().map(UploadedImage::getId).toList());
+        return images.stream().map(image -> ImageView.from(image, summaries.get(image.getId()))).toList();
     }
 
     /** 여러 장을 한 번에 올린다. 한 장이라도 이미지가 아니면 아무것도 저장하지 않고 그 파일명들을 알려준다. */
@@ -67,6 +79,7 @@ public class ImageService {
         }
 
         List<Path> written = new ArrayList<>();
+        List<UploadedImage> saved;
         try {
             Files.createDirectories(uploadDir);
             LocalDateTime now = LocalDateTime.now();
@@ -89,13 +102,27 @@ public class ImageService {
                         .uploadedAt(now)
                         .build());
             }
-            return uploadedImageRepository.saveAll(images).stream().map(ImageView::from).toList();
+            saved = uploadedImageRepository.saveAll(images);
         } catch (IOException | RuntimeException e) {
             written.forEach(this::deleteQuietly);
             if (e instanceof IOException io) {
                 throw new UncheckedIOException("이미지 저장에 실패했습니다.", io);
             }
             throw (RuntimeException) e;
+        }
+        // 저장이 끝난 뒤 분석(P-03·P-04) 대기열에 넣는다. 업로드 응답은 분석을 기다리지 않는다.
+        documentService.registerImages(saved, username);
+        return withAnalysis(saved);
+    }
+
+    /** 분석(AnalysisService)이 Claude에 보낼 원본. */
+    public ImageBytes readBytes(Long id) {
+        UploadedImage image = uploadedImageRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 이미지입니다: " + id));
+        try {
+            return new ImageBytes(Files.readAllBytes(resolveStored(image.getStoredName())), image.getContentType());
+        } catch (IOException e) {
+            throw new UncheckedIOException("이미지 파일을 읽지 못했습니다: " + image.getOriginalName(), e);
         }
     }
 
@@ -116,6 +143,7 @@ public class ImageService {
             throw new IllegalArgumentException("삭제할 이미지를 선택하세요.");
         }
         List<UploadedImage> images = uploadedImageRepository.findAllById(ids);
+        documentService.deleteByImageIds(images.stream().map(UploadedImage::getId).toList());
         uploadedImageRepository.deleteAll(images);
         images.forEach(image -> deleteQuietly(resolveStored(image.getStoredName())));
     }
@@ -155,6 +183,10 @@ public class ImageService {
     }
 
     /** 내려줄 파일과 그 형식. */
+    /** 원본 바이트와 형식(업로드 때 파일 내용으로 확인한 값). */
+    public record ImageBytes(byte[] bytes, String contentType) {
+    }
+
     public record ImageFile(Resource resource, String contentType, String originalName) {
     }
 }

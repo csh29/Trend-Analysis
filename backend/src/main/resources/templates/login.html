@@ -88,10 +88,10 @@
     // 탭 안에서 로그인하지 않도록 창 전체를 로그인 페이지로 옮긴다.
     if (window.top !== window.self) {
         window.top.location.href = window.location.href;
-
-        document.getElementById("username").value = "admin"
-        document.getElementById("password").value = "admin"
     }
+
+    document.getElementById("username").value = "admin"
+    document.getElementById("password").value = "admin"
 </script>
 </body>
 </html>

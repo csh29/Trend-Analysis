@@ -63,9 +63,35 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 | 화면 | 템플릿 | API |
 | --- | --- | --- |
 | 이미지 업로드 | `program/img-upload.html` | `/api/images` |
+| 텍스트 등록 | `program/text-upload.html` | `/api/texts` |
 
 이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
 파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
+
+### AI 분석 (P-03 정형화 · P-04 색인)
+
+이미지·텍스트를 올리면 뒤에서 Claude가 카테고리·키워드·소재·컬러·실루엣을 뽑고(정형 JSON), 결과는 RDB에,
+청크 임베딩은 Chroma에 저장된다. 목록의 "분석" 칸에 상태가 나오고, 행을 누르면 결과·재분석이 뜬다.
+AI 처리는 Python 서비스(`../ai`, FastAPI)가 하고 Spring이 호출한다 — 분석하려면 둘 다 띄운다.
+
+`application.properties`에 넣을 값:
+
+| 키 | 용도 |
+| --- | --- |
+| `claude.api.key` | Claude API 키(이 파일은 커밋하지 않는다) |
+| `claude.model` | 기본 `claude-sonnet-5` |
+| `ai.server.url` | AI 서비스 주소, 기본 `http://127.0.0.1:8001` |
+| `ai.analysis.max-attempts` | 정형화 재시도 상한, 기본 3 |
+
+AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끈다(더블클릭 가능). 처음 실행하면 가상환경과 패키지를 설치한다.
+로그는 `ai/logs/`에 남는다. 직접 띄울 때는 `ai` 폴더에서:
+
+```bash
+.venv/Scripts/python -m uvicorn main:app --host 127.0.0.1 --port 8001
+```
+
+임베딩은 `Qwen/Qwen3-VL-Embedding-2B`(CPU, RAM 약 4.5GB)이고 첫 색인 때 모델(약 4GB)을 내려받는다.
+Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.env`의 `CHROMA_MODE=http`와 `CHROMA_HOST`만 바꾸면 서버형으로 전환된다.
 
 ## 관리 화면
 
