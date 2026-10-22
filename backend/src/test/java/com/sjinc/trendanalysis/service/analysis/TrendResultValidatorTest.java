@@ -93,10 +93,13 @@ class TrendResultValidatorTest {
     }
 
     @Test
-    void 아이템이_없거나_이름이_비면_거부한다() {
+    void 아이템이_없으면_기타_하나로_채우고_이름이_비면_거부한다() {
         Map<String, Object> empty = valid();
-        empty.put("items", List.of());
-        assertThat(TrendResultValidator.validate(empty, codes).errors()).contains("items가 비어 있습니다.");
+        empty.put("items", List.of()); // 의류가 없는 자료 — 프롬프트 대신 서버가 기타 아이템으로 채운다
+        TrendResultValidator.Validated filled = TrendResultValidator.validate(empty, codes).validated();
+        assertThat(filled.items()).hasSize(1);
+        assertThat(filled.items().get(0).category()).isEqualTo("ETC");
+        assertThat(filled.items().get(0).type()).isEqualTo("ETC");
 
         Map<String, Object> noName = valid();
         noName.put("items", List.of(item("OUTER", "  ", List.of(), List.of())));
@@ -118,6 +121,16 @@ class TrendResultValidatorTest {
         // 축이 정해지지 않은 코드(공통코드에 새로 넣은 것)는 그대로 둔다
         assertThat(TrendResultValidator.onePerAxis(List.of("REGULAR", "NEW_CODE", "SLIM"), axes))
                 .containsExactly("REGULAR", "NEW_CODE");
+    }
+
+    @Test
+    void 카테고리에_쓸_수_없는_실루엣은_버린다() {
+        // 공통코드 실루엣 속성의 카테고리 목록 — 하의는 OVERSIZED 대신 WIDE, 기타는 실루엣 없음
+        Map<String, java.util.Set<String>> allowed = Map.of("OVERSIZED", java.util.Set.of("OUTER", "TOP"),
+                "WIDE", java.util.Set.of("BOTTOM"));
+        assertThat(TrendResultValidator.forCategory(List.of("OVERSIZED", "WIDE", "NEW_CODE"), "BOTTOM", allowed))
+                .containsExactly("WIDE", "NEW_CODE"); // 카테고리를 적지 않은 코드는 그대로
+        assertThat(TrendResultValidator.forCategory(List.of("OVERSIZED", "WIDE"), "ETC", allowed)).isEmpty();
     }
 
     @Test
@@ -157,16 +170,17 @@ class TrendResultValidatorTest {
     }
 
     @Test
-    void 아이템_종류는_그_카테고리의_코드여야_한다() {
+    void 종류와_카테고리가_어긋나면_종류의_카테고리를_따른다() {
         TrendResultValidator.Outcome ok = TrendResultValidator.validate(valid(), codes);
         assertThat(ok.validated().items().get(0).type()).isEqualTo("OUTER_ETC");
 
         Map<String, Object> mismatch = valid();
         @SuppressWarnings("unchecked")
         Map<String, Object> outer = (Map<String, Object>) ((List<?>) mismatch.get("items")).get(0);
-        outer.put("type", "BOTTOM_DENIM"); // 아우터에 데님 팬츠 — 집계가 틀어진다
-        assertThat(TrendResultValidator.validate(mismatch, codes).errors())
-                .anyMatch(e -> e.contains("items[0].type") && e.contains("카테고리"));
+        outer.put("type", "BOTTOM_DENIM"); // 아우터에 데님 팬츠 — 재시도 대신 종류(더 구체적)에 맞춘다
+        TrendResultValidator.Garment fixed = TrendResultValidator.validate(mismatch, codes).validated().items().get(0);
+        assertThat(fixed.category()).isEqualTo("BOTTOM");
+        assertThat(fixed.type()).isEqualTo("BOTTOM_DENIM");
 
         outer.put("type", "OUTER_UNKNOWN");
         assertThat(TrendResultValidator.validate(mismatch, codes).errors()).anyMatch(e -> e.contains("공통코드에 없습니다"));

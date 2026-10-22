@@ -3,6 +3,7 @@ package com.sjinc.trendanalysis.service.rag;
 import com.sjinc.trendanalysis.domain.ComCd;
 import com.sjinc.trendanalysis.domain.SourceDocument;
 import com.sjinc.trendanalysis.dto.rag.RagAnswerView;
+import com.sjinc.trendanalysis.dto.rag.RagQuestionRequest;
 import com.sjinc.trendanalysis.dto.trend.TrendView;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
@@ -19,9 +20,11 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -33,6 +36,7 @@ import java.util.stream.Collectors;
  *       원문으로 AI 서비스가 답한다. 문장이 비슷한 자료만 보고 "유행"이라고 하지 않게.</li>
  *   <li>그 밖의 질문: AI 서비스가 문장 유사도로 근거를 찾는다(카테고리·기간으로 거름). 주간 집계 상위 값을 참고로 덧붙인다.</li>
  * </ul>
+ * 패션·트렌드 질문이 아니면(해석의 fashion=false) 어느 쪽으로도 보내지 않고 OFF_TOPIC으로 답한다.
  * 근거는 원문 문서(제목·매체·날짜·링크)로 되돌리고, 삭제됐거나 분석 완료가 아니면 출처에서 뺀다.
  */
 @Service
@@ -40,6 +44,10 @@ import java.util.stream.Collectors;
 public class RagService {
 
     public static final int MAX_QUESTION_LENGTH = 500;
+    /** 이어 묻기에 넘기는 앞 대화 건수. 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다. */
+    static final int MAX_HISTORY = 3;
+    /** 패션·트렌드 질문이 아니면 이 말만 하고 집계·검색·답변을 하지 않는다(2026-10-22 사용자 결정). */
+    static final String OFF_TOPIC_ANSWER = "패션·트렌드 관련 질문에만 답할 수 있어요. 예) 요즘 유행하는 아우터는? · 데님 재킷 코디는 어떻게 해?";
     /** 답변에 덧붙이는 집계 — 유형별 언급량 상위 몇 개. 많이 넣으면 근거보다 수치가 앞선다. */
     static final int STATS_PER_TYPE = 5;
 
@@ -84,6 +92,14 @@ public class RagService {
     }
 
     public RagAnswerView ask(String question) {
+        return ask(question, List.of());
+    }
+
+    /**
+     * @param history 챗봇의 앞 질문·해석(오래된 것 → 최근 순). 이어 묻기("그럼 하의는?")를 알아듣는 데만 쓰고, 검색·답변은
+     *                해석이 앞 대화로 채워 다시 쓴 질문으로 한다. 화면이 보낸 값이라 건수·길이·코드를 여기서 거른다.
+     */
+    public RagAnswerView ask(String question, List<RagQuestionRequest.Turn> history) {
         String text = question == null ? "" : question.trim();
         if (text.isEmpty()) {
             throw new IllegalArgumentException("질문을 입력하세요.");
@@ -95,29 +111,42 @@ public class RagService {
             throw new AiCallException("claude.api.key가 설정되지 않았습니다. application.properties에 키를 넣으세요.", false);
         }
         LocalDate today = LocalDate.now();
-        Interpreted interpreted = interpret(text, today);
+        Interpreted interpreted = interpret(text, today, history);
+        if (!interpreted.fashion()) {
+            log.info("RAG 질문 {}자 — 패션 질문이 아니라 답하지 않음", text.length());
+            return new RagAnswerView(text, false, OFF_TOPIC_ANSWER, List.of(), "OFF_TOPIC", List.of(), null, minScore, null,
+                    null, interpreted.view(), null);
+        }
         return interpreted.question().trend() ? askTrend(text, interpreted, today) : askSearch(text, interpreted, today);
     }
 
-    /** 해석 결과와 누가 해석했는지(AI·RULE). */
-    private record Interpreted(QuestionInterpreter.Interpretation question, String by) {
+    /**
+     * 해석 결과와 누가 해석했는지(AI·RULE). fashion은 AI 해석만 false가 될 수 있다(규칙으로는 주제를 가리지 않는다).
+     * query는 검색·답변에 쓰는 질문 — 이어 묻기면 앞 대화로 채워 다시 쓴 질문, 아니면(규칙 해석 포함) 원래 질문.
+     */
+    private record Interpreted(QuestionInterpreter.Interpretation question, boolean fashion, String by, String original,
+                               String query) {
         RagAnswerView.Interpretation view() {
-            return new RagAnswerView.Interpretation(question.trend(), question.category(), question.categoryName(),
-                    question.itemType(), question.itemTypeName(), by);
+            QuestionInterpreter.Period p = question.period();
+            return new RagAnswerView.Interpretation(fashion, question.trend(), question.category(), question.categoryName(),
+                    question.itemType(), question.itemTypeName(), by, query.equals(original) ? null : query,
+                    p == null ? null : new RagAnswerView.Period(p.from(), p.to(), p.label(), true, false));
         }
     }
 
     /**
-     * 질문 해석 — 작은 모델(claude.interpret-model)에게 맡기고(2026-10-22 사용자 결정 A), 호출이 실패하거나 결과가 공통코드와 맞지
-     * 않으면 규칙(QuestionInterpreter)으로 대신한다. 답변이 멈추지 않게 하는 것이 먼저다.
+     * 질문 해석 — 작은 모델(claude.interpret-model)에게 맡기고(2026-10-22 사용자 결정 A), 호출이 실패하면 규칙(QuestionInterpreter)으로
+     * 대신한다. 답변이 멈추지 않게 하는 것이 먼저다. 결과 중 공통코드에 없는 값(카테고리·종류)만 버리고 나머지 해석은 쓴다.
      */
-    private Interpreted interpret(String text, LocalDate today) {
+    private Interpreted interpret(String text, LocalDate today, List<RagQuestionRequest.Turn> history) {
         List<ComCd> categories = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.CATEGORY, "Y");
         List<ComCd> itemTypes = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.ITEM_TYPE, "Y");
+        List<AiClient.InterpretTurn> turns = turns(history, categories, itemTypes);
         try {
             AiClient.InterpretResponse r = aiClient.interpret(new AiClient.InterpretRequest(text, interpretModel, today.toString(),
-                    categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), c.getAttr1())).toList(),
-                    itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), null)).toList()), apiKey);
+                    // 일상 표현이 없으면 null이 아니라 ""로 보낸다(예전 AI 서비스는 null이면 422로 거부했다)
+                    categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList(),
+                    itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns), apiKey);
             String category = known(categories, r.category());
             String itemType = known(itemTypes, r.itemType());
             if (itemType != null) {
@@ -125,14 +154,48 @@ public class RagService {
             }
             QuestionInterpreter.Period period = r.period() == null ? null : new QuestionInterpreter.Period(
                     LocalDate.parse(r.period().from()), LocalDate.parse(r.period().to()), r.period().label(), true);
-            log.info("질문 해석(AI) 유행={} 카테고리={} 종류={} 기간={} 토큰 {}", r.trend(), category, itemType,
-                    period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
+            String query = r.question() == null || r.question().isBlank() || r.question().length() > MAX_QUESTION_LENGTH
+                    ? text : r.question().trim();
+            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 기간={} 토큰 {}", turns.size(),
+                    !query.equals(text), !r.offTopic(), r.trend(), category, itemType, period == null ? "-" : period.label(),
+                    TokenUsage.of(r.usage()));
             return new Interpreted(new QuestionInterpreter.Interpretation(r.trend(), category, name(categories, category),
-                    itemType, name(itemTypes, itemType), period), "AI");
+                    itemType, name(itemTypes, itemType), period), !r.offTopic(), "AI", text, query);
         } catch (RuntimeException e) {
             log.warn("질문 해석(AI) 실패 — 규칙으로 대신합니다: {}", e.getMessage());
             List<ComCd> trendWords = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.TREND_WORD, "Y");
-            return new Interpreted(QuestionInterpreter.interpret(text, today, categories, itemTypes, trendWords), "RULE");
+            // 규칙은 주제를 가리지 않고 이어 묻기도 모른다 — 검색 질문은 기준 유사도가 무관한 질문을 따로 막는다
+            return new Interpreted(QuestionInterpreter.interpret(text, today, categories, itemTypes, trendWords), true, "RULE",
+                    text, text);
+        }
+    }
+
+    /** 화면이 보낸 앞 대화를 거른다 — 최근 MAX_HISTORY건, 질문 길이 상한, 공통코드에 없는 값·잘못된 날짜는 버린다. */
+    private static List<AiClient.InterpretTurn> turns(List<RagQuestionRequest.Turn> history, List<ComCd> categories,
+                                                      List<ComCd> itemTypes) {
+        if (history == null) {
+            return List.of();
+        }
+        List<RagQuestionRequest.Turn> valid = history.stream()
+                .filter(t -> t != null && t.question() != null && !t.question().isBlank()).toList();
+        return valid.subList(Math.max(0, valid.size() - MAX_HISTORY), valid.size()).stream()
+                .map(t -> {
+                    String q = t.question().trim();
+                    boolean hasPeriod = t.periodLabel() != null && !t.periodLabel().isBlank()
+                            && isDate(t.periodFrom()) && isDate(t.periodTo());
+                    return new AiClient.InterpretTurn(q.length() > MAX_QUESTION_LENGTH ? q.substring(0, MAX_QUESTION_LENGTH) : q,
+                            t.trend(), Objects.toString(known(categories, t.category()), ""),
+                            Objects.toString(known(itemTypes, t.itemType()), ""),
+                            hasPeriod ? t.periodLabel().trim() : "", hasPeriod ? t.periodFrom() : "", hasPeriod ? t.periodTo() : "");
+                })
+                .toList();
+    }
+
+    private static boolean isDate(String value) {
+        try {
+            return value != null && LocalDate.parse(value) != null;
+        } catch (DateTimeParseException e) {
+            return false;
         }
     }
 
@@ -147,7 +210,7 @@ public class RagService {
                     + facts.scopeLabel() + " 원문이 없습니다.", List.of(), "NO_EVIDENCE", List.of(), null, minScore, null,
                     period, interpreted.view(), factsView);
         }
-        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(text, model, topK, minScore, null, List.of(),
+        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore, null, List.of(),
                 today.toString(), AiClient.AnswerRequest.TREND, interpreted.question().category(),
                 new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), p.explicit(), facts.stale()),
                 facts.lines(), facts.evidenceDocIds()), apiKey);
@@ -162,7 +225,7 @@ public class RagService {
         LocalDate week = statRepository.findLastWeekStart();
         List<AiClient.StatRow> stats = week == null ? List.of() : stats(week);
         QuestionInterpreter.Period p = interpreted.question().period();
-        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(text, model, topK, minScore,
+        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
                 week == null ? null : week.toString(), stats, today.toString(), AiClient.AnswerRequest.SEARCH,
                 interpreted.question().category(),
                 p == null ? null : new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), true, false),

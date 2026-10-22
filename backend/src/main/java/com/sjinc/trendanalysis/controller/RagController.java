@@ -30,10 +30,10 @@ public class RagController {
 
     private final RagService ragService;
 
-    /** 질문 한 건에 답한다(요청 시 실시간 — 검색·Claude 답변까지 수 초~수십 초). */
+    /** 질문 한 건에 답한다(요청 시 실시간 — 검색·Claude 답변까지 수 초~수십 초). 앞 대화는 이어 묻기 해석에만 쓴다. */
     @PostMapping("/ask")
     public RagAnswerView ask(@RequestBody RagQuestionRequest request) {
-        return ragService.ask(request.question());
+        return ragService.ask(request.question(), request.history());
     }
 
     /** 이미지 출처 보기(홈 오른쪽 슬라이드 패널). 분석이 끝난 이미지 원문만 열린다. */

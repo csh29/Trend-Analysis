@@ -33,27 +33,17 @@ py -m venv .venv
 
 AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAPI 기본 화면)를 열고 아래 API를 "Try it out"으로 부른다.
 
-| API | 내용 |
-| --- | --- |
-| `GET /index/stats` | 컬렉션 이름, 내장형/서버형, 임베딩 모델, 청크 수 |
-| `GET /index/chunks?doc_id=&limit=20&offset=0&with_embedding=false` | 청크 id(`문서ID#순번`), 청크 문장, 메타(doc_id·유형·매체·게시일·URL·카테고리·순번). `with_embedding=true`면 벡터 차원과 앞 8개 값 |
-| `GET /search?q=&top_k=10` | 질문과 비슷한 청크와 유사도(Claude 호출 없음). RAG 기준 유사도를 정할 때 점수 분포를 본다 |
+- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다).
 
 - 실행 중인 서비스를 통해 읽는다. 내장형 Chroma 폴더(`chroma_data/`)를 다른 프로세스로 직접 열지 않는다(한 프로세스만 열어야 안전하다).
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.
 
 ## 2. 설정 (`ai/.env`)
 
-`ai/.env`(커밋 제외, `.env.example`을 복사)를 읽고, 같은 이름의 환경변수가 있으면 그 값이 이긴다. Claude API 키는 여기 두지 않는다(Spring에서 요청 헤더로 받는다).
+`ai/.env`(커밋 제외)를 읽고, 같은 이름의 환경변수가 있으면 그 값이 이긴다. 키·기본값·설명은 `ai/.env.example`(복사해서 쓴다)과 `app/core/config.py`에 있다. Claude API 키는 여기 두지 않는다(Spring에서 요청 헤더로 받는다).
 
-| 키 | 기본값 | 용도 |
-| --- | --- | --- |
-| `CHROMA_MODE` | `embedded` | `embedded`(로컬 폴더) / `http`(Chroma 서버). 시스템 오픈 때 `http`로 바꾼다 |
-| `CHROMA_PATH` | `./chroma_data` | 내장형 폴더(`ai/` 기준) |
-| `CHROMA_HOST`·`CHROMA_PORT` | `localhost`·`8000` | 서버형 주소 |
-| `CHROMA_COLLECTION` | `trend_chunks_qwen3vl` | 컬렉션 이름(3자 이상) |
-| `EMBEDDING_MODEL` | `Qwen/Qwen3-VL-Embedding-2B` | `Qwen/Qwen3-VL-Embedding-*`은 sentence-transformers, 그 밖의 이름은 fastembed로 돈다 |
-| `CHUNK_SIZE`·`CHUNK_OVERLAP` | `500`·`80` | 본문 청크 분할(문자 수) |
+- 시스템 오픈 때 `CHROMA_MODE=http`·`CHROMA_HOST`만 바꿔 서버형으로 전환한다(코드 수정 없음).
+- 임베딩 모델(`EMBEDDING_MODEL`)을 바꾸면 컬렉션(`CHROMA_COLLECTION`)도 새로 준다(아래 4절).
 
 ## 3. 파일 구성
 
@@ -62,7 +52,7 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 ```
 ai/
 ├─ app/                    Python 코드 (실행: uvicorn app.main:app)
-│  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /answer, /search, /health …)
+│  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /interpret, /answer, /search, /health …)
 │  ├─ core/                여러 기능이 같이 쓰는 것
 │  │  ├─ config.py         ai/.env + 환경변수 설정
 │  │  ├─ prompt_loader.py  prompts/ 아래 md 읽기(이름 = 상대 경로, 예: "structure/common")
@@ -76,7 +66,7 @@ ai/
 │  │  ├─ embedding.py      임베딩 함수(Qwen3-VL / fastembed)
 │  │  └─ vector_store.py   Chroma 클라이언트를 만드는 유일한 곳
 │  └─ rag/                 P-06 검색·답변
-│     ├─ interpret.py      질문 해석(작은 모델 — 유행 질문인지·카테고리·종류·기간, 공통코드 enum)
+│     ├─ interpret.py      질문 해석(작은 모델 — 패션 질문인지·유행 질문인지·카테고리·종류·기간, 이어 묻기면 질문 다시 쓰기)
 │     └─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
@@ -92,7 +82,11 @@ ai/
 
 ## 4. 코딩 규칙
 
-- **Claude가 읽는 글은 코드에 쓰지 않고 `prompts/` 아래 md에 둔다.** 이미지·텍스트 둘 다에 해당하는 규칙은 `structure/common.md`에만 쓴다(양쪽에 복사하면 고칠 때 어긋난다). 한쪽 유형에만 해당하는 규칙은 그 유형 파일에 쓴다. 판단 기준(무엇을 뽑고 무엇을 비울지)은 md, 출력 형식(필드·코드 enum)은 `build_schema`, 조립 틀(`<document>` 감싸기)은 코드다. md를 고치면 AI 서비스를 재기동한다(기동 때 한 번 읽는다). `## 키` 제목은 코드가 찾는 이름이라 바꾸지 않는다. md 주석(`<!-- -->`)은 보내지 않는다.
+- **Claude가 읽는 글은 코드에 쓰지 않고 `prompts/` 아래 md에 둔다.**
+  - 역할 나누기: 판단 기준(무엇을 뽑고 무엇을 비울지)은 md, 출력 형식(필드·코드 enum)은 `build_schema`, 조립 틀(`<document>` 감싸기)은 코드.
+  - 이미지·텍스트 둘 다에 해당하는 규칙은 `structure/common.md`에만 쓴다(양쪽에 복사하면 고칠 때 어긋난다). 한쪽 유형에만 해당하는 규칙은 그 유형 파일에.
+  - md를 고치면 AI 서비스를 재기동한다(기동 때 한 번 읽는다). `## 키` 제목은 코드가 찾는 이름이라 바꾸지 않는다.
+  - 개발자용 메모는 md 주석(`<!-- -->`)에 쓴다 — Claude에게 가지 않는다.
 - **Chroma 클라이언트는 `app/indexing/vector_store.py`의 `create_client`에서만 만든다.** 다른 모듈은 `get_collection()`만 쓴다. 내장형↔서버형 전환을 설정(`CHROMA_MODE`) 하나로 끝내기 위한 규칙이다.
 - 임베딩 모델을 바꾸면 기존 컬렉션과 섞이지 않게 `CHROMA_COLLECTION`을 새로 주거나 재색인한다(같은 컬렉션으로 열면 기동이 막힌다).
 - 패키지 버전은 `requirements.txt`에 고정한다. Chroma는 서버형으로 갈 때 서버와 같은 버전이어야 하고, 임베딩 결과가 라이브러리 버전에 따라 달라지면 기존 색인과 어긋난다.
@@ -108,14 +102,11 @@ ai/
 
 `ai/` 폴더에서 돌린다(`tests/` 패키지를 찾는다). 네트워크·실제 Claude 호출·모델 다운로드가 없다(가짜 클라이언트·가짜 컬렉션·가짜 모델).
 
-| 테스트 | 범위 |
-| --- | --- |
-| `test_core.py` | 설정(.env·환경변수·모드 검증), **Chroma 내장형/서버형 선택**, 임베딩 구현 선택·질의 지시문, 청크 분할, 이미지 축소·변환, 스키마 enum, Claude 오류 분류(거절·잘림·연결)·토큰 사용량, 색인 청크(코드 이름 사용·갈아끼움) |
-| `test_rag.py` | P-06: 기간 해석(지난주·지난달·최근 N·올해·작년·시즌 표현, 막연하면 안 자름), 최신성 가중치·stale, 게시일 숫자 채우기, 유사도·문서별 묶음, 기준 미달이면 Claude 미호출, 줄별 인용 번호 정리, `/answer` 401·400 |
-| `test_api.py` | FastAPI: 키 없음 401, 키 전달·응답에 키 미포함, 오류의 retryable·소모 토큰(usage) 전달, 색인 조회(읽기 전용·벡터는 앞부분만), 빈 본문·깨진 이미지 400, 색인·삭제 |
+`test_core`(설정·Chroma·임베딩·정형화·색인), `test_rag`(P-06 해석·검색·답변), `test_api`(FastAPI 라우트).
 
 | 변경 | 확인할 것 |
 | --- | --- |
 | `vector_store`·`config` | `CHROMA_MODE`만으로 내장형/서버형이 바뀜(코드 수정 없이) |
-| `embedding` | 모델을 바꿨으면 실제 모델로 한국어 질의 비교("가죽 아우터", "청바지 트렌드", "니트 유행")를 다시 돌린다 |
-| `structurer`·`indexer` | [`analysis-pipeline.md`](../features/analysis-pipeline.md) 회귀 항목 |
+| `embedding` | 모델을 바꿨으면 재색인 뒤 `GET /search?q=`로 "가죽 아우터"·"청바지 트렌드"·"니트 유행"을 돌려, 상위 결과가 관련 원문인지와 관련/무관 질문의 점수 차이(`rag.min-score` 판단 근거)를 예전 모델과 비교한다 |
+| `structurer`·`indexer`·`prompts/structure` | [`analysis-pipeline.md`](../features/analysis-pipeline.md) 규칙의 "같이 고친다" 목록 |
+| `rag`·`prompts/rag` | [`rag-search.md`](../features/rag-search.md) 테스트 절(프롬프트는 실제 호출로 확인) |

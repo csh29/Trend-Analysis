@@ -11,6 +11,10 @@ import java.util.Set;
  * 맞춰 주지만, 공통코드가 그사이 바뀌었거나 값이 비는 경우는 여기서 걸러야 한다. Spring 없이 테스트되는 순수 클래스다.
  *
  * <p>결과는 의류 아이템 배열(items)이다. 아이템 수 상한은 스키마로 걸 수 없어(배열 길이 제약 미지원) 여기서 자른다.
+ *
+ * <p>규칙대로 고칠 수 있는 것은 실패(재시도 = 비용 2배)로 돌리지 않고 여기서 고친다 — 그래서 프롬프트(structure/*.md)에서
+ * 그 지시를 뺐다(2026-10-22): 아이템이 없으면 기타 아이템 하나, 종류와 카테고리가 어긋나면 종류의 카테고리, 카테고리에 맞지 않는
+ * 실루엣(공통코드 속성)과 축이 겹친 실루엣은 버린다.
  */
 public final class TrendResultValidator {
 
@@ -20,6 +24,7 @@ public final class TrendResultValidator {
     static final int MAX_KEYWORDS = 8;
     static final int MAX_KEYWORD_LENGTH = 100;
     static final int MAX_SUMMARY_LENGTH = 1000;
+    static final String ETC = "ETC";
 
     /** 의류 아이템 하나. type은 아이템 종류 코드(OUTER_PADDING). 다중 값은 중복을 빼고 순서를 지킨다. */
     public record Garment(String category, String item, String type, List<String> materials, List<String> colors,
@@ -55,7 +60,12 @@ public final class TrendResultValidator {
         if (rawItems == null) {
             errors.add("items가 배열이 아닙니다.");
         } else if (rawItems.isEmpty()) {
-            errors.add("items가 비어 있습니다.");
+            // 의류가 없는 자료(신발·가방만 등) — 자료 전체를 기타 아이템 하나로 나타낸다
+            if (codes.contains(TrendCodes.CATEGORY, ETC) && codes.contains(TrendCodes.ITEM_TYPE, ETC)) {
+                items.add(new Garment(ETC, "기타", ETC, List.of(), List.of(), List.of()));
+            } else {
+                errors.add("items가 비어 있습니다.");
+            }
         } else {
             // 프롬프트가 "눈에 띄는 순서로 최대 5개"를 지시한다 — 넘치면 실패 대신 앞에서부터 자른다
             for (int i = 0; i < Math.min(rawItems.size(), MAX_ITEMS); i++) {
@@ -108,6 +118,11 @@ public final class TrendResultValidator {
             return null;
         }
         String category = text(map.get("category"));
+        String type = text(map.get("type"));
+        // 종류가 이긴다 — 종류(OUTER_PADDING)가 카테고리보다 구체적이다. 집계가 어긋나지 않게 카테고리를 종류에 맞춘다
+        if (codes.contains(TrendCodes.ITEM_TYPE, type) && codes.contains(TrendCodes.CATEGORY, TrendCodes.categoryOfType(type))) {
+            category = TrendCodes.categoryOfType(type);
+        }
         if (!codes.contains(TrendCodes.CATEGORY, category)) {
             errors.add(prefix + "category가 공통코드에 없습니다: " + category);
         }
@@ -117,18 +132,19 @@ public final class TrendResultValidator {
         } else if (name.length() > MAX_ITEM_NAME_LENGTH) {
             name = name.substring(0, MAX_ITEM_NAME_LENGTH);
         }
-        // 종류는 그 아이템 카테고리의 것이어야 한다(OUTER면 OUTER_…) — 아우터에 데님 팬츠가 붙으면 집계가 틀어진다
-        String type = text(map.get("type"));
         if (!codes.contains(TrendCodes.ITEM_TYPE, type)) {
             errors.add(prefix + "type이 공통코드에 없습니다: " + type);
-        } else if (!TrendCodes.categoryOfType(type).equals(category)) {
-            errors.add(prefix + "type이 카테고리(" + category + ")의 종류가 아닙니다: " + type);
         }
         return new Garment(category, name, type,
                 codeValues(map.get("materials"), prefix + "materials", TrendCodes.MATERIAL, codes, errors),
                 codeValues(map.get("colors"), prefix + "colors", TrendCodes.COLOR, codes, errors),
-                onePerAxis(codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors),
-                        codes.silhouetteAxes()));
+                onePerAxis(forCategory(codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors),
+                        category, codes.silhouetteCategories()), codes.silhouetteAxes()));
+    }
+
+    /** 그 카테고리에 쓸 수 없는 실루엣(공통코드 속성의 카테고리 목록 밖)은 버린다 — 하의 OVERSIZED, 원피스 CROPPED, 기타의 모든 실루엣 등. */
+    static List<String> forCategory(List<String> silhouettes, String category, Map<String, Set<String>> allowed) {
+        return silhouettes.stream().filter(code -> !allowed.containsKey(code) || allowed.get(code).contains(category)).toList();
     }
 
     /** 실루엣은 축(핏·기장·형태 — 공통코드 속성)마다 처음 나온 값 하나만 — 실패로 돌리면 재시도 비용만 들어서 걸러 낸다. */

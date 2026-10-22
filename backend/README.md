@@ -7,7 +7,7 @@
 | --- | --- |
 | Language | Java 17 |
 | Framework | Spring Boot 3.3.4 |
-| Build Tool | Maven (Maven Wrapper 포함, `./mvnw` \| `mvnw.cmd`) |
+| Build Tool | Maven (`mvnw` 스크립트는 있지만 `.mvn/wrapper/`는 커밋 제외 — 새로 클론했으면 설치된 `mvn`이나 IDE로 빌드) |
 | Group / Artifact | `org.example` / `trend-analysis` |
 | 기본 패키지 | `com.sjinc.trendanalysis` |
 | View | Thymeleaf (서버 렌더링) |
@@ -35,9 +35,10 @@
 ```
 
 ```bash
-./mvnw spring-boot:run
+java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
+또는 IDE에서 `TrendAnalysisApplication`을 실행한다(실행 설정에 `local` 프로파일). `./mvnw spring-boot:run`은 경로의 한글 때문에 main class를 못 찾아 실패한다.
 실행 후 http://localhost:8080 으로 접속한다.
 
 ## 화면 프레임워크
@@ -46,7 +47,7 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 
 | 위치 | 역할 |
 | --- | --- |
-| `templates/home.html` | 홈 대시보드(요약 카드 + RAG 질문창) 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
+| `templates/home.html` | 홈 대시보드(요약 카드 + 트렌드 챗봇) 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
 | `templates/fragments/sidebar.html` | 사이드바. 메뉴는 프로그램 관리(DB)와 공통코드 `MENU_GROUP`이 정한다(`SidebarModelAdvice`) |
 | `templates/login.html` | 로그인 화면 |
 | `templates/fragments/topbar.html` | 상단바(로고·사이드바 접기·탭 목록·로그인 사용자·비밀번호 변경·로그아웃) |
@@ -76,7 +77,7 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 청크 임베딩은 Chroma에 저장된다. 목록의 "분석" 칸에 상태가 나오고, 행을 누르면 결과·재분석이 뜬다.
 AI 처리는 Python 서비스(`../ai`, FastAPI)가 하고 Spring이 호출한다 — 분석하려면 둘 다 띄운다.
 
-`application.properties`에 넣을 값:
+`src/main/resources/application-local.properties`(`local` 프로파일, 커밋 제외)에 넣을 값:
 
 | 키 | 용도 |
 | --- | --- |
@@ -111,8 +112,8 @@ Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.e
 
 ### RAG 검색 (P-06)
 
-홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 질문창으로 되어 있다. 질문하면 분석이 끝난 자료 중 비슷한 원문을 찾아 Claude가 답하고, 답변 아래에 출처(매체·날짜·원문 링크)를 보여 준다. API는 `/api/rag`(로그인만 필요).
-비슷한 원문이 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 기간을 말하지 않으면("요즘" 포함) 관련 자료 중 최근 것을 앞세워 답하고(4주마다 비중 절반), 지난달·최근 3개월처럼 기간을 쓰면 그 기간 자료만 쓴다.
+홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 **트렌드 챗봇**(대화형)으로 되어 있다. 작은 모델이 질문을 해석해(패션 질문인지·유행 질문인지·범위·기간, 앞 질문에 이어 묻기) 유행 질문은 원문 수·매체 수를 세서, 그 밖의 질문은 비슷한 원문을 찾아 Claude가 답하고 출처(매체·날짜·원문 링크 또는 사진)를 붙인다. API는 `/api/rag`(로그인만 필요).
+패션·트렌드 질문이 아니면 답하지 않고, 근거가 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 자세한 규칙은 `docs/llm/features/rag-search.md`.
 
 | 키 | 용도 |
 | --- | --- |

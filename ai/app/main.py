@@ -116,7 +116,19 @@ class AnswerRequest(BaseModel):
 class CodeHintModel(BaseModel):
     value: str
     name: str
-    words: str = ""
+    # 공통코드 속성이 비어 있으면 Spring(Jackson)이 null로 보낸다 — str만 받으면 요청 전체가 422가 되어 늘 규칙 해석으로 빠졌다(2026-10-22)
+    words: str | None = None
+
+
+class TurnModel(BaseModel):
+    """챗봇의 앞 질문 한 건과 그 해석 — 이어 묻기("그럼 하의는?")를 알아듣는 데만 쓴다."""
+    question: str
+    trend: bool = False
+    category: str | None = None
+    item_type: str | None = None
+    period_label: str | None = None  # 기간을 콕 집은 질문만
+    period_from: str | None = None
+    period_to: str | None = None
 
 
 class InterpretRequest(BaseModel):
@@ -125,6 +137,7 @@ class InterpretRequest(BaseModel):
     today: date | None = None
     categories: list[CodeHintModel] = []
     item_types: list[CodeHintModel] = []
+    history: list[TurnModel] = []  # 오래된 것 → 최근 순
 
 
 @app.get("/health")
@@ -254,8 +267,12 @@ def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Hea
         question = rag.ensure_question(req.question, MAX_QUESTION_LENGTH)
         data = interpreter.InterpretInput(
             question=question, model=req.model, today=req.today or date.today(),
-            categories=[interpreter.CodeHint(c.value, c.name, c.words) for c in req.categories],
-            item_types=[interpreter.CodeHint(t.value, t.name) for t in req.item_types])
+            categories=[interpreter.CodeHint(c.value, c.name, c.words or "") for c in req.categories],
+            item_types=[interpreter.CodeHint(t.value, t.name) for t in req.item_types],
+            # 앞 대화는 최근 몇 건만, 질문은 상한까지만 — 화면이 보낸 값이라 길이를 믿지 않는다
+            history=[interpreter.Turn(h.question[:MAX_QUESTION_LENGTH], h.trend, h.category or "", h.item_type or "",
+                                      h.period_label or "", h.period_from or "", h.period_to or "")
+                     for h in req.history[-interpreter.MAX_HISTORY:] if h.question.strip()])
         return interpreter.interpret(data, x_claude_api_key)
     except AiServiceError as e:
         log.warning("질문 해석 실패: %s", e)

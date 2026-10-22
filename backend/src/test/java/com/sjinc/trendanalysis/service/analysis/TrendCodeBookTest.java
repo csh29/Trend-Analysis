@@ -38,6 +38,16 @@ class TrendCodeBookTest {
     }
 
     @Test
+    void 실루엣을_쓸_수_있는_카테고리도_공통코드_속성으로_정한다() {
+        // structure/silhouette.md에 있던 카테고리별 금지 규칙을 서버로 옮겼다(2026-10-22)
+        Map<String, java.util.Set<String>> allowed = seedBook().silhouetteCategories();
+        assertThat(allowed.get("OVERSIZED")).doesNotContain("BOTTOM");
+        assertThat(allowed.get("CROPPED")).doesNotContain("DRESS", "SETUP");
+        assertThat(allowed.get("WIDE")).containsExactlyInAnyOrder("BOTTOM", "SETUP");
+        assertThat(allowed.values()).noneMatch(s -> s.contains("ETC"));
+    }
+
+    @Test
     void 이미지용_코드_묶음에는_사진으로_구분되는_소재만_남는다() {
         TrendCodeBook image = seedBook().restrict(TrendCodes.MATERIAL, seedBook().imageMaterials());
 

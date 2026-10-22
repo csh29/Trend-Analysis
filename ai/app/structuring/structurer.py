@@ -34,7 +34,7 @@ TEXT = prompt_loader.load("structure/text", ["system", "title_label", "task"])
 ARTICLE = prompt_loader.load("structure/article", ["system", "task"])
 
 
-def system_prompt(data: "StructureInput") -> str:
+def rules_text(data: "StructureInput") -> str:
     parts = [COMMON["system"], SILHOUETTE["system"]]
     if data.has_text:
         parts.append(TEXT["system"])
@@ -43,6 +43,18 @@ def system_prompt(data: "StructureInput") -> str:
     if data.has_text and data.images:
         parts.append(ARTICLE["system"])
     return "\n\n".join(parts)
+
+
+def system_prompt(data: "StructureInput") -> list[dict]:
+    """규칙 + 허용 코드 목록. 매 요청 같아서 프롬프트 캐싱을 건다(2026-10-22 — 입력 약 6,300토큰 중 이미지·본문 빼고 다 고정).
+
+    허용 코드 목록도 여기(system)에 둔다 — 이미지 뒤(user)에 있으면 캐시 구간에 들지 못한다. 캐시는 모델·자료 유형 조합
+    (이미지만·본문만·본문+이미지)·공통코드가 같을 때만 맞고, 마지막 호출 뒤 5분 안에 다음 분석이 와야 읽힌다.
+    """
+    return [
+        {"type": "text", "text": rules_text(data)},
+        {"type": "text", "text": _allowed_values_text(data), "cache_control": {"type": "ephemeral"}},
+    ]
 
 
 @dataclass
@@ -138,7 +150,7 @@ def build_content(data: StructureInput) -> list[dict]:
         task = IMAGE["task"]
     else:
         task = TEXT["task"]
-    content.append({"type": "text", "text": f"{_allowed_values_text(data)}\n\n{task}"})
+    content.append({"type": "text", "text": task})
     return content
 
 

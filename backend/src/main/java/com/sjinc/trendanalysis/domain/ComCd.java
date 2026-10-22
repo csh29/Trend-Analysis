@@ -64,6 +64,15 @@ public class ComCd {
     }
 
     /** 속성이 비어 있을 때만 기본값을 넣는다(DataInitializer — 화면에서 고친 값은 덮어쓰지 않는다). 넣었으면 true. */
+    /** 속성이 기본값의 앞부분(예: 축만 "FIT")뿐이면 기본값("FIT,OUTER,…")으로 늘린다. 다른 값으로 고친 속성은 건드리지 않는다. */
+    public boolean extendAttr1(String value) {
+        if (value == null || attr1 == null || attr1.isBlank() || !value.startsWith(attr1.trim() + ",")) {
+            return false;
+        }
+        attr1 = value;
+        return true;
+    }
+
     public boolean fillAttr1IfBlank(String value) {
         if (value == null || (attr1 != null && !attr1.isBlank())) {
             return false;

@@ -120,7 +120,7 @@ public class DataInitializer implements CommandLineRunner {
     /** 그룹 비고 — 속성(attr1)을 쓰는 그룹은 무엇을 쓰는지 적는다. */
     private static final java.util.Map<String, String> GROUP_REMARKS = java.util.Map.of(
             TrendCodes.MATERIAL, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 IMAGE = 사진의 질감으로 구분되는 소재(이미지만 있는 원문은 이것만)",
-            TrendCodes.SILHOUETTE, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 축(FIT·LENGTH·SHAPE) — 축마다 하나만 남긴다",
+            TrendCodes.SILHOUETTE, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 축(FIT·LENGTH·SHAPE),쓸 수 있는 카테고리(쉼표, 없으면 전체) — 축마다 하나만, 목록 밖 카테고리면 버린다",
             TrendCodes.CATEGORY, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 질문에서 이 카테고리를 알아보는 일상 표현(쉼표)",
             TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
             TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다. 속성 RAG = 질문 답변에 참고 집계로 보낸다",
@@ -133,7 +133,8 @@ public class DataInitializer implements CommandLineRunner {
         if (defaults.isEmpty()) return;
         int filled = 0;
         for (ComCd code : comCdRepository.findByCodeGroupOrderBySortOrderAsc(group)) {
-            if (code.fillAttr1IfBlank(defaults.get(code.getCodeValue()))) {
+            String value = defaults.get(code.getCodeValue());
+            if (code.fillAttr1IfBlank(value) || code.extendAttr1(value)) {
                 comCdRepository.save(code);
                 filled++;
             }

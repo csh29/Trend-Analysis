@@ -64,6 +64,21 @@ public record TrendCodeBook(Map<String, List<ComCd>> groups) {
         return axes;
     }
 
+    /**
+     * 실루엣 코드 → 쓸 수 있는 카테고리(속성의 축 뒤 값들). 카테고리를 적지 않은 코드는 빠진다(모든 카테고리 허용).
+     * 기타(ETC)처럼 어느 목록에도 없는 카테고리는 카테고리를 적은 실루엣을 쓸 수 없다.
+     */
+    public Map<String, Set<String>> silhouetteCategories() {
+        Map<String, Set<String>> allowed = new LinkedHashMap<>();
+        codes(TrendCodes.SILHOUETTE).forEach(c -> {
+            List<String> values = c.attrValues();
+            if (values.size() > 1) {
+                allowed.put(c.getCodeValue(), Set.copyOf(values.subList(1, values.size())));
+            }
+        });
+        return allowed;
+    }
+
     /** 비어 있는 그룹 — 하나라도 비면 정형화할 수 없다(LLM이 고를 값이 없다). */
     public List<String> emptyGroups() {
         return groups.entrySet().stream().filter(e -> e.getValue().isEmpty()).map(Map.Entry::getKey).toList();

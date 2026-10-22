@@ -96,13 +96,27 @@ public class AiClient {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretRequest(String question, String model, String today, List<CodeHint> categories,
-                                   List<CodeHint> itemTypes) {
+                                   List<CodeHint> itemTypes, List<InterpretTurn> history) {
     }
 
-    /** 작은 모델의 질문 해석. period는 질문에 기간이 있을 때만(없으면 null). */
+    /** 챗봇의 앞 질문과 그 해석(이어 묻기용). 기간은 콕 집은 질문만, 날짜는 문자열. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record InterpretTurn(String question, boolean trend, String category, String itemType, String periodLabel,
+                                String periodFrom, String periodTo) {
+    }
+
+    /**
+     * 작은 모델의 질문 해석. period는 질문에 기간이 있을 때만(없으면 null).
+     * fashion이 false면 패션·트렌드 질문이 아니다 — null(예전 AI 서비스)은 패션 질문으로 본다.
+     * question은 이어 묻기를 앞 대화로 채워 혼자서도 뜻이 통하게 다시 쓴 질문(이어 묻기가 아니면 원래 질문, 예전 AI 서비스는 null).
+     */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
-                                    Map<String, Object> usage) {
+                                    Map<String, Object> usage, Boolean fashion, String question) {
+
+        public boolean offTopic() {
+            return Boolean.FALSE.equals(fashion);
+        }
     }
 
     /**

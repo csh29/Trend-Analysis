@@ -22,9 +22,13 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
     public record Period(LocalDate from, LocalDate to, String label, boolean explicit, boolean stale) {
     }
 
-    /** by: AI(작은 모델) 또는 RULE(규칙 — AI 해석 실패). */
-    public record Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
-                                 String by) {
+    /**
+     * by: AI(작은 모델) 또는 RULE(규칙 — AI 해석 실패). fashion이 false면 패션 질문이 아니라 답하지 않았다(규칙 해석은 늘 true).
+     * resolvedQuestion: 이어 묻기를 앞 대화로 채워 다시 쓴 질문(검색·답변에 쓴 질문) — 원래 질문과 같으면 null.
+     * period: 질문이 콕 집은 기간(없으면 null) — 화면이 다음 질문의 앞 대화로 돌려보낸다.
+     */
+    public record Interpretation(boolean fashion, boolean trend, String category, String categoryName, String itemType,
+                                 String itemTypeName, String by, String resolvedQuestion, Period period) {
     }
 
     /** 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). */

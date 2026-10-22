@@ -84,10 +84,14 @@ public final class TrendCodes {
                     new String[]{"BURGUNDY", "버건디"}, new String[]{"PINK", "핑크"}, new String[]{"PURPLE", "퍼플"},
                     new String[]{"YELLOW", "옐로우"}, new String[]{"ORANGE", "오렌지"}, new String[]{"MULTI", "멀티컬러(패턴)"}),
             SILHOUETTE, List.of(
-                    new String[]{"OVERSIZED", "오버사이즈", "FIT"}, new String[]{"REGULAR", "레귤러", "FIT"}, new String[]{"SLIM", "슬림", "FIT"},
-                    new String[]{"BOXY", "박시", "SHAPE"}, new String[]{"WIDE", "와이드", "SHAPE"}, new String[]{"CROPPED", "크롭", "LENGTH"},
-                    new String[]{"LONG", "롱", "LENGTH"}, new String[]{"A_LINE", "A라인", "SHAPE"}, new String[]{"H_LINE", "H라인", "SHAPE"},
-                    new String[]{"FLARE", "플레어", "SHAPE"}),
+                    // 속성 = 축,이 실루엣을 쓸 수 있는 카테고리(없으면 모든 카테고리). 기타(ETC)는 어느 실루엣도 쓰지 않는다
+                    new String[]{"OVERSIZED", "오버사이즈", "FIT,OUTER,TOP,DRESS,SETUP"}, // 하의는 통이 넓으면 WIDE
+                    new String[]{"REGULAR", "레귤러", "FIT,OUTER,TOP,BOTTOM,DRESS,SETUP"},
+                    new String[]{"SLIM", "슬림", "FIT,OUTER,TOP,BOTTOM,DRESS,SETUP"},
+                    new String[]{"BOXY", "박시", "SHAPE,OUTER,TOP,DRESS,SETUP"}, new String[]{"WIDE", "와이드", "SHAPE,BOTTOM,SETUP"},
+                    new String[]{"CROPPED", "크롭", "LENGTH,OUTER,TOP,BOTTOM"}, new String[]{"LONG", "롱", "LENGTH,OUTER,TOP,BOTTOM,DRESS"},
+                    new String[]{"A_LINE", "A라인", "SHAPE,OUTER,BOTTOM,DRESS"}, new String[]{"H_LINE", "H라인", "SHAPE,OUTER,BOTTOM,DRESS"},
+                    new String[]{"FLARE", "플레어", "SHAPE,BOTTOM,DRESS"}),
             // 여러 개를 고른다(간절기 = 봄·가을). SS/FW는 이 값들을 묶어 본다
             SEASON, List.of(
                     new String[]{"SPRING", "봄"}, new String[]{"SUMMER", "여름"}, new String[]{"FALL", "가을"},

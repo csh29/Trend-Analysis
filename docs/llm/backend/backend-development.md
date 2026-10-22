@@ -11,12 +11,12 @@
 ```
 
 ```bash
-java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar
+java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
+- **설정은 `src/main/resources/application-local.properties` 하나**(커밋 제외)이고 `local` 프로파일일 때만 읽힌다. IDE 실행 설정에는 프로파일이 들어 있지만, jar로 띄울 때는 `--spring.profiles.active=local`을 꼭 붙인다 — 빼면 DB 주소·`claude.api.key`를 못 읽는다. 설정 키 목록은 `backend/README.md`에 있다.
 - **`./mvnw spring-boot:run`은 쓰지 않는다.** 경로의 한글(`ai 과제`) 때문에 "Could not find or load main class"로 실패한다. 패키징한 jar로 실행하거나 IDE에서 `TrendAnalysisApplication`을 실행한다.
-- `.mvn/wrapper/`는 git에서 제외돼 있다. 새로 클론한 곳에서는 `./mvnw`가 없으니 설치된 `mvn`이나 IDE로 빌드한다.
-- 설정은 `src/main/resources/application*.properties`(커밋 제외)다. 설정 키 목록은 `backend/README.md`에 있다.
+- `mvnw` 스크립트는 git에 있지만 `.mvn/wrapper/`는 제외돼 있어, 새로 클론한 곳에서는 `./mvnw`가 실행되지 않는다. 설치된 `mvn`이나 IDE로 빌드한다.
 - IDE로 앱을 띄워 둔 채 같은 폴더에서 `package`하면 `target/classes`가 바뀌어 떠 있는 앱이 ClassNotFound로 깨질 수 있다. 확인용 기동은 jar를 복사해 다른 포트(`--server.port=8081`)로 띄운다.
 
 ### 앱 기동 확인
@@ -33,19 +33,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
                                                                      └─ AiClient ──▶ AI 서비스(FastAPI)
 ```
 
-| 패키지 / 위치 | 역할 | 기능 문서 |
-| --- | --- | --- |
-| `config` | `SecurityConfig`(보안 정책), `DataInitializer`(기본 데이터), `ImageUploadConfig`(업로드 크기 상한), `AnalysisAsyncConfig`(분석 스레드) | 각 기능 |
-| `security` | 프로그램 권한 검사: `RequiresProgram`, `RequiresProgramAuthorizationManager`, `ProgramAccessGuard`, `CsrfCookieFilter` | auth-permission |
-| `mvc` | 화면 컨트롤러 `ViewController`, 공통 모델(`SidebarModelAdvice`, `TopbarModelAdvice`), 예외 변환(`ApiExceptionAdvice`, `UploadSizeExceptionAdvice`) | screen-framework |
-| `controller` | REST API (`/api/**`) | 각 기능 |
-| `service/program`·`user`·`permission`·`comcd` | 관리 업무 로직 | admin-screens |
-| `service/image`, `service/analysis`(`DocumentService`) | 원문 등록 | document-upload |
-| `service/analysis` | 정형화·검증·저장·색인 | analysis-pipeline |
-| `repository` | Spring Data JPA | — |
-| `domain` | 엔티티 + `ProgramButton`(공통 버튼 종류) | — |
-| `dto` | 화면·API 요청·응답 record | — |
-| `templates/`, `static/` | 화면·공통 JS/CSS | screen-framework |
+패키지 → 기능 문서: `security` → auth-permission, `mvc`·`templates/`·`static/`·`service/home` → screen-framework, `service/program`·`user`·`permission`·`comcd` → admin-screens, `service/image`·`service/analysis`(`DocumentService`) → document-upload, `service/analysis` → analysis-pipeline, `service/trend` → trend-aggregation, `service/rag` → rag-search. `config`(보안·기본 데이터·업로드·분석 스레드·스케줄)는 각 기능.
 
 - **화면(`mvc`)과 API(`controller`)는 분리돼 있다.** 화면은 HTML 껍데기만 그리고, 데이터는 화면 JS가 `/api/**`를 fetch해서 채운다.
 
@@ -54,8 +42,8 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
 ### 레이어
 
 - 화면은 `mvc/ViewController`, 데이터는 `controller`(REST) → `service` → `repository`로 흐른다. 컨트롤러에 업무 로직을 넣지 않는다.
-- 패키지는 기능별 하위 패키지로 나눈다(`service/user`, `dto/comcd` 등). 이름과 역할이 어긋나면 그때 고친다.
-- 요청·응답은 `dto`의 record로 받는다. 응답에 엔티티를 그대로 내보낼 때는 민감 필드가 없는지 확인한다. `User`는 반드시 `UserResponse`로 내보낸다(비밀번호 해시).
+- 패키지는 기능별 하위 패키지로 나눈다(`service/user`, `dto/comcd` 등). 작업 중인 코드의 이름·위치가 역할과 어긋나면 그 작업 범위 안에서만 고친다(범위 밖 리팩터링은 하지 않는다).
+- **새 API의 요청·응답은 `dto`의 record**로 한다. 예전에 엔티티를 그대로 내보내는 API를 고칠 때는 민감 필드가 없는지 확인한다. `User`는 반드시 `UserResponse`로 내보낸다(비밀번호 해시).
 - 엔티티 컬럼 이름에 DB 예약어(`value`, `user` 등)를 쓰지 않는다 — H2 DDL이 깨진다(`TrendItemValue.item_value`, 테이블 `users`).
 - 컬럼 기본값은 `@ColumnDefault`로 준다. `columnDefinition`에 `default ... not null`까지 넣으면 `ddl-auto=update`의 ALTER 문이 깨진다(`User.useYn`).
 
@@ -93,7 +81,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
 ./mvnw test
 ```
 
-- 변경을 마치기 전에 통과시킨다. 기능별로 고칠 때 확인할 것은 각 기능 문서의 "확인할 것"에 있다.
+- 변경을 마치기 전에 통과시킨다. 기능별로 고칠 때 확인할 것은 각 기능 문서의 "확인할 것" 또는 "테스트" 절에 있다(없는 문서도 있다).
 - `@SpringBootTest` + `@AutoConfigureMockMvc`로 전체 컨텍스트를 띄운다. 보안 필터·`DataInitializer`까지 실제와 같이 돈다.
 - 로그인은 `@WithMockUser(username = "...")`로 흉내 낸다. 메뉴·권한은 그 username으로 DB를 조회하므로, **DB에 있는 사용자 이름**을 써야 권한이 붙는다. 권한 없음은 `nobody`처럼 없는 이름으로 확인한다.
 - 상태 변경 요청에는 `.with(csrf())`를 붙인다. 빼면 403이 나는 것 자체를 검증하는 테스트도 있다.
@@ -107,7 +95,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
   새 테스트 클래스도 이 속성을 붙이고 이름을 다르게 준다. 같은 이름을 쓰면 컨텍스트 캐시가 DB를 공유한다.
 - 기본 데이터는 `DataInitializer`가 넣은 것을 그대로 쓴다.
   - `admin`(id 1, ADMIN, 모든 프로그램 모든 버튼 권한)
-  - 공통코드 `ROLE`(ADMIN·USER), `MENU_GROUP`(TREND·MNG), `TREND_*`
+  - 공통코드 `ROLE`(ADMIN·USER), `MENU_GROUP`(TREND·MNG), `TREND_*`, `RAG_TREND_WORD`
   - `user-permission-mng`는 신규·삭제 버튼을 쓰지 않는다(버튼 거르기 확인용).
 - 같은 클래스의 테스트는 DB를 공유하고 실행 순서가 정해져 있지 않다. 그래서:
   - `admin`의 권한·역할을 바꾸지 않는다. 바꿔야 하면 테스트 안에서 사용자를 새로 만들어 쓴다.
@@ -118,7 +106,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
 | 변경 | 확인할 것 |
 | --- | --- |
 | `SecurityConfig`·`security` 패키지 | 미로그인 화면 → 로그인 이동, API → 401, 권한 없음 403, CSRF 없는 POST 403 |
-| 새 API | 정상 응답 + 권한 없는 사용자 403 테스트 추가(`@RequiresProgram` 누락 방지) |
+| 새 API | 정상 응답 + 권한 없는 사용자 403 테스트 추가(`@RequiresProgram` 누락 방지). 일부러 로그인만 요구하는 API는 미로그인 401([`auth-permission.md`](../features/auth-permission.md)) |
 | `DataInitializer` | 새 DB에서 기동 성공, 기존 DB에서 재기동 시 중복 삽입 없음(유일 제약 위반 없이 기동) |
 | 엔티티(`ddl-auto=update`) | 새 파일 DB와 기존 파일 DB 양쪽에서 기동 시 DDL 오류가 없는지 |
 | 템플릿·공통 JS | jar 기동 후 로그인 → 각 탭이 열리고 그리드가 조회되는지, 콘솔 오류가 없는지 |

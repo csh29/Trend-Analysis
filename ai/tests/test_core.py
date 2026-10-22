@@ -19,7 +19,7 @@ from app.indexing import indexer
 from app.core import prompt_loader
 from app.indexing import vector_store
 from app.core.claude import AiServiceError
-from app.structuring.structurer import CodeOption, ImageInput, StructureInput, build_content, build_schema, structure
+from app.structuring.structurer import CodeOption, ImageInput, StructureInput, build_content, build_schema, structure, system_prompt
 
 
 def sample_input(doc_type="TEXT", images=None) -> StructureInput:
@@ -158,12 +158,20 @@ class StructurerTest(unittest.TestCase):
     def test_image_content_puts_image_first(self):
         content = build_content(sample_input("IMAGE"))
         self.assertEqual("image", content[0]["type"])
-        self.assertIn("LEATHER=레더(가죽)", content[-1]["text"])
+        self.assertNotIn("LEATHER", content[-1]["text"])  # 허용 코드 목록은 system(캐시 구간)에 있다
+
+    def test_fixed_part_is_cached_in_system(self):
+        # 규칙 + 허용 코드 목록은 매 요청 같다 — system 마지막 블록에 캐시 표시를 달아 둘 다 캐시에 든다
+        system = system_prompt(sample_input("IMAGE"))
+        self.assertNotIn("cache_control", system[0])
+        self.assertEqual({"type": "ephemeral"}, system[-1]["cache_control"])
+        self.assertIn("LEATHER=레더(가죽)", system[-1]["text"])
+        self.assertEqual(system, system_prompt(sample_input("IMAGE")))  # 같은 입력이면 바이트까지 같아야 캐시가 맞는다
 
     def _system_for(self, doc_type):
         messages = FakeMessages(fake_response())
         structure(sample_input(doc_type), "k", client=SimpleNamespace(messages=messages))
-        return messages.calls[0]["system"]
+        return "\n\n".join(b["text"] for b in messages.calls[0]["system"])
 
     def test_each_type_gets_only_its_own_rules(self):
         # 이미지로 소재를 짐작하면 오판이 많다(그레이 데님 → 면) — 질감이 분명할 때만, 텍스트는 본문에 나온 것만.
@@ -181,14 +189,14 @@ class StructurerTest(unittest.TestCase):
     def test_article_gets_both_rules_and_precedence(self):
         messages = FakeMessages(fake_response())
         structure(sample_input("TEXT", images=2), "k", client=SimpleNamespace(messages=messages))
-        system = messages.calls[0]["system"]
+        system = messages.calls[0]["system"][0]["text"]
         self.assertIn("본문에 그 아이템의 소재가 직접 나온 것만", system)
         self.assertIn("질감이 사진에서 분명할 때만", system)
         self.assertLess(system.index("질감이 사진에서 분명할 때만"), system.index("본문을 따른다"))  # 우선순위가 마지막
         content = messages.calls[0]["messages"][0]["content"]
         self.assertEqual(["image", "image", "text", "text"], [c["type"] for c in content])  # 이미지 → 본문 → 지시문
         self.assertIn("<document>", content[2]["text"])
-        self.assertIn("함께 온 이미지", content[3]["text"])
+        self.assertIn("본문이 주된 근거", content[3]["text"])  # 지시도 본문 우선(사진 위주로 뽑지 않게)
 
     def test_successful_call_uses_structured_output(self):
         messages = FakeMessages(fake_response())
@@ -311,12 +319,13 @@ class PromptLoaderTest(unittest.TestCase):
         structure(sample_input("TEXT"), "k", client=SimpleNamespace(messages=messages))
         call = messages.calls[0]
         # 공통 → 실루엣 기준 → 자료 유형 기준 순서로 붙는다
-        self.assertEqual("\n\n".join([common["system"], silhouette["system"], text_rules["system"]]), call["system"])
-        self.assertNotIn("<!--", call["system"])  # md 주석은 보내지 않는다
+        rules, allowed = call["system"]
+        self.assertEqual("\n\n".join([common["system"], silhouette["system"], text_rules["system"]]), rules["text"])
+        self.assertTrue(allowed["text"].startswith(common["allowed_values_header"]))  # 규칙 뒤에 허용 코드 목록
+        self.assertNotIn("<!--", rules["text"] + allowed["text"])  # md 주석은 보내지 않는다
         texts = [b["text"] for b in call["messages"][0]["content"] if b["type"] == "text"]
         self.assertTrue(any(text_rules["task"] in t for t in texts))
         self.assertTrue(any(t.startswith("<document>\n" + text_rules["title_label"]) for t in texts))
-        self.assertTrue(any(t.startswith(common["allowed_values_header"]) for t in texts))
 
 
 if __name__ == "__main__":

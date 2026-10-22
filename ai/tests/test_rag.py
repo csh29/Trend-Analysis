@@ -322,6 +322,49 @@ class InterpretTest(unittest.TestCase):
             self.assertIsNone(r["period"], bad)
             self.assertIsNone(r["category"])
 
+    def test_history_goes_into_prompt_and_rewritten_question_comes_back(self):
+        # 이어 묻기 — 앞 질문·해석을 프롬프트에 넣고, 다시 쓴 질문을 돌려준다(비었거나 너무 길면 원래 질문)
+        data = self.interpret.InterpretInput(
+            question="그럼 하의는?", model="m", today=TODAY, categories=self.data.categories, item_types=self.data.item_types,
+            history=[self.interpret.Turn("요즘 유행하는 아우터는?", True, "OUTER"),
+                     self.interpret.Turn("지난달 유행한 패딩은?", True, "OUTER", "OUTER_PADDING", "지난달(9월)", "2026-09-01", "2026-09-30")])
+        content = self.interpret.build_content(data)
+        self.assertIn("<previous>", content)
+        self.assertLess(content.index("요즘 유행하는 아우터는?"), content.index("지난달 유행한 패딩은?"))  # 마지막이 바로 앞
+        self.assertIn("item_type=OUTER_PADDING, 기간=지난달(9월)(2026-09-01~2026-09-30)", content)
+        self.assertLess(content.index("</previous>"), content.index("<question>"))
+        self.assertNotIn("<previous>", self.interpret.build_content(self.data))  # 앞 대화가 없으면 없다
+        self.assertIn("question", self.interpret.build_schema(data)["required"])
+        n = self.interpret.normalize
+        self.assertEqual("요즘 유행하는 하의는?", n({"question": " 요즘 유행하는 하의는? "}, data)["question"])
+        self.assertEqual("그럼 하의는?", n({"question": ""}, data)["question"])
+        self.assertEqual("그럼 하의는?", n({"question": "가" * 501}, data)["question"])
+
+    def test_api_passes_recent_history_only(self):
+        seen = {}
+
+        def fake_interpret(data, key):
+            seen["history"] = data.history
+            return {"question": data.question, "fashion": True, "trend": True, "category": None, "item_type": None,
+                    "period": None, "usage": {}}
+
+        history = [{"question": f"질문{i}", "trend": True, "category": "OUTER"} for i in range(5)] + [{"question": "  "}]
+        with mock.patch.object(main.interpreter, "interpret", fake_interpret):
+            res = TestClient(main.app).post("/interpret", headers={"X-Claude-Api-Key": "k"}, json={
+                "question": "그럼 하의는?", "model": "m", "history": history})
+        self.assertEqual(200, res.status_code, res.text)
+        # 최근 3건만(빈 질문은 버린다) — 오래된 질문에 이어 붙이지 않게
+        self.assertEqual(["질문3", "질문4"], [t.question for t in seen["history"]])
+
+    def test_fashion_flag(self):
+        # 패션 질문이 아니면 Spring이 답하지 않는다 — 칸이 빠졌으면 패션 질문으로 본다(잘못 막지 않게)
+        schema = self.interpret.build_schema(self.data)
+        self.assertIn("fashion", schema["required"])
+        n = self.interpret.normalize
+        self.assertFalse(n({"fashion": False, "trend": True}, self.data)["fashion"])
+        self.assertTrue(n({"fashion": True}, self.data)["fashion"])
+        self.assertTrue(n({"trend": True}, self.data)["fashion"])
+
     def test_interpret_calls_small_model_with_low_effort(self):
         body = json.dumps({"trend": True, "category": "OUTER", "item_type": "", "has_period": False,
                            "period_from": "", "period_to": "", "period_label": ""})
@@ -336,3 +379,19 @@ class InterpretTest(unittest.TestCase):
     def test_api_requires_key(self):
         res = TestClient(main.app).post("/interpret", json={"question": "q", "model": "m"})
         self.assertEqual(401, res.status_code)
+
+    def test_api_accepts_null_words(self):
+        # 공통코드 속성이 비면 Spring이 words: null로 보낸다 — 422로 거부해 늘 규칙 해석으로 빠졌다(2026-10-22)
+        seen = {}
+
+        def fake_interpret(data, key):
+            seen["categories"] = data.categories
+            return {"trend": True, "category": None, "item_type": None, "period": None, "usage": {}}
+
+        with mock.patch.object(main.interpreter, "interpret", fake_interpret):
+            res = TestClient(main.app).post("/interpret", headers={"X-Claude-Api-Key": "k"}, json={
+                "question": "요즘 유행하는 아우터는?", "model": "m",
+                "categories": [{"value": "OUTER", "name": "아우터", "words": None}],
+                "item_types": [{"value": "OUTER_PADDING", "name": "패딩", "words": None}]})
+        self.assertEqual(200, res.status_code, res.text)
+        self.assertEqual("", seen["categories"][0].words)

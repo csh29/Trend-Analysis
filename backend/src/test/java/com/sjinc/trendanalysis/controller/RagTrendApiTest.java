@@ -101,7 +101,7 @@ class RagTrendApiTest {
     @WithMockUser(username = "admin")
     void 유행_질문은_범위_원문을_세서_집계와_예시_원문으로_답한다() throws Exception {
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(
-                new AiClient.InterpretResponse(true, "OUTER", null, null, null));
+                new AiClient.InterpretResponse(true, "OUTER", null, null, null, true, null));
         when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("요즘 사람들 겉옷 뭐 입어?")))
@@ -133,7 +133,7 @@ class RagTrendApiTest {
     @Test
     @WithMockUser(username = "admin")
     void 종류를_콕_집으면_그_종류만_센다() throws Exception {
-        when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, "TOP", "OUTER_PADDING", null, null));
+        when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, "TOP", "OUTER_PADDING", null, null, true, null));
         when(aiClient.answer(any(), any())).thenReturn(grounded("RT-4"));
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("패딩 유행 색은?")))
@@ -148,7 +148,7 @@ class RagTrendApiTest {
     @WithMockUser(username = "admin")
     void 기간에_원문이_없으면_AI를_부르지_않고_근거_없음() throws Exception {
         when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, "OUTER", null,
-                new AiClient.AnswerPeriod("2020-01-01", "2020-12-31", "2020년", true, false), null));
+                new AiClient.AnswerPeriod("2020-01-01", "2020-12-31", "2020년", true, false), null, true, null));
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("2020년 유행 아우터")))
                 .andExpect(jsonPath("$.grounded").value(false))
@@ -174,8 +174,60 @@ class RagTrendApiTest {
 
     @Test
     @WithMockUser(username = "admin")
+    void 이어_묻기는_앞_대화를_걸러_해석에_넘기고_다시_쓴_질문으로_답한다() throws Exception {
+        when(aiClient.interpret(any(), any())).thenReturn(
+                new AiClient.InterpretResponse(true, "BOTTOM", null, null, null, true, "요즘 유행하는 하의는?"));
+        when(aiClient.answer(any(), any())).thenReturn(grounded("RT-5"));
+        // 앞 대화 4건 — 최근 3건만 넘기고, 공통코드에 없는 값·잘못된 날짜는 버린다
+        String body = """
+                {"question": "그럼 하의는?", "history": [
+                  {"question": "아주 옛날 질문", "trend": true, "category": "OUTER"},
+                  {"question": "요즘 유행하는 신발은?", "trend": true, "category": "SHOES"},
+                  {"question": "지난달 유행 아우터는?", "trend": true, "category": "OUTER", "periodLabel": "지난달", "periodFrom": "어제", "periodTo": "2026-09-30"},
+                  {"question": "요즘 유행하는 아우터는?", "trend": true, "category": "OUTER", "itemType": "OUTER_PADDING", "periodLabel": "지난달(9월)", "periodFrom": "2026-09-01", "periodTo": "2026-09-30"}]}
+                """;
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.question").value("그럼 하의는?")) // 화면에는 사용자가 쓴 질문
+                .andExpect(jsonPath("$.interpretation.resolvedQuestion").value("요즘 유행하는 하의는?"))
+                .andExpect(jsonPath("$.interpretation.category").value("BOTTOM"));
+
+        ArgumentCaptor<AiClient.InterpretRequest> interpreted = ArgumentCaptor.forClass(AiClient.InterpretRequest.class);
+        verify(aiClient).interpret(interpreted.capture(), eq("test-key"));
+        List<AiClient.InterpretTurn> turns = interpreted.getValue().history();
+        assertThat(turns).extracting(AiClient.InterpretTurn::question)
+                .containsExactly("요즘 유행하는 신발은?", "지난달 유행 아우터는?", "요즘 유행하는 아우터는?");
+        assertThat(turns.get(0).category()).isEmpty();      // 공통코드에 없는 카테고리
+        assertThat(turns.get(1).periodLabel()).isEmpty();   // 잘못된 날짜면 기간을 통째로 뺀다
+        assertThat(turns.get(2).itemType()).isEqualTo("OUTER_PADDING");
+        assertThat(turns.get(2).periodFrom()).isEqualTo("2026-09-01");
+
+        ArgumentCaptor<AiClient.AnswerRequest> answered = ArgumentCaptor.forClass(AiClient.AnswerRequest.class);
+        verify(aiClient).answer(answered.capture(), eq("test-key"));
+        assertThat(answered.getValue().question()).isEqualTo("요즘 유행하는 하의는?"); // 검색·답변은 다시 쓴 질문으로
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 패션_질문이_아니면_집계도_답변도_하지_않는다() throws Exception {
+        // "유행"이 들어 있어도 패션이 아니면(밈) 옷 원문을 세서 답하면 안 된다
+        when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, null, null, null, null, false, null));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("요즘 유행하는 밈은?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(false))
+                .andExpect(jsonPath("$.reason").value("OFF_TOPIC"))
+                .andExpect(jsonPath("$.interpretation.fashion").value(false))
+                .andExpect(jsonPath("$.facts").doesNotExist())
+                .andExpect(jsonPath("$.sources").isEmpty());
+        verify(aiClient, never()).answer(any(), any());
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
     void 공통코드에_없는_해석_값은_버린다() throws Exception {
-        when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, "SHOES", "SHOES_SNEAKER", null, null));
+        when(aiClient.interpret(any(), any())).thenReturn(new AiClient.InterpretResponse(true, "SHOES", "SHOES_SNEAKER", null, null, null, null));
         when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("요즘 유행?")))

@@ -52,27 +52,60 @@
         .bar-row .fill{ height:10px; border-radius:3px; background:var(--accent); }
         .bar-row .num{ font-size:11px; color:var(--text-sub); }
 
-        /* 질문창(P-06 RAG). 입력은 한 줄, Enter로 질문한다. */
-        /* 상자 어디를 눌러도 입력칸에 들어가게 — 입력칸이 상자 높이를 꽉 채우고(위아래 여백은 입력칸 안쪽), 아이콘·빈 곳도 label이라 누르면 포커스 */
-        .search{
-            display:flex; align-items:stretch; gap:10px; cursor:text;
-            border:1px solid var(--line); border-radius:var(--radius-md);
-            padding:0 8px 0 16px; background:#fafafd;
-        }
-        .search:focus-within{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
-        .search .ico{ display:flex; align-items:center; font-size:15px; color:#b6b6cc; }
-        .search input{ flex:1; min-width:0; padding:16px 0; border:none; outline:none; background:transparent; font:inherit; font-size:13px; color:var(--text); cursor:text; }
-        .search .btn{ align-self:center; cursor:pointer; }
-        .search input::placeholder{ color:#b6b6cc; }
+        /* 트렌드 챗봇(P-06 RAG) — 대화형(2026-10-22 사용자 요청). 질문은 오른쪽 말풍선, 답은 왼쪽 AI 말풍선으로 쌓인다.
+           이어 묻기("그럼 하의는?")를 알아듣게 최근 질문·해석 몇 건을 같이 보낸다. 대화는 이 화면에만 있고 저장하지 않는다. */
+        .chat{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
+            display:flex; flex-direction:column; height:clamp(480px, 74vh, 780px); }
+        .chat-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:16px 22px; border-bottom:1px solid var(--line); }
+        .chat-log{ position:relative; flex:1; min-height:0; overflow-y:auto; padding:20px 22px; display:flex; flex-direction:column; gap:18px; }
+        .msg{ display:flex; gap:10px; align-items:flex-start; }
+        .msg.user{ justify-content:flex-end; }
+        .msg.user .bubble{ max-width:min(640px, 80%); background:var(--navy); color:#fff; border-radius:16px 16px 4px 16px;
+            padding:10px 14px; font-size:13.5px; line-height:1.6; white-space:pre-wrap; word-break:break-word; }
+        .chat .avatar{ flex:none; width:30px; height:30px; border-radius:15px; background:var(--accent); color:#fff;
+            font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+        .msg.bot .bubble{ flex:1; min-width:0; max-width:840px; background:#fafafd; border:1px solid var(--line);
+            border-radius:4px 16px 16px 16px; padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
+        .msg.bot.is-error .bubble{ border-color:#f6c6d2; background:#fff7f9; }
+        .bubble-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .bubble-head .interp{ font-size:11.5px; color:var(--text-sub); }
+        /* 이어 묻기를 앞 대화로 채워 다시 쓴 질문 — 무엇으로 찾았는지 보이게 */
+        .resolved{ font-size:12px; color:var(--text-sub); margin-top:-4px; }
+        .resolved b{ color:var(--text); font-weight:700; }
+        .msg .plain{ font-size:13.5px; line-height:1.65; color:var(--text); white-space:pre-wrap; }
+        .msg .retry{ align-self:flex-start; }
+        /* 답을 기다리는 동안 — 점 세 개 */
+        .typing{ display:flex; align-items:center; gap:5px; font-size:12.5px; color:var(--text-sub); }
+        .typing i{ width:6px; height:6px; border-radius:50%; background:var(--accent); opacity:.3; animation:chat-blink 1.2s infinite; }
+        .typing i:nth-child(2){ animation-delay:.2s; }
+        .typing i:nth-child(3){ animation-delay:.4s; margin-right:6px; }
+        @keyframes chat-blink{ 0%, 80%, 100%{ opacity:.3; } 40%{ opacity:1; } }
+        @media (prefers-reduced-motion: reduce){ .typing i{ animation:none; opacity:.7; } }
+        /* 첫 화면 — 인사와 예시 질문(누르면 바로 묻는다) */
+        .chat-welcome{ margin:auto; text-align:center; display:flex; flex-direction:column; align-items:center; gap:8px; max-width:600px; }
+        .chat-welcome[hidden]{ display:none; }
+        .chat-welcome .avatar{ width:40px; height:40px; border-radius:20px; font-size:13px; }
+        .chat-welcome .hello{ font-size:16px; font-weight:800; color:var(--navy); }
+        .chat-welcome .desc{ font-size:12.5px; color:var(--text-sub); line-height:1.6; }
+        .suggests{ display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin-top:8px; }
+        .suggest{ border:1px solid var(--line); background:var(--card); border-radius:16px; padding:7px 13px;
+            font:inherit; font-size:12.5px; color:var(--text); cursor:pointer; }
+        .suggest:hover, .suggest:focus-visible{ border-color:var(--accent); color:var(--accent); outline:none; }
+        /* 입력 — 상자 어디를 눌러도 입력칸으로(label). Enter 보내기, Shift+Enter 줄바꿈, 6줄까지 늘어난다 */
+        .chat-input{ margin:0 22px; display:flex; align-items:flex-end; gap:10px; cursor:text;
+            border:1px solid var(--line); border-radius:14px; padding:5px 5px 5px 16px; background:#fafafd; }
+        .chat-input:focus-within{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+        .chat-input textarea{ flex:1; min-width:0; resize:none; border:none; outline:none; background:transparent;
+            font:inherit; font-size:13.5px; line-height:1.5; color:var(--text); padding:9px 0; height:auto; max-height:calc(1.5em * 6 + 18px); cursor:text; }
+        .chat-input textarea::placeholder{ color:#b6b6cc; }
+        .chat-send{ flex:none; width:38px; height:38px; border:none; border-radius:10px; background:var(--accent); color:#fff;
+            font-size:17px; font-weight:800; cursor:pointer; }
+        .chat-send:disabled{ opacity:.35; cursor:default; }
+        .chat-foot{ display:flex; justify-content:space-between; gap:12px; padding:6px 24px 12px; font-size:11px; color:var(--text-sub); }
 
-        /* 답변 박스 — 결론 한 줄(굵게) → 글머리 줄(줄 끝에 인용 번호) → 번호 붙은 출처 목록 → 검색 정보.
+        /* 답변 — 결론 한 줄(굵게) → 글머리 줄(줄 끝에 인용 번호) → 판단 근거 → 번호 붙은 출처 → 검색 정보.
            한 덩어리 글에 [1][2]가 섞여 읽기 어렵던 것을 나눴다(2026-10-22). 번호를 누르면 그 출처로 간다. */
-        .result{ border:1px solid var(--line); border-radius:var(--radius-md); padding:18px 22px; background:var(--card);
-            display:flex; flex-direction:column; gap:14px; }
-        .result[hidden]{ display:none; }
-        .result .q{ font-size:12px; font-weight:700; color:var(--text-sub); display:flex; align-items:center; gap:8px; }
-        .result .q .badge{ margin-left:auto; }
-        .answer-lead{ font-size:15px; font-weight:800; color:var(--navy); line-height:1.5; }
+        .answer-lead{ font-size:14.5px; font-weight:800; color:var(--navy); line-height:1.55; }
         .answer-lead.none{ font-size:13.5px; font-weight:600; color:var(--text-sub); }
         .answer-points{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
         .answer-points li{ position:relative; padding-left:16px; font-size:13.5px; line-height:1.65; color:var(--text); }
@@ -120,20 +153,15 @@
         .answer-sources .info{ flex:none; font-size:11.5px; color:var(--text-sub); white-space:nowrap; }
         .answer-sources .excerpt{ margin-top:2px; font-size:12px; line-height:1.5; color:var(--text-sub);
             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
-        .result .meta{ font-size:11px; color:var(--text-sub); }
+        .msg .meta{ font-size:11px; color:var(--text-sub); }
         .period-notice{ font-size:12px; color:#b8860b; background:#fff3d6; border-radius:8px; padding:8px 12px; }
-        /* 질문을 어떻게 알아들었는지(유행 질문·범위·해석 주체) — 질문 줄 아래 작은 글씨 */
-        .result .interp{ font-size:11.5px; color:var(--text-sub); margin-top:-8px; }
         /* 유행 질문의 판단 근거 집계 — 주 축(아이템 종류)은 막대, 나머지 축은 한 줄 요약 */
         .facts-box{ background:var(--bg); border-radius:10px; padding:12px 14px; display:flex; flex-direction:column; gap:8px; }
-        .facts-box[hidden]{ display:none; }
         .facts-box .facts-head{ font-size:12px; font-weight:700; color:var(--text-sub); }
         .facts-box .bars{ margin-top:0; gap:6px; }
         .facts-box .bar-row{ grid-template-columns:150px 1fr; }
         .facts-box .facts-line{ font-size:12px; color:var(--text); line-height:1.6; }
         .facts-box .facts-line b{ color:var(--text-sub); font-weight:700; margin-right:6px; }
-        .period-notice[hidden]{ display:none; }
-        .answer-points[hidden], .answer-sources[hidden]{ display:none; } /* display:flex가 hidden 속성을 이기지 않게 */
 
         /* 좁으면 위아래로 */
         @media (max-width:1100px){
@@ -212,27 +240,36 @@
                 </section>
             </div>
 
-            <!-- P-06 RAG: 분석이 끝난 자료 안에서만 답하고, 근거가 기준 유사도에 못 미치면 "근거 자료 없음". -->
-            <label class="search" for="ragQuestion">
-                <span class="ico">⌕</span>
-                <input type="text" id="ragQuestion" maxlength="500" autocomplete="off"
-                       placeholder="트렌드를 물어보세요 — 예) 요즘 유행하는 와이드 팬츠 스타일은?">
-                <button type="button" class="btn primary" id="ragAsk">질문</button>
-            </label>
-
-            <div class="result" id="ragResult" hidden>
-                <div class="q"><span id="ragResultQ"></span><span class="badge" id="ragBadge"></span></div>
-                <div class="interp" id="ragInterp"></div>
-                <div class="period-notice" id="ragPeriodNotice" hidden></div>
-                <div class="answer-lead" id="ragAnswer"></div>
-                <ul class="answer-points" id="ragPoints"></ul>
-                <div class="facts-box" id="ragFacts" hidden></div>
-                <div class="answer-sources" id="ragSourcesBox">
-                    <h4>출처</h4>
-                    <ol id="ragSources"></ol>
+            <!-- P-06 RAG 트렌드 챗봇: 분석이 끝난 자료 안에서만 답하고, 근거가 기준 유사도에 못 미치면 "근거 자료 없음",
+                 패션·트렌드 질문이 아니면 답하지 않는다. -->
+            <section class="chat" aria-label="트렌드 챗봇">
+                <div class="chat-head">
+                    <div>
+                        <div class="domain-title">트렌드 챗봇</div>
+                        <div class="domain-desc">분석이 끝난 자료 안에서만 답합니다 · 앞 질문에 이어서 물어봐도 돼요(최근 3개까지 기억)</div>
+                    </div>
+                    <button type="button" class="domain-link" id="chatClear" hidden>대화 지우기</button>
                 </div>
-                <div class="meta" id="ragMeta"></div>
-            </div>
+                <div class="chat-log" id="chatLog" aria-live="polite">
+                    <div class="chat-welcome" id="chatWelcome">
+                        <span class="avatar">AI</span>
+                        <div class="hello">무엇이 유행하는지 물어보세요</div>
+                        <div class="desc">유행 질문은 원문 수·매체 수를 세서, 코디·특징 질문은 비슷한 자료를 찾아 답하고 출처를 붙입니다.</div>
+                        <div class="suggests">
+                            <button type="button" class="suggest">요즘 유행하는 아우터는?</button>
+                            <button type="button" class="suggest">요즘 많이 보이는 컬러는?</button>
+                            <button type="button" class="suggest">데님 재킷은 어떤 하의랑 입었어?</button>
+                            <button type="button" class="suggest">지난주에 많이 올라온 아이템은?</button>
+                        </div>
+                    </div>
+                </div>
+                <label class="chat-input" for="ragQuestion">
+                    <textarea id="ragQuestion" rows="1" maxlength="500" autocomplete="off"
+                              placeholder="트렌드를 물어보세요 — 예) 요즘 유행하는 와이드 팬츠 스타일은?"></textarea>
+                    <button type="button" class="chat-send" id="ragAsk" title="보내기 (Enter)" aria-label="보내기" disabled>↑</button>
+                </label>
+                <div class="chat-foot"><span>Enter 보내기 · Shift+Enter 줄바꿈</span><span id="chatCount">0 / 500</span></div>
+            </section>
         </div>
 
         <div id="tabPanels"></div>
@@ -342,12 +379,33 @@
         new MutationObserver(refreshIfStale).observe(panel, { attributes: true, attributeFilter: ['class'] });
     })();
 
-    /** RAG 질문(P-06). 마지막 답 하나만 보여 준다 — 질문·답변은 저장하지 않는다. */
+    /**
+     * 트렌드 챗봇(P-06 RAG) — 대화형. 질문을 오른쪽 말풍선으로 쌓고, 답을 받으면 왼쪽 AI 말풍선에 그린다.
+     * 이어 묻기를 알아듣게 최근 질문(해석이 다시 쓴 질문)과 해석을 MAX_HISTORY건까지 같이 보낸다 — 서버는 해석에만 쓰고 저장하지 않는다.
+     * 대화는 이 화면에만 있다 — 페이지를 다시 열거나 지우면 사라진다.
+     */
     (function () {
+        const log = document.getElementById('chatLog');
+        const welcome = document.getElementById('chatWelcome');
         const input = document.getElementById('ragQuestion');
         const button = document.getElementById('ragAsk');
-        const result = document.getElementById('ragResult');
+        const clearButton = document.getElementById('chatClear');
+        const counter = document.getElementById('chatCount');
+        const MAX_LENGTH = 500;
         let asking = false;
+        let seq = 0; // 말풍선마다 출처 행 id를 따로 쓴다(ragSource-3-1) — 여러 답의 [1]이 서로 다른 출처를 가리킨다
+        const MAX_HISTORY = 3;
+        let history = []; // 앞 대화(오래된 것 → 최근). 답을 받은 패션 질문만 — 오류·범위 밖 질문은 이어 붙일 대상이 아니다
+
+        /** 답을 받으면 앞 대화에 넣는다. 질문은 해석이 다시 쓴 것(혼자서도 뜻이 통한다) — 이어 묻기가 겹쳐도 뜻이 이어진다. */
+        function remember(view) {
+            const i = view.interpretation;
+            if (!i || i.fashion === false) return;
+            const p = i.period;
+            history.push({ question: i.resolvedQuestion || view.question, trend: !!i.trend, category: i.category || null,
+                itemType: i.itemType || null, periodLabel: p ? p.label : null, periodFrom: p ? p.from : null, periodTo: p ? p.to : null });
+            history = history.slice(-MAX_HISTORY);
+        }
 
         // 모델이 쓴 글은 모두 textContent로만 넣는다(HTML로 해석하지 않는다)
         function el(tag, className, text) {
@@ -357,14 +415,29 @@
             return node;
         }
 
-        /** 줄 끝 인용 번호. 누르면 아래 출처 행으로 스크롤하고 잠깐 강조한다. */
-        function citeButton(n, sourcesByN) {
+        function scrollTo(node) {
+            // 답이 길면 맨 아래가 아니라 답의 첫 줄이 보이게 한다
+            log.scrollTo({ top: node ? node.offsetTop - 12 : log.scrollHeight, behavior: 'smooth' });
+        }
+
+        function addMessage(kind) {
+            welcome.hidden = true;
+            clearButton.hidden = false;
+            const msg = el('div', 'msg ' + kind);
+            if (kind === 'bot') msg.appendChild(el('span', 'avatar', 'AI'));
+            msg.appendChild(el('div', 'bubble'));
+            log.appendChild(msg);
+            return msg;
+        }
+
+        /** 줄 끝 인용 번호. 누르면 같은 말풍선의 출처 행으로 스크롤하고 잠깐 강조한다. */
+        function citeButton(n, sourcesByN, prefix) {
             const btn = el('button', 'cite', String(n));
             btn.type = 'button';
             const s = sourcesByN[n];
             if (s) btn.title = [s.title, s.media, s.statDate].filter(Boolean).join(' · ');
             btn.addEventListener('click', function () {
-                const row = document.getElementById('ragSource' + n);
+                const row = document.getElementById(prefix + n);
                 if (!row) return;
                 row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
                 row.classList.add('is-flash');
@@ -407,9 +480,9 @@
         drawerBackdrop.addEventListener('click', closeDrawer);
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeDrawer(); });
 
-        function sourceRow(s) {
+        function sourceRow(s, prefix) {
             const li = el('li');
-            li.id = 'ragSource' + s.n;
+            li.id = prefix + s.n;
             li.appendChild(el('span', 'n', String(s.n)));
             const body = el('div');
             const head = el('div', 'head');
@@ -447,11 +520,8 @@
         }
 
         /** 유행 질문의 판단 근거: 범위·기간·원문 수·매체 수, 주 축은 막대(원문 수·매체 수·직전), 나머지 축은 한 줄. */
-        function renderFacts(facts, period) {
-            const box = document.getElementById('ragFacts');
-            box.replaceChildren();
-            box.hidden = !facts;
-            if (!facts) return;
+        function factsBox(facts, period) {
+            const box = el('div', 'facts-box');
             box.appendChild(el('div', 'facts-head', '판단 근거 — ' + facts.scopeLabel
                 + (period ? ' · ' + period.label + ' ' + period.from + ' ~ ' + period.to : '')
                 + ' · 원문 ' + facts.docCount + '건 · 매체 ' + facts.mediaCount + '곳 (직전 ' + facts.prevDocCount + '건)'));
@@ -477,94 +547,146 @@
                     box.appendChild(line);
                 }
             });
+            return box;
         }
 
-        function show(view) {
-            document.getElementById('ragResultQ').textContent = 'Q. ' + view.question;
-            document.getElementById('ragInterp').textContent = interpretationText(view.interpretation);
-            renderFacts(view.facts, view.period);
-            const badge = document.getElementById('ragBadge');
-            badge.className = 'badge ' + (view.grounded ? 'success' : 'medium');
-            badge.textContent = view.grounded ? '근거 ' + view.sources.length + '건' : '근거 없음';
+        function metaText(view) {
+            const p = view.period;
+            if (view.facts) return '유행 판단은 원문 수·매체 수 집계 기준 · 출처는 그 집계의 예시 원문';
+            let periodText = '';
+            if (p && p.explicit) periodText = '기간 ' + p.label + ' ' + p.from + ' ~ ' + p.to + ' · ';
+            else if (p && p.from) periodText = '근거 게시일 ' + p.from + ' ~ ' + p.to + ' (최근 자료 우선) · ';
+            return periodText + '최고 유사도 ' + (view.bestScore == null ? '-' : view.bestScore.toFixed(3))
+                + ' (기준 ' + view.minScore.toFixed(2) + ')' + (view.statsWeek ? ' · 참고 집계 ' + view.statsWeek + ' 주' : '');
+        }
 
-            const answer = document.getElementById('ragAnswer');
-            answer.textContent = view.answer;
-            answer.classList.toggle('none', !view.grounded);
+        /** 답 말풍선: 근거 배지·해석 → (오래된 자료 안내) → 결론 → 글머리 줄 → 판단 근거 → 출처 → 검색 정보 */
+        function renderAnswer(bubble, view) {
+            bubble.replaceChildren();
+            if (view.reason === 'OFF_TOPIC') { // 패션 질문이 아니면 안내 한 줄만
+                bubble.appendChild(el('div', 'plain', view.answer));
+                return;
+            }
+            const prefix = 'ragSource-' + (++seq) + '-';
+            const head = el('div', 'bubble-head');
+            head.append(el('span', 'badge ' + (view.grounded ? 'success' : 'medium'),
+                view.grounded ? '근거 ' + view.sources.length + '건' : '근거 없음'),
+                el('span', 'interp', interpretationText(view.interpretation)));
+            bubble.appendChild(head);
+            if (view.interpretation && view.interpretation.resolvedQuestion) { // 이어 묻기 — 앞 대화로 채운 질문으로 찾았다
+                const resolved = el('div', 'resolved', '이렇게 이해했어요 · ');
+                resolved.appendChild(el('b', null, view.interpretation.resolvedQuestion));
+                bubble.appendChild(resolved);
+            }
+
+            // 기간이 없는 질문은 최근 자료를 앞세운다 — 가장 최근 근거도 오래됐으면(8주 넘음) 답 위에 알린다
+            const p = view.period;
+            if (p && p.stale && view.grounded) {
+                bubble.appendChild(el('div', 'period-notice', view.facts
+                    ? '최근 4주에 자료가 없어 ' + p.from + ' ~ ' + p.to + ' 자료로 셌습니다. 지금도 유행인지는 더 봐야 합니다.'
+                    : '최근 자료가 적어 ' + p.from + ' ~ ' + p.to + ' 자료로 답했습니다. 지금도 유행인지는 출처 날짜를 확인하세요.'));
+            }
+            bubble.appendChild(el('div', 'answer-lead' + (view.grounded ? '' : ' none'), view.answer));
 
             const sourcesByN = {};
             view.sources.forEach(function (s) { sourcesByN[s.n] = s; });
-            const points = document.getElementById('ragPoints');
-            points.replaceChildren.apply(points, (view.points || []).map(function (p) {
-                const li = el('li', null, p.text);
-                (p.sources || []).forEach(function (n) { li.appendChild(citeButton(n, sourcesByN)); });
-                return li;
-            }));
-            points.hidden = !points.children.length;
-
-            const sources = document.getElementById('ragSources');
-            sources.replaceChildren.apply(sources, view.sources.slice()
-                .sort(function (a, b) { return a.n - b.n; }).map(sourceRow)); // 번호 순 — 줄의 번호로 찾기 쉽게
-            document.getElementById('ragSourcesBox').hidden = !view.sources.length;
-
-            // 기간이 없는 질문은 관련 자료 중 최근 것을 앞세운다 — 가장 최근 근거도 오래됐으면(8주 넘음) 답 위에 알린다
-            const p = view.period;
-            const notice = document.getElementById('ragPeriodNotice');
-            const stale = !!(p && p.stale && view.grounded);
-            notice.hidden = !stale;
-            if (stale) notice.textContent = '최근 자료가 적어 ' + p.from + ' ~ ' + p.to + ' 자료로 답했습니다. 지금도 유행인지는 출처 날짜를 확인하세요.';
-            if (stale && view.facts) notice.textContent = '최근 4주에 자료가 없어 ' + p.from + ' ~ ' + p.to + ' 자료로 셌습니다. 지금도 유행인지는 더 봐야 합니다.';
-            let meta;
-            if (view.facts) { // 유행 질문 — 기간·집계는 판단 근거 상자에 있다
-                meta = '유행 판단은 원문 수·매체 수 집계 기준 · 출처는 그 집계의 예시 원문';
-            } else {
-                let periodText = '';
-                if (p && p.explicit) periodText = '기간 ' + p.label + ' ' + p.from + ' ~ ' + p.to + ' · ';
-                else if (p && p.from) periodText = '근거 게시일 ' + p.from + ' ~ ' + p.to + ' (최근 자료 우선) · ';
-                meta = periodText + '최고 유사도 ' + (view.bestScore == null ? '-' : view.bestScore.toFixed(3))
-                    + ' (기준 ' + view.minScore.toFixed(2) + ')'
-                    + (view.statsWeek ? ' · 참고 집계 ' + view.statsWeek + ' 주' : '');
+            if (view.points && view.points.length) {
+                const points = el('ul', 'answer-points');
+                view.points.forEach(function (pt) {
+                    const li = el('li', null, pt.text);
+                    (pt.sources || []).forEach(function (n) { li.appendChild(citeButton(n, sourcesByN, prefix)); });
+                    points.appendChild(li);
+                });
+                bubble.appendChild(points);
             }
-            document.getElementById('ragMeta').textContent = meta;
-            result.hidden = false;
+            if (view.facts) bubble.appendChild(factsBox(view.facts, view.period));
+            if (view.sources.length) {
+                const box = el('div', 'answer-sources');
+                const list = el('ol');
+                view.sources.slice().sort(function (a, b) { return a.n - b.n; }) // 번호 순 — 줄의 번호로 찾기 쉽게
+                    .forEach(function (s) { list.appendChild(sourceRow(s, prefix)); });
+                box.append(el('h4', null, '출처'), list);
+                bubble.appendChild(box);
+            }
+            bubble.appendChild(el('div', 'meta', metaText(view)));
         }
 
-        function ask() {
-            const question = input.value.trim();
-            if (!question) {
-                input.focus();
-                return;
-            }
-            if (asking) return;
+        function renderError(msg, bubble, message, question) {
+            msg.classList.add('is-error');
+            bubble.replaceChildren(el('div', 'plain', '답변을 받지 못했습니다 — ' + message));
+            const retry = el('button', 'btn retry', '다시 묻기');
+            retry.type = 'button';
+            retry.addEventListener('click', function () { send(question); });
+            bubble.appendChild(retry);
+        }
+
+        function updateInput() {
+            input.style.height = '0'; // 줄였다가 내용 높이로 늘린다(auto는 flex 안에서 줄지 않는다). 최대 6줄은 CSS
+            input.style.height = input.scrollHeight + 'px';
+            counter.textContent = input.value.length + ' / ' + MAX_LENGTH;
+            button.disabled = asking || !input.value.trim();
+        }
+
+        function send(text) {
+            const question = (text || '').trim();
+            if (!question || asking) return;
             asking = true;
-            button.disabled = true;
+            addMessage('user').querySelector('.bubble').textContent = question;
+            const msg = addMessage('bot');
+            const bubble = msg.querySelector('.bubble');
+            const typing = el('div', 'typing');
+            typing.append(el('i'), el('i'), el('i'), document.createTextNode('자료를 찾고 답을 쓰는 중이에요'));
+            bubble.appendChild(typing);
+            scrollTo(null);
+            if (text === input.value) input.value = '';
+            updateInput();
+
+            // 전체 화면 스피너 대신 말풍선 안의 점 세 개로 기다림을 보여 준다(silent — loading-overlay의 fetch 래퍼)
             fetch('/api/rag/ask', {
                 method: 'POST',
+                silent: true,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question })
+                body: JSON.stringify({ question: question, history: history })
             })
                 .then(function (res) {
-                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '답변을 받지 못했습니다.'); });
+                    if (!res.ok) return res.text().then(function (m) { throw new Error(m || 'HTTP ' + res.status); });
                     return res.json();
                 })
                 .then(function (view) {
-                    show(view);
-                    input.value = '';
+                    renderAnswer(bubble, view);
+                    remember(view);
                 })
-                .catch(function (err) { alert(err.message); })
+                .catch(function (err) { renderError(msg, bubble, err.message, question); })
                 .finally(function () {
                     asking = false;
-                    button.disabled = false;
+                    updateInput();
+                    scrollTo(msg);
                     input.focus();
                 });
         }
 
-        button.addEventListener('click', ask);
+        button.addEventListener('click', function () { send(input.value); });
+        input.addEventListener('input', updateInput);
         input.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' && !e.isComposing) { // 한글 조합 중 Enter는 글자 확정이다
+            // Enter 보내기, Shift+Enter 줄바꿈. 한글 조합 중 Enter는 글자 확정이다
+            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
                 e.preventDefault();
-                ask();
+                send(input.value);
             }
         });
+        welcome.addEventListener('click', function (e) {
+            const chip = e.target.closest('.suggest');
+            if (chip) send(chip.textContent);
+        });
+        clearButton.addEventListener('click', function () {
+            if (asking) return;
+            log.querySelectorAll('.msg').forEach(function (m) { m.remove(); });
+            history = [];
+            welcome.hidden = false;
+            clearButton.hidden = true;
+            input.focus();
+        });
+        updateInput();
     })();
 </script>
 </body>
