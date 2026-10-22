@@ -6,14 +6,100 @@
     <title>패션 트렌드 분석</title>
     <link rel="stylesheet" href="/css/common-ui.css">
     <style>
-        /* 화면 공통 뼈대(:root, .app-shell 등)는 common-ui.css가 담당한다. 여기는 이 화면 전용 위젯만 남긴다. */
+        /* 화면 공통 뼈대(:root, .app-shell 등)는 common-ui.css가 담당한다. 여기는 이 화면 전용
+           위젯(요약 카드, 막대 차트, 질문창·답변)만 남긴다. security-monitoring 홈과 같은 구조다. */
         #homePanel{ display:flex; flex-direction:column; gap:20px; }
-        .welcome-card{
+
+        /* 트렌드 집계(P-05)와 분석 현황(P-03)을 좌우 카드로 나란히 둔다. */
+        .overview{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:20px; }
+        .domain-card{
             background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
-            padding:20px 22px;
+            padding:20px 22px; display:flex; flex-direction:column; gap:16px;
         }
-        .welcome-title{ font-size:15px; font-weight:800; color:var(--navy); }
-        .welcome-desc{ font-size:12px; color:var(--text-sub); margin-top:6px; }
+        .domain-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+        .domain-title{ font-size:15px; font-weight:800; color:var(--navy); }
+        .domain-desc{ font-size:12px; color:var(--text-sub); margin-top:4px; }
+        .domain-link{
+            flex:none; border:none; background:none; cursor:pointer; font:inherit;
+            font-size:12px; font-weight:700; color:var(--accent); white-space:nowrap;
+        }
+        .domain-link:hover{ text-decoration:underline; }
+
+        /* 대표 수치 하나 + 보조 수치 둘. 0이면 경고색을 빼서 "변화 없음"이 한눈에 보이게 한다. */
+        .domain-main{ display:flex; align-items:baseline; gap:6px; }
+        .domain-main .big{ font-size:40px; font-weight:800; line-height:1; color:var(--accent); }
+        .domain-main.is-zero .big{ color:var(--navy); }
+        .domain-main .unit{ font-size:16px; font-weight:700; color:var(--navy); }
+        .domain-main .big-lbl{ font-size:13px; color:var(--text-sub); margin-left:8px; }
+        .domain-stats{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .domain-stats > div{ background:var(--bg); border-radius:10px; padding:10px 14px; }
+        .domain-stats b{ display:block; font-size:18px; font-weight:800; color:var(--navy); }
+        .domain-stats span{ display:block; font-size:11.5px; color:var(--text-sub); margin-top:2px; }
+
+        .domain-bars-title{ font-size:12px; font-weight:700; color:var(--text-sub); padding-top:14px; border-top:1px solid var(--line); }
+
+        /* 가로 막대 차트(fragments/rank-bars.html) */
+        .bars-empty{ font-size:13px; color:var(--text-sub); margin-top:10px; }
+        .bars{ display:flex; flex-direction:column; gap:8px; margin-top:10px; }
+        .bar-row{ display:grid; grid-template-columns:110px 1fr; align-items:center; gap:12px; }
+        .bar-row .cap{ font-size:12px; text-align:right; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .bar-row .track{ display:flex; align-items:center; gap:8px; }
+        .bar-row .fill{ height:10px; border-radius:3px; background:var(--accent); }
+        .bar-row .num{ font-size:11px; color:var(--text-sub); }
+
+        /* 질문창(P-06 RAG). 입력은 한 줄, Enter로 질문한다. */
+        .search{
+            display:flex; align-items:center; gap:10px;
+            border:1px solid var(--line); border-radius:var(--radius-md);
+            padding:8px 8px 8px 16px; background:#fafafd;
+        }
+        .search:focus-within{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent-soft); }
+        .search .ico{ font-size:15px; color:#b6b6cc; }
+        .search input{ flex:1; min-width:0; border:none; outline:none; background:transparent; font:inherit; font-size:13px; color:var(--text); }
+        .search input::placeholder{ color:#b6b6cc; }
+
+        /* 답변 박스 — 결론 한 줄(굵게) → 글머리 줄(줄 끝에 인용 번호) → 번호 붙은 출처 목록 → 검색 정보.
+           한 덩어리 글에 [1][2]가 섞여 읽기 어렵던 것을 나눴다(2026-10-22). 번호를 누르면 그 출처로 간다. */
+        .result{ border:1px solid var(--line); border-radius:var(--radius-md); padding:18px 22px; background:var(--card);
+            display:flex; flex-direction:column; gap:14px; }
+        .result[hidden]{ display:none; }
+        .result .q{ font-size:12px; font-weight:700; color:var(--text-sub); display:flex; align-items:center; gap:8px; }
+        .result .q .badge{ margin-left:auto; }
+        .answer-lead{ font-size:15px; font-weight:800; color:var(--navy); line-height:1.5; }
+        .answer-lead.none{ font-size:13.5px; font-weight:600; color:var(--text-sub); }
+        .answer-points{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+        .answer-points li{ position:relative; padding-left:16px; font-size:13.5px; line-height:1.65; color:var(--text); }
+        .answer-points li::before{ content:''; position:absolute; left:3px; top:.7em; width:5px; height:5px; border-radius:50%; background:var(--accent); }
+        .cite{
+            display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px;
+            margin-left:4px; vertical-align:1px; border:none; border-radius:9px; cursor:pointer;
+            background:var(--accent-soft); color:var(--accent); font:inherit; font-size:10.5px; font-weight:800; line-height:1;
+        }
+        .cite:hover, .cite:focus-visible{ background:var(--accent); color:#fff; outline:none; }
+
+        .answer-sources{ border-top:1px solid var(--line); padding-top:12px; }
+        .answer-sources h4{ margin:0 0 8px; font-size:12px; font-weight:700; color:var(--text-sub); }
+        .answer-sources ol{ list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; }
+        .answer-sources li{ display:grid; grid-template-columns:24px minmax(0, 1fr); gap:10px; padding:8px 10px; border-radius:8px; transition:background .3s; }
+        .answer-sources li.is-flash{ background:var(--accent-soft); }
+        .answer-sources .n{ width:22px; height:22px; border-radius:11px; background:var(--navy); color:#fff;
+            font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+        .answer-sources .head{ display:flex; align-items:baseline; gap:8px; min-width:0; }
+        .answer-sources .title{ font-size:13px; font-weight:700; color:var(--text); text-decoration:none;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+        .answer-sources a.title:hover{ color:var(--accent); text-decoration:underline; }
+        .answer-sources .info{ flex:none; font-size:11.5px; color:var(--text-sub); white-space:nowrap; }
+        .answer-sources .excerpt{ margin-top:2px; font-size:12px; line-height:1.5; color:var(--text-sub);
+            display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+        .result .meta{ font-size:11px; color:var(--text-sub); }
+        .period-notice{ font-size:12px; color:#b8860b; background:#fff3d6; border-radius:8px; padding:8px 12px; }
+        .period-notice[hidden]{ display:none; }
+        .answer-points[hidden], .answer-sources[hidden]{ display:none; } /* display:flex가 hidden 속성을 이기지 않게 */
+
+        /* 좁으면 위아래로 */
+        @media (max-width:1100px){
+            .overview{ grid-template-columns:1fr; }
+        }
 
         /* 홈 화면이 탭 셸 역할도 한다 — 사이드바에서 홈 외 메뉴를 열면 이 안에 탭(iframe)이
            쌓인다. 탭이 있을 땐 홈 내용을 숨기고 탭 영역을 그 자리(.area-main)에 꽉 채운다. */
@@ -32,11 +118,75 @@
 
     <main class="area-main">
         <div id="homePanel">
-            <!-- 대시보드 자리. 화면이 생기면 이 영역을 채운다. -->
-            <section class="welcome-card">
-                <div class="welcome-title">패션 트렌드 분석</div>
-                <div class="welcome-desc">왼쪽 메뉴에서 화면을 열면 상단에 탭으로 쌓입니다.</div>
-            </section>
+            <!-- 카드 링크는 사이드바 메뉴를 대신 눌러 탭으로 연다(tabs.js — 홈이 탭 셸이라 일반 링크로 가면 탭 화면을 벗어난다).
+                 권한이 없어 메뉴가 없으면 눌러도 아무 일도 없다. -->
+            <div class="overview" th:with="h=${home}">
+                <section class="domain-card">
+                    <div class="domain-head">
+                        <div>
+                            <div class="domain-title">트렌드 집계</div>
+                            <div class="domain-desc" th:if="${h.statsWeek != null}"
+                                 th:text="|기준 주 ${#temporals.format(h.statsWeek, 'MM/dd')} ~ ${#temporals.format(h.statsWeek.plusDays(6), 'MM/dd')}${h.currentWeek ? ' (진행 중)' : ''} · 전주 대비 +20% 이상이 급상승|">기준 주</div>
+                            <div class="domain-desc" th:if="${h.statsWeek == null}">아직 집계가 없습니다.</div>
+                        </div>
+                        <button type="button" class="domain-link" data-open-menu="trend-analysis">트렌드 분석 ›</button>
+                    </div>
+                    <div class="domain-main" th:classappend="${h.surgeKeywordCount == 0} ? 'is-zero'">
+                        <span class="big" th:text="${h.surgeKeywordCount}">0</span><span class="unit">개</span>
+                        <span class="big-lbl">급상승 키워드</span>
+                    </div>
+                    <div class="domain-stats">
+                        <div><b th:text="|${h.newKeywordCount}개|">0개</b><span>신규 키워드 (전주 0건)</span></div>
+                        <div><b th:text="|${h.keywordCount}개|">0개</b><span>기준 주 키워드 종류</span></div>
+                    </div>
+                    <div>
+                        <div class="domain-bars-title">키워드 언급 TOP 5</div>
+                        <div th:replace="~{fragments/rank-bars :: rankBars(${h.topKeywords}, '기준 주에 집계된 키워드가 없습니다.')}"></div>
+                    </div>
+                </section>
+
+                <section class="domain-card">
+                    <div class="domain-head">
+                        <div>
+                            <div class="domain-title">분석 현황</div>
+                            <div class="domain-desc">업로드·등록한 원문의 AI 정형화 (P-03)</div>
+                        </div>
+                        <button type="button" class="domain-link" data-open-menu="img-upload">이미지 업로드 ›</button>
+                    </div>
+                    <div class="domain-main">
+                        <span class="big" th:text="${h.doneCount}">0</span><span class="unit">건</span>
+                        <span class="big-lbl">분석 완료</span>
+                    </div>
+                    <div class="domain-stats">
+                        <div><b th:text="|${h.pendingCount}건|">0건</b><span>대기·처리 중</span></div>
+                        <div><b th:text="|${h.failedCount}건|">0건</b><span>실패 (재분석 필요)</span></div>
+                    </div>
+                    <div>
+                        <div class="domain-bars-title">카테고리 언급 TOP 5 (기준 주)</div>
+                        <div th:replace="~{fragments/rank-bars :: rankBars(${h.topCategories}, '기준 주에 집계된 카테고리가 없습니다.')}"></div>
+                    </div>
+                </section>
+            </div>
+
+            <!-- P-06 RAG: 분석이 끝난 자료 안에서만 답하고, 근거가 기준 유사도에 못 미치면 "근거 자료 없음". -->
+            <div class="search">
+                <span class="ico">⌕</span>
+                <input type="text" id="ragQuestion" maxlength="500" autocomplete="off"
+                       placeholder="트렌드를 물어보세요 — 예) 요즘 유행하는 와이드 팬츠 스타일은?">
+                <button type="button" class="btn primary" id="ragAsk">질문</button>
+            </div>
+
+            <div class="result" id="ragResult" hidden>
+                <div class="q"><span id="ragResultQ"></span><span class="badge" id="ragBadge"></span></div>
+                <div class="period-notice" id="ragPeriodNotice" hidden></div>
+                <div class="answer-lead" id="ragAnswer"></div>
+                <ul class="answer-points" id="ragPoints"></ul>
+                <div class="answer-sources" id="ragSourcesBox">
+                    <h4>출처</h4>
+                    <ol id="ragSources"></ol>
+                </div>
+                <div class="meta" id="ragMeta"></div>
+            </div>
         </div>
 
         <div id="tabPanels"></div>
@@ -44,5 +194,148 @@
 </div>
 
 <script src="/js/tabs.js"></script>
+<script>
+    // 카드의 "… ›" 버튼 — 같은 화면의 사이드바 메뉴를 대신 눌러 탭 동작(tabs.js)을 그대로 쓴다.
+    document.getElementById('homePanel').addEventListener('click', function (e) {
+        const btn = e.target.closest('[data-open-menu]');
+        if (!btn) return;
+        const link = document.querySelector('.nav a[data-menu="' + btn.dataset.openMenu + '"]');
+        if (link) link.click();
+    });
+
+    /** RAG 질문(P-06). 마지막 답 하나만 보여 준다 — 질문·답변은 저장하지 않는다. */
+    (function () {
+        const input = document.getElementById('ragQuestion');
+        const button = document.getElementById('ragAsk');
+        const result = document.getElementById('ragResult');
+        let asking = false;
+
+        // 모델이 쓴 글은 모두 textContent로만 넣는다(HTML로 해석하지 않는다)
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text != null) node.textContent = text;
+            return node;
+        }
+
+        /** 줄 끝 인용 번호. 누르면 아래 출처 행으로 스크롤하고 잠깐 강조한다. */
+        function citeButton(n, sourcesByN) {
+            const btn = el('button', 'cite', String(n));
+            btn.type = 'button';
+            const s = sourcesByN[n];
+            if (s) btn.title = [s.title, s.media, s.statDate].filter(Boolean).join(' · ');
+            btn.addEventListener('click', function () {
+                const row = document.getElementById('ragSource' + n);
+                if (!row) return;
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                row.classList.add('is-flash');
+                setTimeout(function () { row.classList.remove('is-flash'); }, 1200);
+            });
+            return btn;
+        }
+
+        function sourceRow(s) {
+            const li = el('li');
+            li.id = 'ragSource' + s.n;
+            li.appendChild(el('span', 'n', String(s.n)));
+            const body = el('div');
+            const head = el('div', 'head');
+            const title = el(s.url ? 'a' : 'span', 'title', s.title || s.docId);
+            if (s.url) {
+                title.href = s.url;
+                title.target = '_blank';
+                title.rel = 'noopener noreferrer';
+            }
+            head.append(title, el('span', 'info',
+                [s.media, s.statDate, s.docType === 'IMAGE' ? '이미지' : '텍스트'].filter(Boolean).join(' · ')));
+            body.appendChild(head);
+            // 근거 청크의 첫 줄(요약 문장)만 — 뒤에 붙은 "키워드: …" 같은 색인용 줄은 빼고 보여 준다
+            const excerpt = el('div', 'excerpt', (s.chunk || '').split('\n')[0]);
+            excerpt.title = '유사도 ' + s.score.toFixed(3) + '\n' + s.chunk;
+            body.appendChild(excerpt);
+            li.appendChild(body);
+            return li;
+        }
+
+        function show(view) {
+            document.getElementById('ragResultQ').textContent = 'Q. ' + view.question;
+            const badge = document.getElementById('ragBadge');
+            badge.className = 'badge ' + (view.grounded ? 'success' : 'medium');
+            badge.textContent = view.grounded ? '근거 ' + view.sources.length + '건' : '근거 없음';
+
+            const answer = document.getElementById('ragAnswer');
+            answer.textContent = view.answer;
+            answer.classList.toggle('none', !view.grounded);
+
+            const sourcesByN = {};
+            view.sources.forEach(function (s) { sourcesByN[s.n] = s; });
+            const points = document.getElementById('ragPoints');
+            points.replaceChildren.apply(points, (view.points || []).map(function (p) {
+                const li = el('li', null, p.text);
+                (p.sources || []).forEach(function (n) { li.appendChild(citeButton(n, sourcesByN)); });
+                return li;
+            }));
+            points.hidden = !points.children.length;
+
+            const sources = document.getElementById('ragSources');
+            sources.replaceChildren.apply(sources, view.sources.slice()
+                .sort(function (a, b) { return a.n - b.n; }).map(sourceRow)); // 번호 순 — 줄의 번호로 찾기 쉽게
+            document.getElementById('ragSourcesBox').hidden = !view.sources.length;
+
+            // 기간이 없는 질문은 관련 자료 중 최근 것을 앞세운다 — 가장 최근 근거도 오래됐으면(8주 넘음) 답 위에 알린다
+            const p = view.period;
+            const notice = document.getElementById('ragPeriodNotice');
+            const stale = !!(p && p.stale && view.grounded);
+            notice.hidden = !stale;
+            if (stale) notice.textContent = '최근 자료가 적어 ' + p.from + ' ~ ' + p.to + ' 자료로 답했습니다. 지금도 유행인지는 출처 날짜를 확인하세요.';
+            let periodText = '';
+            if (p && p.explicit) periodText = '기간 ' + p.label + ' ' + p.from + ' ~ ' + p.to + ' · ';
+            else if (p && p.from) periodText = '근거 게시일 ' + p.from + ' ~ ' + p.to + ' (최근 자료 우선) · ';
+            document.getElementById('ragMeta').textContent = periodText
+                + '최고 유사도 ' + (view.bestScore == null ? '-' : view.bestScore.toFixed(3))
+                + ' (기준 ' + view.minScore.toFixed(2) + ')'
+                + (view.statsWeek ? ' · 참고 집계 ' + view.statsWeek + ' 주' : '');
+            result.hidden = false;
+        }
+
+        function ask() {
+            const question = input.value.trim();
+            if (!question) {
+                input.focus();
+                return;
+            }
+            if (asking) return;
+            asking = true;
+            button.disabled = true;
+            fetch('/api/rag/ask', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            })
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '답변을 받지 못했습니다.'); });
+                    return res.json();
+                })
+                .then(function (view) {
+                    show(view);
+                    input.value = '';
+                })
+                .catch(function (err) { alert(err.message); })
+                .finally(function () {
+                    asking = false;
+                    button.disabled = false;
+                    input.focus();
+                });
+        }
+
+        button.addEventListener('click', ask);
+        input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !e.isComposing) { // 한글 조합 중 Enter는 글자 확정이다
+                e.preventDefault();
+                ask();
+            }
+        });
+    })();
+</script>
 </body>
 </html>

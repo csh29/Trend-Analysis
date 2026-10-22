@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = Path(__file__).resolve().parents[2]  # ai/ — .env·chroma_data 기준(코드는 ai/app/core/)
 
 
 def _read_env_file(path: Path) -> dict[str, str]:

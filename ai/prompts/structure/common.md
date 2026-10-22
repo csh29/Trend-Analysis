@@ -1,6 +1,6 @@
 <!--
 P-03 정형화에서 Claude에게 보내는 글 — 이미지·텍스트 공통. 시스템 프롬프트는 이 파일의 system 뒤에
-자료 유형 파일(structure-image.md 또는 structure-text.md)의 system을 붙여 보낸다. 한쪽에만 해당하는 규칙은 여기 쓰지 않는다.
+자료 유형 파일(image.md 또는 text.md)의 system을 붙여 보낸다. 한쪽에만 해당하는 규칙은 여기 쓰지 않는다.
 - "## 키" 제목은 코드(prompt_loader.py)가 찾는 이름이라 바꾸지 않는다. 빠지면 AI 서비스가 기동하지 않는다.
 - 고친 뒤에는 AI 서비스를 재기동한다(ai/stop-ai.cmd → start-ai.cmd). 이 주석은 보내지 않는다.
 - 출력 형식(필드·코드 값 enum)은 여기가 아니라 structurer.build_schema가 강제한다. 여기는 판단 기준만 쓴다.

@@ -96,6 +96,25 @@
         addRow(dl, '상태', status);
         if (view.failReason) addRow(dl, '실패 사유', view.failReason);
         addRow(dl, '출처', [view.media, view.publishedAt].filter(Boolean).join(' · '));
+        // 텍스트 원문에 첨부한 이미지 — 본문과 함께 분석했다. 누르면 원본을 새 창으로
+        if (view.images && view.images.length) {
+            const thumbs = document.createElement('div');
+            thumbs.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
+            view.images.forEach(function (image) {
+                const a = document.createElement('a');
+                a.href = image.url;
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+                a.title = image.name;
+                const img = document.createElement('img');
+                img.src = image.url;
+                img.alt = image.name;
+                img.style.cssText = 'width:72px;height:72px;object-fit:cover;border:1px solid var(--line);border-radius:6px;display:block;';
+                a.appendChild(img);
+                thumbs.appendChild(a);
+            });
+            addRow(dl, '첨부 이미지 ' + view.images.length + '장', thumbs);
+        }
 
         const r = view.result;
         if (r) {

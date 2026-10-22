@@ -10,7 +10,11 @@ import java.util.List;
  */
 public record AnalysisView(Long documentId, String docId, String docType, String title, String status,
                            String failReason, int attempts, LocalDateTime analyzedAt,
-                           String media, LocalDate publishedAt, String url, Result result) {
+                           String media, LocalDate publishedAt, String url, List<Image> images, Result result) {
+
+    /** 텍스트 원문에 첨부한 이미지(순서대로). url은 그 원문 화면 권한으로 여는 주소다. 이미지만 있는 원문은 비어 있다. */
+    public record Image(Long id, String name, String url) {
+    }
 
     public record Code(String value, String name) {
     }

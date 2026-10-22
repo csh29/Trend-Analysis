@@ -217,13 +217,15 @@ public class AnalysisService {
                 options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.MATERIAL)),
                 options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)),
                 options(codes.codes(TrendCodes.SEASON)));
-        if (doc.isImage()) {
-            ImageService.ImageBytes image = imageService.readBytes(doc.getImageId());
-            return new AiClient.StructureRequest(doc.getDocId(), doc.getDocType(), model, doc.getTitle(), null,
-                    Base64.getEncoder().encodeToString(image.bytes()), image.contentType(), allowed);
+        // 원문 1건 = 본문 + 이미지 — 텍스트 원문에 첨부한 이미지도 한 요청에 같이 보낸다
+        List<AiClient.ImageInput> images = imageService.readDocumentImages(doc).stream()
+                .map(image -> new AiClient.ImageInput(Base64.getEncoder().encodeToString(image.bytes()), image.contentType()))
+                .toList();
+        if (doc.isImage() && images.isEmpty()) {
+            throw new IllegalStateException("이미지 파일이 없습니다.");
         }
-        return new AiClient.StructureRequest(doc.getDocId(), doc.getDocType(), model, doc.getTitle(), doc.getBody(),
-                null, null, allowed);
+        return new AiClient.StructureRequest(doc.getDocId(), doc.getDocType(), model, doc.getTitle(),
+                doc.isImage() ? null : doc.getBody(), images, allowed);
     }
 
     private static List<AiClient.CodeOption> options(List<ComCd> codes) {

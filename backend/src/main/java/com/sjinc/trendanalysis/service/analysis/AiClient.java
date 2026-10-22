@@ -53,8 +53,13 @@ public class AiClient {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record ImageInput(String data, String mediaType) {
+    }
+
+    /** 원문 1건 = 본문(text, TEXT만) + 이미지 0~5장. IMAGE는 본문 없이 이미지 한 장인 원문이다. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record StructureRequest(String docId, String docType, String model, String title, String text,
-                                   String imageBase64, String imageMediaType, AllowedCodes allowed) {
+                                   List<ImageInput> images, AllowedCodes allowed) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -66,6 +71,46 @@ public class AiClient {
                                Map<String, String> names, Map<String, String> meta) {
     }
 
+    /** P-06 주간 집계 한 줄 — 근거가 아니라 답변에 덧붙이는 참고 수치. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record StatRow(String typeLabel, String label, int count, int prevCount, Double prevRate, boolean surge,
+                          boolean isNew) {
+    }
+
+    /**
+     * today는 최신성 가중치·기간 해석의 기준일 — 서버 날짜를 "2026-10-22" 문자열로 보낸다. 날짜는 이 클라이언트에서 모두 문자열로 주고받는다:
+     * RestClient 기본 JSON 설정은 LocalDate를 [2026,10,22] 배열로 써서 AI 서비스가 422로 거부했다(2026-10-22).
+     */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AnswerRequest(String question, String model, int topK, double minScore, String statsWeek,
+                                List<StatRow> stats, String today) {
+    }
+
+    /**
+     * 근거의 기간(yyyy-MM-dd). explicit이면 질문이 정한 기간(그 범위로 잘랐다), 아니면 근거로 쓴 원문의 게시일 범위(최근 자료
+     * 우선으로 골랐다 — 근거가 없으면 null). stale=가장 최근 근거도 8주가 넘었다.
+     */
+    public record AnswerPeriod(String from, String to, String label, boolean explicit, boolean stale) {
+    }
+
+    /** n은 답변 본문의 인용 번호([1]), chunk는 그 문서에서 가장 비슷했던 청크. */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AnswerSource(int n, String docId, double score, String chunk) {
+    }
+
+    /** 답의 한 줄과 그 줄의 근거 번호. */
+    public record AnswerPoint(String text, List<Integer> sources) {
+    }
+
+    /**
+     * answer는 결론 한 줄, points는 글머리 줄들. reason: 근거 없음이면 NO_EVIDENCE(기준 유사도 미달 — Claude를 부르지 않았다),
+     * MODEL_DECLINED(근거가 질문과 맞지 않음).
+     */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
+                                 Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period) {
+    }
+
     public StructureResponse structure(StructureRequest request, String apiKey) {
         return call(() -> restClient.post().uri("/structure")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -73,6 +118,16 @@ public class AiClient {
                 .body(request)
                 .retrieve()
                 .body(StructureResponse.class));
+    }
+
+    /** P-06 RAG 답변. 검색·근거 판정은 AI 서비스가 한다. */
+    public AnswerResponse answer(AnswerRequest request, String apiKey) {
+        return call(() -> restClient.post().uri("/answer")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Claude-Api-Key", apiKey)
+                .body(request)
+                .retrieve()
+                .body(AnswerResponse.class));
     }
 
     /** P-04 색인. 넣은 청크 수. */
@@ -99,11 +154,19 @@ public class AiClient {
         }
     }
 
-    /** FastAPI 오류 본문 {"detail": {"message", "retryable"}}를 읽는다. 형식이 다르면 5xx만 재시도한다. */
+    /**
+     * FastAPI 오류 본문 {"detail": {"message", "retryable"}}를 읽는다. 요청 형식 검사(422)에서 막히면 detail이 목록이라
+     * 어느 필드인지(loc·msg)를 사유에 붙인다 — "AI 서비스 오류(422)"만으로는 원인을 알 수 없었다. 형식이 다르면 5xx만 재시도한다.
+     */
     private AiCallException toException(RestClientResponseException e) {
         int status = e.getStatusCode().value();
         try {
             JsonNode detail = objectMapper.readTree(e.getResponseBodyAsString()).path("detail");
+            if (detail.isArray() && !detail.isEmpty()) {
+                List<String> problems = new java.util.ArrayList<>();
+                detail.forEach(d -> problems.add(d.path("loc").toString() + " " + d.path("msg").asText()));
+                return new AiCallException("AI 서비스가 요청 형식을 거부했습니다(" + status + "): " + String.join(" / ", problems), false, e);
+            }
             if (detail.has("message")) {
                 // 거절·잘림처럼 Claude가 응답한 뒤 실패하면 소모한 토큰(usage)도 같이 온다
                 TokenUsage usage = detail.has("usage")

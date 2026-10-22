@@ -62,7 +62,7 @@ Get-ChildItem -LiteralPath $archiveDir -Filter "*.log" -ErrorAction SilentlyCont
 $env:PYTHONIOENCODING = "utf-8"  # 한글 로그가 시스템 인코딩(MS949)으로 깨지지 않게
 # 워커는 1개(--workers 없음) — 내장형 Chroma 폴더는 한 프로세스만 열어야 안전하다
 $proc = Start-Process -FilePath $python `
-    -ArgumentList "-m", "uvicorn", "main:app", "--host", $BindHost, "--port", $Port `
+    -ArgumentList "-m", "uvicorn", "app.main:app", "--host", $BindHost, "--port", $Port `
     -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru `
     -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 Set-Content -LiteralPath $pidFile -Value $proc.Id -Encoding ascii

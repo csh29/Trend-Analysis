@@ -22,7 +22,7 @@ py -m venv .venv
 ```
 
 ```bash
-.venv/Scripts/python -m uvicorn main:app --host 127.0.0.1 --port 8001
+.venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 - 워커는 1개로 띄운다(`--workers`를 주지 않는다). 내장형 Chroma 폴더는 한 프로세스만 열어야 안전하다.
@@ -37,6 +37,7 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 | --- | --- |
 | `GET /index/stats` | 컬렉션 이름, 내장형/서버형, 임베딩 모델, 청크 수 |
 | `GET /index/chunks?doc_id=&limit=20&offset=0&with_embedding=false` | 청크 id(`문서ID#순번`), 청크 문장, 메타(doc_id·유형·매체·게시일·URL·카테고리·순번). `with_embedding=true`면 벡터 차원과 앞 8개 값 |
+| `GET /search?q=&top_k=10` | 질문과 비슷한 청크와 유사도(Claude 호출 없음). RAG 기준 유사도를 정할 때 점수 분포를 본다 |
 
 - 실행 중인 서비스를 통해 읽는다. 내장형 Chroma 폴더(`chroma_data/`)를 다른 프로세스로 직접 열지 않는다(한 프로세스만 열어야 안전하다).
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.
@@ -56,28 +57,47 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 
 ## 3. 파일 구성
 
-| 파일 | 역할 |
-| --- | --- |
-| `main.py` | API: `POST /structure`(P-03), `POST /index`·`DELETE /index/{doc_id}`(P-04), `GET /index/stats`·`GET /index/chunks`(색인 조회, 읽기 전용), `GET /health` |
-| `prompts/structure-common.md`·`-silhouette.md`·`-image.md`·`-text.md` | **Claude가 읽는 글**. 공통 → 실루엣 기준 → 자료 유형 규칙 순으로 붙여 보낸다(이미지 분석에 텍스트 기준을 보내지 않는다). `## 키` 구역 단위 |
-| `prompt_loader.py` | `prompts/*.md` 읽기. 구역이 빠지면 기동 실패 |
-| `structurer.py` | Claude Structured Output 호출. 카테고리·소재·컬러·실루엣은 요청에 온 공통코드 값만 enum으로 허용 |
-| `image_prep.py` | 이미지를 긴 변 2576px·5MB 이하로 줄여 보냄(BMP 등은 JPEG로) |
-| `indexer.py`, `chunker.py` | 청크 분할·Chroma 저장(문서 ID 단위로 갈아끼움) |
-| `vector_store.py` | **Chroma 클라이언트를 만드는 유일한 곳** — `CHROMA_MODE`로 내장형·서버형 선택 |
-| `embedding.py` | 임베딩 함수(모델 이름으로 Qwen3-VL / fastembed 선택, Qwen은 질의에만 지시문) |
-| `config.py` | `ai/.env` + 환경변수 설정 |
-| `start-ai.*`, `stop-ai.*` | 기동·종료 스크립트 |
-| `requirements.txt` | 버전 고정. torch는 CPU 빌드(`--extra-index-url .../whl/cpu`) |
+**AI를 다루는 Python 코드(`app/`)와 Claude가 읽는 글(`prompts/`)을 나누고, 코드는 기능(프로세스)별 패키지로 묶는다**(2026-10-22 사용자 결정).
+
+```
+ai/
+├─ app/                    Python 코드 (실행: uvicorn app.main:app)
+│  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /answer, /search, /health …)
+│  ├─ core/                여러 기능이 같이 쓰는 것
+│  │  ├─ config.py         ai/.env + 환경변수 설정
+│  │  ├─ prompt_loader.py  prompts/ 아래 md 읽기(이름 = 상대 경로, 예: "structure/common")
+│  │  └─ claude.py         Claude 호출·SDK 오류 분류(AiServiceError)·JSON 읽기·토큰 사용량
+│  ├─ structuring/         P-03 정형화
+│  │  ├─ structurer.py     스키마(공통코드 enum)·프롬프트 조립·호출
+│  │  └─ image_prep.py     이미지 축소(긴 변 2576px·5MB, 여러 장이면 장마다 1568px·3MB)
+│  ├─ indexing/            P-04 색인
+│  │  ├─ indexer.py        청크 만들기·Chroma 저장(문서 ID 단위 갈아끼움)·게시일 숫자 메타
+│  │  ├─ chunker.py        본문 청크 분할
+│  │  ├─ embedding.py      임베딩 함수(Qwen3-VL / fastembed)
+│  │  └─ vector_store.py   Chroma 클라이언트를 만드는 유일한 곳
+│  └─ rag/                 P-06 검색·답변
+│     ├─ period.py         질문 기간 해석(콕 집은 기간만 자른다)
+│     └─ answer.py         검색·최신성 가중치(반감기 4주)·기준 유사도·Claude 답변
+├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
+│  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
+│  └─ rag/answer.md        답변 모양·기간·근거 규칙
+├─ tests/                  test_core · test_api · test_rag
+├─ start-ai.* / stop-ai.*  기동·종료 스크립트(ai 폴더에 둔다 — 더블클릭)
+└─ requirements.txt        버전 고정. torch는 CPU 빌드
+```
+
+- 새 기능은 `app/<기능>/` 패키지로, 그 기능의 프롬프트는 `prompts/<기능>/`에 둔다. 두 기능 이상이 쓰는 것만 `core/`로 올린다.
+- 모듈은 `from app.<패키지> import <모듈>`처럼 `app.`부터 쓴다. 실행·테스트는 항상 `ai` 폴더에서 한다(그래야 `app`을 찾는다).
+- 경로 기준(`.env`, `chroma_data/`, `prompts/`)은 실행 위치가 아니라 `ai/`다(`config.BASE_DIR`, `prompt_loader.PROMPT_DIR`).
 
 ## 4. 코딩 규칙
 
-- **Claude가 읽는 글은 코드에 쓰지 않고 `prompts/*.md`에 둔다.** 이미지·텍스트 둘 다에 해당하는 규칙은 `structure-common.md`에만 쓴다(양쪽에 복사하면 고칠 때 어긋난다). 한쪽 유형에만 해당하는 규칙은 그 유형 파일에 쓴다. 판단 기준(무엇을 뽑고 무엇을 비울지)은 md, 출력 형식(필드·코드 enum)은 `build_schema`, 조립 틀(`<document>` 감싸기)은 코드다. md를 고치면 AI 서비스를 재기동한다(기동 때 한 번 읽는다). `## 키` 제목은 코드가 찾는 이름이라 바꾸지 않는다. md 주석(`<!-- -->`)은 보내지 않는다.
-- **Chroma 클라이언트는 `vector_store.py`의 `create_client`에서만 만든다.** 다른 모듈은 `get_collection()`만 쓴다. 내장형↔서버형 전환을 설정(`CHROMA_MODE`) 하나로 끝내기 위한 규칙이다.
+- **Claude가 읽는 글은 코드에 쓰지 않고 `prompts/` 아래 md에 둔다.** 이미지·텍스트 둘 다에 해당하는 규칙은 `structure/common.md`에만 쓴다(양쪽에 복사하면 고칠 때 어긋난다). 한쪽 유형에만 해당하는 규칙은 그 유형 파일에 쓴다. 판단 기준(무엇을 뽑고 무엇을 비울지)은 md, 출력 형식(필드·코드 enum)은 `build_schema`, 조립 틀(`<document>` 감싸기)은 코드다. md를 고치면 AI 서비스를 재기동한다(기동 때 한 번 읽는다). `## 키` 제목은 코드가 찾는 이름이라 바꾸지 않는다. md 주석(`<!-- -->`)은 보내지 않는다.
+- **Chroma 클라이언트는 `app/indexing/vector_store.py`의 `create_client`에서만 만든다.** 다른 모듈은 `get_collection()`만 쓴다. 내장형↔서버형 전환을 설정(`CHROMA_MODE`) 하나로 끝내기 위한 규칙이다.
 - 임베딩 모델을 바꾸면 기존 컬렉션과 섞이지 않게 `CHROMA_COLLECTION`을 새로 주거나 재색인한다(같은 컬렉션으로 열면 기동이 막힌다).
 - 패키지 버전은 `requirements.txt`에 고정한다. Chroma는 서버형으로 갈 때 서버와 같은 버전이어야 하고, 임베딩 결과가 라이브러리 버전에 따라 달라지면 기존 색인과 어긋난다.
 - Claude 호출 방식(모델 ID, `output_config`, 오류 클래스)은 추측하지 말고 claude-api 스킬 문서로 확인한다. SDK는 `anthropic` 1.x다.
-- 오류는 `HTTPException(detail={"message", "retryable"})`로 돌려준다. Spring `AiClient`가 이 형식을 읽어 재시도 여부를 정한다.
+- 오류는 `AiServiceError`(`app/core/claude.py`)로 올리고 라우트가 `HTTPException(detail={"message", "retryable"})`로 돌려준다. Spring `AiClient`가 이 형식을 읽어 재시도 여부를 정한다.
 - 보안: AI 서비스는 127.0.0.1에만 연다(인증 없는 내부 API). Claude API 키는 요청 헤더(`X-Claude-Api-Key`)로만 받고 저장·로그·응답에 남기지 않는다.
 
 ## 5. 테스트
@@ -86,11 +106,12 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 .venv/Scripts/python -m unittest
 ```
 
-`ai/` 폴더에서 돌린다. 네트워크·실제 Claude 호출·모델 다운로드가 없다(가짜 클라이언트·가짜 컬렉션·가짜 모델).
+`ai/` 폴더에서 돌린다(`tests/` 패키지를 찾는다). 네트워크·실제 Claude 호출·모델 다운로드가 없다(가짜 클라이언트·가짜 컬렉션·가짜 모델).
 
 | 테스트 | 범위 |
 | --- | --- |
 | `test_core.py` | 설정(.env·환경변수·모드 검증), **Chroma 내장형/서버형 선택**, 임베딩 구현 선택·질의 지시문, 청크 분할, 이미지 축소·변환, 스키마 enum, Claude 오류 분류(거절·잘림·연결)·토큰 사용량, 색인 청크(코드 이름 사용·갈아끼움) |
+| `test_rag.py` | P-06: 기간 해석(지난주·지난달·최근 N·올해·작년·시즌 표현, 막연하면 안 자름), 최신성 가중치·stale, 게시일 숫자 채우기, 유사도·문서별 묶음, 기준 미달이면 Claude 미호출, 줄별 인용 번호 정리, `/answer` 401·400 |
 | `test_api.py` | FastAPI: 키 없음 401, 키 전달·응답에 키 미포함, 오류의 retryable·소모 토큰(usage) 전달, 색인 조회(읽기 전용·벡터는 앞부분만), 빈 본문·깨진 이미지 400, 색인·삭제 |
 
 | 변경 | 확인할 것 |

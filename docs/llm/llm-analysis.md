@@ -8,7 +8,7 @@
 패션 트렌드 분석 시스템. 기준 문서는 `C:\ai 과제\시스템 프로세스 정의서.pptx`(P-01~P-08)다.
 
 - security-monitoring 프로젝트(`C:\ai 과제\security-monitoring\backend`)의 화면 프레임워크와 로그인·권한 구조를 그대로 옮겨 왔다. 같은 일을 다시 설계하지 말고 그쪽 방식을 따른다.
-- 모듈 두 개: `backend/`(Spring Boot — 화면·API·RDB)와 `ai/`(Python FastAPI — Claude 정형화·Chroma 색인). Spring이 AI 서비스를 HTTP로 부른다.
+- 모듈 두 개: `backend/`(Spring Boot — 화면·API·RDB)와 `ai/`(Python FastAPI — Claude 정형화·Chroma 색인·RAG 답변). Spring이 AI 서비스를 HTTP로 부른다.
 
 | 구분 | 내용 |
 | --- | --- |
@@ -26,12 +26,13 @@
 
 | 프로세스 | 상태 | 문서 |
 | --- | --- | --- |
-| P-01 수집 · P-02 전처리 | 대신 이미지 업로드·텍스트 등록 화면이 원문을 넣는다 | [`features/document-upload.md`](features/document-upload.md) |
+| P-01 수집 · P-02 전처리 | 대신 이미지 업로드·텍스트 등록 화면이 원문을 넣는다(원문 1건 = 본문 + 이미지 최대 5장) | [`features/document-upload.md`](features/document-upload.md) |
 | P-03 AI 정형화 · P-04 저장·색인 | 구현 | [`features/analysis-pipeline.md`](features/analysis-pipeline.md) |
 | P-05 트렌드 집계 | 구현(주간 언급량·전주/전월 대비·급상승, 트렌드 분석 화면) | [`features/trend-aggregation.md`](features/trend-aggregation.md) |
-| P-06 이후 | 아직 없음 | — |
+| P-06 RAG 검색 | 구현(홈 질문창 — 질문·답변·출처, 근거 없으면 차단. 만족도 평가는 P-08 때) | [`features/rag-search.md`](features/rag-search.md) |
+| P-07 브리핑 · P-08 로그·KPI | 아직 없음 | — |
 
-그 밖에 구현된 것: 화면 프레임워크, 로그인·권한, 관리 화면 5종.
+그 밖에 구현된 것: 화면 프레임워크, 로그인·권한, 관리 화면 5종, 홈 대시보드(트렌드 집계·분석 현황 카드 + RAG 질문창, `HomeService`).
 
 ## 3. 문서 목차
 
@@ -58,6 +59,7 @@
 | [`features/document-upload.md`](features/document-upload.md) | 이미지 업로드·텍스트 등록, 원문 문서, 출처 |
 | [`features/analysis-pipeline.md`](features/analysis-pipeline.md) | P-03 정형화·P-04 저장·색인(Spring↔AI), 표준 코드, 임베딩·Chroma, 분석 로그 |
 | [`features/trend-aggregation.md`](features/trend-aggregation.md) | P-05 주간 집계·급상승 판정 기준, 배치, 샘플 데이터 |
+| [`features/rag-search.md`](features/rag-search.md) | P-06 RAG 검색: 근거 기준 유사도, 근거 없음 처리, 집계 덧붙이기 |
 
 ### 어떤 문서를 읽나
 
@@ -69,3 +71,4 @@
 | 권한·로그인 | `features/auth-permission.md` |
 | 분석 결과·토큰·임베딩 | `features/analysis-pipeline.md` |
 | 집계·급상승·트렌드 화면 | `features/trend-aggregation.md` |
+| RAG 질문·답변·근거 기준 | `features/rag-search.md` |

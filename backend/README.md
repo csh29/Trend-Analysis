@@ -46,7 +46,7 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 
 | 위치 | 역할 |
 | --- | --- |
-| `templates/home.html` | 홈 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
+| `templates/home.html` | 홈 대시보드(요약 카드 + RAG 질문창) 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
 | `templates/fragments/sidebar.html` | 사이드바. 메뉴는 프로그램 관리(DB)와 공통코드 `MENU_GROUP`이 정한다(`SidebarModelAdvice`) |
 | `templates/login.html` | 로그인 화면 |
 | `templates/fragments/topbar.html` | 상단바(로고·사이드바 접기·탭 목록·로그인 사용자·비밀번호 변경·로그아웃) |
@@ -63,11 +63,12 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 | 화면 | 템플릿 | API |
 | --- | --- | --- |
 | 이미지 업로드 | `program/img-upload.html` | `/api/images` |
-| 텍스트 등록 | `program/text-upload.html` | `/api/texts` |
+| 텍스트 등록 | `program/text-upload.html` | `/api/texts` (본문 + 첨부 이미지 최대 5장) |
 | 트렌드 분석 | `program/trend-analysis.html` | `/api/trends` |
 
 이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
 파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
+기사·잡지처럼 본문에 사진이 딸린 자료는 텍스트 등록에서 이미지를 같이 첨부한다(원문 1건 = 본문 + 이미지). 본문과 사진을 한 번에 분석하고 한 건으로 센다.
 
 ### AI 분석 (P-03 정형화 · P-04 색인)
 
@@ -88,7 +89,7 @@ AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끈다(더블
 로그는 `ai/logs/`에 남는다. 직접 띄울 때는 `ai` 폴더에서:
 
 ```bash
-.venv/Scripts/python -m uvicorn main:app --host 127.0.0.1 --port 8001
+.venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
 임베딩은 `Qwen/Qwen3-VL-Embedding-2B`(CPU, RAM 약 4.5GB)이고 첫 색인 때 모델(약 4GB)을 내려받는다.
@@ -106,6 +107,16 @@ Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.e
 | `trend.aggregate.cron` | 집계 시각, 기본 `0 0 3 * * *` |
 
 확인용 샘플(6주 분량 텍스트 37건, 실제 Claude 분석을 거친다)은 `--trend.sample.load=true`로 한 번 띄우면 들어간다.
+
+### RAG 검색 (P-06)
+
+홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 질문창으로 되어 있다. 질문하면 분석이 끝난 자료 중 비슷한 원문을 찾아 Claude가 답하고, 답변 아래에 출처(매체·날짜·원문 링크)를 보여 준다. API는 `/api/rag`(로그인만 필요).
+비슷한 원문이 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 기간을 말하지 않으면("요즘" 포함) 관련 자료 중 최근 것을 앞세워 답하고(4주마다 비중 절반), 지난달·최근 3개월처럼 기간을 쓰면 그 기간 자료만 쓴다.
+
+| 키 | 용도 |
+| --- | --- |
+| `rag.min-score` | 근거로 쓰는 최소 유사도(0~1), 기본 0.60(임시값) |
+| `rag.top-k` | 찾는 청크 수, 기본 8 |
 
 ## 관리 화면
 

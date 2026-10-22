@@ -1,7 +1,7 @@
 # analysis-pipeline.md — AI 분석 (P-03 정형화 · P-04 저장·색인)
 
 원문 한 건을 Claude로 정형화(의류 아이템별 카테고리·소재·컬러·실루엣 + 문서 단위 키워드·감성·요약)하고, 검증해 RDB에 저장한 뒤 Chroma에 색인한다. Spring과 AI 서비스(`ai/`)에 걸친 기능이다.
-코드: `service/analysis`(`AnalysisService` 흐름, `TrendResultValidator` 검증, `AiClient` 호출), `ai/structurer.py`·`indexer.py`·`embedding.py`·`vector_store.py`. 실행·설정은 [`ai-development.md`](../ai/ai-development.md).
+코드: `service/analysis`(`AnalysisService` 흐름, `TrendResultValidator` 검증, `AiClient` 호출), `ai/app/structuring/structurer.py`·`ai/app/indexing/`(`indexer`·`embedding`·`vector_store.py`. 실행·설정은 [`ai-development.md`](../ai/ai-development.md).
 
 ## 결정 사항 (2026-10-20 사용자)
 
@@ -10,10 +10,12 @@
 - 표준 코드(카테고리·소재·컬러·실루엣)는 일반 분류 **초안**이다. 확정 체계는 미정(정의서 미결 4번).
 - **정형 결과는 의류 아이템 배열**(`items: [{category, item, materials, colors, silhouettes}]`)이다. 정의서 10번 형식(문서당 category 1개)에서 벗어난다 — 코디 사진은 아이템이 여럿이라 한 묶음으로 받으면 속성이 섞인다.
 - **소재는 빼지 않되 엄격하게** 뽑는다: 이미지는 질감이 분명할 때만(레더 광택, 데님 워싱·결, 니트 짜임, 퍼, 패딩 퀼팅, 코듀로이 골), 텍스트는 본문에 그 아이템의 소재가 직접 나온 것만. 애매하면 빈 배열 — 틀린 소재보다 비는 게 낫다(정의서 P-05가 소재별 집계를 쓴다). 이미지 소재 언급량이 적게 잡히는 것은 의도된 것이다.
-- **실루엣은 카테고리별 기준**(`ai/prompts/structure-silhouette.md`)으로 판단한다. 코드 10개를 핏(오버사이즈·레귤러·슬림)·기장(크롭·롱)·형태(박시·와이드·A·H라인·플레어) 세 축으로 나누고 축마다 최대 1개 — 같은 옷이 박시·오버사이즈·둘 다로 흩어지던 것을 막는다. 정답셋 라벨도 이 기준을 쓴다. 공통코드에 실루엣 코드를 더하면 이 md에도 기준을 적는다.
+- **실루엣은 카테고리별 기준**(`ai/prompts/structure/silhouette.md`)으로 판단한다. 코드 10개를 핏(오버사이즈·레귤러·슬림)·기장(크롭·롱)·형태(박시·와이드·A·H라인·플레어) 세 축으로 나누고 축마다 최대 1개 — 같은 옷이 박시·오버사이즈·둘 다로 흩어지던 것을 막는다. 정답셋 라벨도 이 기준을 쓴다. 공통코드에 실루엣 코드를 더하면 이 md에도 기준을 적는다.
 - **시즌**(공통코드 `TREND_SEASON`: 봄·여름·가을·겨울, 여러 개 가능)은 문서 단위다. 텍스트는 본문에 나온 시즌("올가을", "26SS")을 먼저, 없으면 아이템 두께로 판단하고, 이미지는 옷의 두께·레이어링으로 판단한다. 판단할 수 없으면 비운다(검증도 빈 값을 허용한다).
 - Spring과 AI 서비스는 허용 코드 목록을 맞춰 보낸다 — 코드 그룹을 더하면 **둘 다 재기동**한다. 한쪽만 새 버전이면 요청 형식이 달라 분석이 전부 실패한다.
 - 실루엣 "축마다 1개"는 프롬프트만으로 지켜지지 않아(오버사이즈·레귤러 동시 출력 확인) **검증에서 강제**한다: 축마다 처음 값만 남긴다(`TrendCodes.SILHOUETTE_AXES`, 실패로 돌리지 않음). 공통코드에 새 실루엣 코드를 넣으면 축도 여기에 적는다(없으면 제한 없이 통과).
+- **본문 + 이미지 원문은 Claude 호출 한 번**에 같이 보낸다(이미지 → 본문 → 지시문 순). 시스템 프롬프트는 공통 → 실루엣 → 텍스트 기준 → 이미지 기준 → `structure/article.md`(우선순위) 순으로 붙인다. 우선순위: 본문이 주된 근거, 같은 아이템은 하나로 합치고(전체 5개까지), 본문과 사진이 다르면 본문, 소재는 본문에 나온 것을 쓰고 없으면 사진 질감이 분명할 때만, 주제와 무관한 사진 속 옷(광고 등)은 넣지 않는다. 이미지 소재 허용 목록은 **이미지만 있는 원문에만** 건다 — 본문에 "울"이 나오면 써야 하므로.
+  - 이미지가 여러 장이면 장마다 긴 변 1568px·3MB 이하로 줄인다(`image_prep.prepare(multiple=True)`) — 요청 전체 상한(32MB)을 넘지 않게. 사진 한 장은 입력 약 1,500~3,000토큰이 늘어난다(2026-10-21 실측: 본문 74자 + 사진 1장 = 입력 4,775토큰).
 - **이미지 소재는 허용 목록만**(`TrendCodes.IMAGE_MATERIALS`: 레더·스웨이드·데님·니트·퍼·플리스·트위드·코듀로이·새틴, 2026-10-20 사용자 결정). 면·울·캐시미어·폴리에스터·실크·린넨·나일론은 사진으로 가릴 수 없는데 프롬프트로 막아도 면을 추측했다 — 그래서 이미지 분석에는 이 목록만 허용 값으로 보내 스키마에서 막고, 검증도 같은 목록으로 한다(`TrendCodeBook.restrict`). 텍스트는 전부 허용.
 - **의류만** 뽑는다. 신발·가방·액세서리는 뺀다. 카테고리 코드 초안에서도 SHOES·BAG·ACC를 뺐다 — 이미 넣은 DB는 공통코드 관리에서 사용 안 함으로 바꾼다.
 - 임베딩은 "일단" `Qwen/Qwen3-VL-Embedding-2B`. 한국어 질의 비교에서 3/3(mpnet 2/3, e5-large 1/3, Chroma 기본 영어 MiniLM 실패). 이 PC는 CPU로 돌아 느리다.
@@ -24,7 +26,7 @@
 - **검증을 통과한 결과만 저장한다**(정의서 P-03). Structured Output이 형식을 맞춰 줘도 `TrendResultValidator`를 생략하지 않는다.
 - **표준 코드 값만 저장한다.** 분석할 때마다 사용중 공통코드를 읽어 Claude 스키마 enum으로 넘긴다 — 공통코드를 바꾸면 재기동 없이 다음 분석부터 적용. 코드 이름의 괄호("레더(가죽)")는 다른 표기를 그 코드로 옮기는 힌트다.
 - **출처는 LLM이 만들지 않는다.** Spring이 원문 문서 값을 정형 JSON에 붙인다(정의서 10번 슬라이드 형식).
-- **결과 형식·분류 축을 바꾸면 같이 고친다:** `ai/prompts/structure-*.md`(판단 규칙 — 공통·이미지·텍스트), `structurer.build_schema`, `TrendResultValidator`, `AnalysisService`(저장·정형 JSON), `indexer.summary_chunk`, `TrendItem.garments`, 집계(`TrendAggregationService.mentions`)와 근거 원문(`TrendQueryService.mentions`), 결과 모달(`trend-analysis.js`). 한 곳만 고치면 검증에서 전부 실패하거나 집계가 조용히 틀린다. **AI 서비스도 재기동**한다 — 옛 스키마로 떠 있으면 새 검증이 모든 결과를 거부한다.
+- **결과 형식·분류 축을 바꾸면 같이 고친다:** `ai/prompts/structure/*.md`(판단 규칙 — 공통·실루엣·이미지·텍스트·본문+이미지), `structurer.build_schema`, `TrendResultValidator`, `AnalysisService`(저장·정형 JSON), `indexer.summary_chunk`, `TrendItem.garments`, 집계(`TrendAggregationService.mentions`)와 근거 원문(`TrendQueryService.mentions`), 결과 모달(`trend-analysis.js`). 한 곳만 고치면 검증에서 전부 실패하거나 집계가 조용히 틀린다. **AI 서비스도 재기동**한다 — 옛 스키마로 떠 있으면 새 검증이 모든 결과를 거부한다.
 - 아이템 수 상한(5)은 스키마로 걸 수 없다(구조화 출력은 배열 길이 제약 미지원). 프롬프트로 지시하고 검증에서 앞 5개만 남긴다.
 - 저장: 아이템 단위 값(아이템명 `ITEM`·소재·컬러·실루엣)은 `trend_item_values`의 `garment_no`·`category`로 묶는다. `trend_items.category`는 대표(첫) 아이템이다 — NOT NULL 컬럼이라 엔티티에서 빼면 `ddl-auto=update`가 컬럼을 지우지 않아 저장이 깨진다.
 - 아이템 배열 이전 결과(`garment_no` 없음)는 `TrendItem.garments()`가 문서 카테고리로 아이템 하나를 만들어 보여 준다. 재분석하면 새 형식이 된다.

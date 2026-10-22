@@ -3,8 +3,8 @@
 같은 문서를 다시 분석하면 이전 청크를 지우고 새로 넣는다(문서 ID 단위로 갈아끼움). 이미지는 본문이 없으므로
 정형화 결과(요약·키워드·의류 아이템별 소재·컬러·실루엣)를 문장으로 만든 청크 하나를 넣는다. RAG(P-06)가 근거를 표시할 때 메타를 쓴다.
 """
-from chunker import split_text
-from config import settings
+from app.indexing.chunker import split_text
+from app.core.config import settings
 
 
 def summary_chunk(structured: dict, names: dict[str, str]) -> str:
@@ -24,6 +24,25 @@ def summary_chunk(structured: dict, names: dict[str, str]) -> str:
         category = names.get(item.get("category"), item.get("category") or "")
         parts.append(f"아이템: {item.get('item', '')}({category})" + (" — " + ", ".join(attrs) if attrs else ""))
     return "\n".join(p for p in parts if p)
+
+
+def date_number(value: str | None) -> int:
+    """"2026-10-22" → 20261022. 날짜가 없거나 형식이 다르면 0(기간 필터에서 항상 빠진다)."""
+    digits = (value or "").replace("-", "")[:8]
+    return int(digits) if len(digits) == 8 and digits.isdigit() else 0
+
+
+def backfill_date_numbers(collection) -> int:
+    """published_num이 생기기 전에 색인한 청크에 채운다(메타만 고친다 — 다시 임베딩하지 않는다). 채운 청크 수."""
+    got = collection.get(include=["metadatas"])
+    ids, metas = [], []
+    for chunk_id, meta in zip(got["ids"], got["metadatas"]):
+        if meta is not None and "published_num" not in meta:
+            ids.append(chunk_id)
+            metas.append({**meta, "published_num": date_number(meta.get("published_at"))})
+    if ids:
+        collection.update(ids=ids, metadatas=metas)
+    return len(ids)
 
 
 def item_categories(structured: dict) -> list[str]:
@@ -51,6 +70,8 @@ def index_document(collection, doc_id: str, doc_type: str, text: str | None, str
         "doc_type": doc_type,
         "media": meta.get("media") or "",
         "published_at": meta.get("published_at") or "",
+        # Chroma 메타 필터는 문자열 범위 비교를 못 한다 — RAG 기간 필터("요즘" = 최근 4주)용으로 숫자(20261022)도 둔다
+        "published_num": date_number(meta.get("published_at")),
         "url": meta.get("url") or "",
         # Chroma 메타 값은 스칼라만 된다 — 대표(첫 아이템) 카테고리와 전체 목록(쉼표)을 따로 둔다
         "category": (item_categories(structured) or [""])[0],

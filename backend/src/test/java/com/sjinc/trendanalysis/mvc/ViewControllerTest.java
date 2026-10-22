@@ -47,7 +47,11 @@ class ViewControllerTest {
                 .andExpect(content().string(containsString("data-menu=\"com-cd-master-mng\"")))
                 .andExpect(content().string(containsString("data-menu=\"com-cd-mng\"")))
                 // 상단바 로그인 사용자 표시(TopbarModelAdvice)
-                .andExpect(content().string(containsString("관리자(admin)")));
+                .andExpect(content().string(containsString("관리자(admin)")))
+                // 대시보드 카드(집계 전이면 빈 상태 문구)와 RAG 질문창
+                .andExpect(content().string(containsString("트렌드 집계")))
+                .andExpect(content().string(containsString("분석 현황")))
+                .andExpect(content().string(containsString("id=\"ragQuestion\"")));
     }
 
     @Test

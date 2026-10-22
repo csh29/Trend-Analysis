@@ -19,6 +19,7 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.util.ArrayList;
@@ -36,6 +37,7 @@ public class DataInitializer implements CommandLineRunner {
 
     private static final String INITIAL_PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
     private static final int INITIAL_PASSWORD_LENGTH = 20;
+    private static final String RETIRED_RAG_PROGRAM = "rag-search";
 
     private final UserRepository userRepository;
     private final ProgramRepository programRepository;
@@ -45,6 +47,7 @@ public class DataInitializer implements CommandLineRunner {
     private final PasswordEncoder passwordEncoder;
 
     @Override
+    @Transactional // 권한 일괄 삭제(@Modifying 쿼리)는 트랜잭션 안에서만 돈다
     public void run(String... args) {
         seedRoleIfAbsent();
         seedMenuGroupIfAbsent();
@@ -135,6 +138,13 @@ public class DataInitializer implements CommandLineRunner {
                     .searchYn("Y").newYn("N").saveYn("N").deleteYn("N").resetYn("Y").etc1Nm("집계")
                     .build()));
             log.info("프로그램 trend-analysis(트렌드 분석)를 등록했습니다.");
+        }
+        // RAG 검색은 별도 화면 대신 홈 질문창으로 옮겼다(2026-10-21). 잠깐 등록됐던 프로그램이 남아 있으면 지운다 —
+        // 메뉴에 남으면 없는 화면(program-not-found)이 열린다.
+        if (programRepository.existsById(RETIRED_RAG_PROGRAM)) {
+            userProgramPermissionRepository.deleteByProgramId(RETIRED_RAG_PROGRAM);
+            programRepository.deleteById(RETIRED_RAG_PROGRAM);
+            log.info("프로그램 {}(RAG 검색)를 지웠습니다 — 홈 질문창으로 옮겼습니다.", RETIRED_RAG_PROGRAM);
         }
     }
 

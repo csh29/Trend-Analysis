@@ -1,0 +1,18 @@
+<!--
+    홈 대시보드의 "TOP N" 가로 막대. 트렌드 카드(키워드)·분석 카드(카테고리)가 같은 모양으로 쓴다.
+    bars: HomeView.Bar 목록(건수 내림차순 — 첫 행이 100% 기준), emptyText: 목록이 비었을 때 문구.
+    모양(.bars/.bar-row)은 home.html의 <style>에 있다.
+-->
+<div xmlns:th="http://www.thymeleaf.org" th:fragment="rankBars(bars, emptyText)">
+    <div class="bars" th:if="${not #lists.isEmpty(bars)}">
+        <div class="bar-row" th:each="bar : ${bars}">
+            <span class="cap" th:text="${bar.label}" th:title="${bar.label}">값</span>
+            <span class="track">
+                <i class="fill" th:style="|width:${bars[0].count > 0 ? bar.count * 100 / bars[0].count : 0}%|"></i>
+                <span class="num" th:text="${bar.count}">0</span>
+                <span class="badge high" th:if="${bar.surge}">급상승</span>
+            </span>
+        </div>
+    </div>
+    <p th:if="${#lists.isEmpty(bars)}" class="bars-empty" th:text="${emptyText}">없습니다.</p>
+</div>

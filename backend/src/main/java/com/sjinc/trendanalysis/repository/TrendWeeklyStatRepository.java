@@ -15,4 +15,8 @@ public interface TrendWeeklyStatRepository extends JpaRepository<TrendWeeklyStat
 
     @Query("select max(s.aggregatedAt) from TrendWeeklyStat s")
     LocalDateTime findLastAggregatedAt();
+
+    /** 집계가 있는 가장 최근 주(월요일). */
+    @Query("select max(s.weekStart) from TrendWeeklyStat s")
+    LocalDate findLastWeekStart();
 }

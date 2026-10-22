@@ -3,10 +3,15 @@
 내장형(embedded, 로컬 폴더)과 서버형(http)은 CHROMA_MODE 설정 하나로 바뀐다 — 시스템 오픈 때 서버형으로 옮길 때
 코드를 고치지 않기 위해서다. 두 클라이언트의 컬렉션 API(add·query·delete)는 같다.
 """
+import logging
+
 import chromadb
 
-from config import Settings, settings
-from embedding import create_embedding_function
+from app.indexing import indexer
+from app.core.config import Settings, settings
+from app.indexing.embedding import create_embedding_function
+
+log = logging.getLogger("trend-ai")
 
 _client = None
 _collection = None
@@ -40,5 +45,8 @@ def get_collection():
             raise RuntimeError(
                 f"컬렉션 {settings.chroma_collection}은 {stored}로 만들어졌습니다(현재 설정 {settings.embedding_model}). "
                 "CHROMA_COLLECTION을 바꾸거나 재색인하세요.")
+        filled = indexer.backfill_date_numbers(collection)
+        if filled:
+            log.info("예전 청크 %d개에 게시일 숫자(published_num)를 채웠습니다 — RAG 기간 필터용", filled)
         _collection = collection
     return _collection

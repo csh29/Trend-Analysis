@@ -21,6 +21,9 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
     /** 샘플 데이터(SampleDataLoader)를 이미 넣었는지. */
     boolean existsByTitleStartingWith(String prefix);
 
+    /** RAG 근거(Chroma 메타의 문서 ID)를 원문으로 되돌린다. */
+    List<SourceDocument> findByDocIdIn(Collection<String> docIds);
+
     /** 분석 로그의 대기·처리 중 건수. */
     long countByStatus(String status);
 }

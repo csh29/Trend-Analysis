@@ -20,11 +20,20 @@
         .form-grid .full{ grid-column:1 / -1; }
         .form-hint{ font-size:11.5px; color:var(--text-sub); }
         .body-tools{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
-        .body-tools input[type="file"]{ display:none; }
+        .body-tools input[type="file"], .image-tools input[type="file"]{ display:none; }
+        /* 첨부 이미지(원문 1건 = 본문 + 이미지) — 고른 순서대로 썸네일, ×로 뺀다 */
+        .image-tools{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+        .image-list{ display:flex; flex-wrap:wrap; gap:8px; }
+        .image-list:empty{ display:none; }
+        .image-thumb{ position:relative; width:84px; height:84px; border:1px solid var(--line); border-radius:6px; overflow:hidden; background:var(--bg); }
+        .image-thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+        .image-thumb button{ position:absolute; top:2px; right:2px; width:20px; height:20px; padding:0; border:none; border-radius:50%;
+            background:rgba(25,25,64,.75); color:#fff; font-size:12px; line-height:20px; cursor:pointer; }
     </style>
 </head>
 <body>
-<!-- 텍스트 원문(기사·리포트 본문 등)을 붙여넣거나 .txt로 등록하면 AI 분석(P-03 정형화·P-04 색인)이 뒤에서 돈다. -->
+<!-- 텍스트 원문(기사·잡지·게시물 본문)을 붙여넣거나 .txt로 등록하면 AI 분석(P-03 정형화·P-04 색인)이 뒤에서 돈다.
+     원문 1건 = 본문 + 이미지 — 기사에 딸린 사진은 여기서 같이 첨부한다(본문과 한 번에 분석, 따로 세지 않는다). -->
 <div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
     <div th:replace="~{fragments/sidebar :: sidebar}"></div>
     <div th:replace="~{fragments/topbar :: topbar}"></div>
@@ -66,6 +75,12 @@
                 <input type="file" id="txtFile" accept=".txt,text/plain">
             </div>
             <textarea class="full" id="fldTextBody" placeholder="분석할 본문을 붙여넣으세요"></textarea>
+            <div class="full image-tools">
+                <span class="form-hint" id="imageCount">첨부 이미지 0 / 최대 5장 — 기사에 딸린 사진(본문과 함께 분석)</span>
+                <label class="btn" for="imageFiles">이미지 추가</label>
+                <input type="file" id="imageFiles" accept="image/*" multiple>
+            </div>
+            <div class="full image-list" id="imageList"></div>
         </div>
         <div class="modal-actions">
             <button type="submit" class="btn primary">등록</button>
@@ -91,6 +106,10 @@
             { type: 'row-select', width: 36, align: 'center' },
             { id: 'docId', label: '문서 ID', width: 170, align: 'center' },
             { id: 'title', label: '제목', title: true },
+            {
+                id: 'imageCount', label: '이미지', width: 60, align: 'center',
+                render: function (value) { return value ? value + '장' : '-'; }
+            },
             {
                 id: 'statusText', label: '분석', width: 80, align: 'center',
                 title: function (value, row) { return row.analysis && row.analysis.failReason; },
@@ -153,6 +172,45 @@
         const form = document.getElementById('textForm');
         const bodyField = document.getElementById('fldTextBody');
         const bodyCount = document.getElementById('bodyCount');
+        const MAX_IMAGES = 5;
+        const imageList = document.getElementById('imageList');
+        let images = []; // 첨부할 File 목록(고른 순서 = 분석에 보내는 순서)
+
+        function renderImages() {
+            imageList.querySelectorAll('img').forEach(function (img) { URL.revokeObjectURL(img.src); });
+            imageList.replaceChildren();
+            images.forEach(function (file, i) {
+                const box = document.createElement('div');
+                box.className = 'image-thumb';
+                box.title = file.name;
+                const img = document.createElement('img');
+                img.src = URL.createObjectURL(file);
+                img.alt = file.name;
+                const remove = document.createElement('button');
+                remove.type = 'button';
+                remove.textContent = '×';
+                remove.title = '빼기';
+                remove.addEventListener('click', function () {
+                    images.splice(i, 1);
+                    renderImages();
+                });
+                box.append(img, remove);
+                imageList.appendChild(box);
+            });
+            document.getElementById('imageCount').textContent =
+                '첨부 이미지 ' + images.length + ' / 최대 ' + MAX_IMAGES + '장 — 기사에 딸린 사진(본문과 함께 분석)';
+        }
+
+        document.getElementById('imageFiles').addEventListener('change', function (e) {
+            const picked = Array.from(e.target.files || []);
+            e.target.value = '';
+            const room = MAX_IMAGES - images.length;
+            if (picked.length > room) {
+                alert('이미지는 원문 하나에 ' + MAX_IMAGES + '장까지 붙일 수 있습니다. 앞의 ' + Math.max(room, 0) + '장만 추가합니다.');
+            }
+            images = images.concat(picked.slice(0, Math.max(room, 0)));
+            renderImages();
+        });
 
         function updateCount() {
             bodyCount.textContent = bodyField.value.length.toLocaleString() + '자 / 최대 50,000자';
@@ -161,6 +219,8 @@
 
         function openForm() {
             form.reset();
+            images = [];
+            renderImages();
             // toISOString은 UTC라 한국 시간 오전 9시 전에는 어제가 된다 — 로컬 날짜로 만든다
             const now = new Date();
             document.getElementById('fldTextPublished').value = now.getFullYear() + '-'
@@ -212,15 +272,30 @@
                 publishedAt: document.getElementById('fldTextPublished').value || null,
                 url: document.getElementById('fldTextUrl').value.trim()
             };
-            fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            })
+            // 이미지가 있으면 multipart(본문 JSON + 파일), 없으면 JSON
+            let request;
+            if (images.length) {
+                const data = new FormData();
+                data.append('request', new Blob([JSON.stringify(payload)], { type: 'application/json' }));
+                images.forEach(function (file) { data.append('files', file); });
+                request = { method: 'POST', body: data };
+            } else {
+                request = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) };
+            }
+            fetch(API_URL, request)
                 .then(function (res) {
                     if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '등록에 실패했습니다.'); });
+                    return res.json();
+                })
+                .then(function (result) {
                     closeForm();
-                    alert('등록했습니다. AI 분석은 뒤에서 진행되며 목록의 분석 칸에 결과가 표시됩니다.');
+                    let message = '등록했습니다. AI 분석은 뒤에서 진행되며 목록의 분석 칸에 결과가 표시됩니다.';
+                    const skipped = result.skippedImages || [];
+                    if (skipped.length) {
+                        message += '\n\n이미 올린 이미지와 같아 첨부하지 않은 파일 ' + skipped.length + '장:\n'
+                            + skipped.map(function (d) { return '- ' + d.fileName + ' (= ' + d.existingName + ')'; }).join('\n');
+                    }
+                    alert(message);
                     searchTexts();
                 })
                 .catch(function (err) {
@@ -236,7 +311,7 @@
                 alert('삭제할 텍스트를 목록에서 선택하세요.');
                 return;
             }
-            if (!confirm('선택한 텍스트 ' + ids.length + '건을 삭제하시겠습니까? 분석 결과와 색인도 함께 지워집니다.')) {
+            if (!confirm('선택한 텍스트 ' + ids.length + '건을 삭제하시겠습니까? 첨부 이미지·분석 결과·색인도 함께 지워집니다.')) {
                 return;
             }
             fetch(API_URL, {

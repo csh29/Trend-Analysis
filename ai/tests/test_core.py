@@ -11,21 +11,25 @@ from unittest import mock
 import anthropic
 from PIL import Image
 
-import chunker
-import config
-import embedding
-import image_prep
-import indexer
-import prompt_loader
-import vector_store
-from structurer import CodeOption, StructureInput, StructuringError, build_content, build_schema, structure
+from app.indexing import chunker
+from app.core import config
+from app.indexing import embedding
+from app.structuring import image_prep
+from app.indexing import indexer
+from app.core import prompt_loader
+from app.indexing import vector_store
+from app.core.claude import AiServiceError
+from app.structuring.structurer import CodeOption, ImageInput, StructureInput, build_content, build_schema, structure
 
 
-def sample_input(doc_type="TEXT") -> StructureInput:
+def sample_input(doc_type="TEXT", images=None) -> StructureInput:
+    """TEXT는 본문만, IMAGE는 이미지만. images를 주면 TEXT에 이미지를 붙인 원문(기사·게시물)이 된다."""
+    if images is None:
+        images = 1 if doc_type == "IMAGE" else 0
     return StructureInput(
-        doc_id="TXT-1", doc_type=doc_type, model="claude-sonnet-5", title="제목", text="레더 재킷이 유행",
-        image_base64="AAAA" if doc_type == "IMAGE" else None,
-        image_media_type="image/png" if doc_type == "IMAGE" else None,
+        doc_id="TXT-1", doc_type=doc_type, model="claude-sonnet-5", title="제목",
+        text="레더 재킷이 유행" if doc_type == "TEXT" else None,
+        images=[ImageInput("AAAA", "image/png") for _ in range(images)],
         categories=[CodeOption("OUTER", "아우터"), CodeOption("ETC", "기타")],
         materials=[CodeOption("LEATHER", "레더(가죽)")],
         colors=[CodeOption("BROWN", "브라운")],
@@ -110,6 +114,15 @@ class ImagePrepTest(unittest.TestCase):
         Image.new("RGB", size, (200, 30, 60)).save(buffer, format=fmt)
         return buffer.getvalue()
 
+    def test_multiple_images_are_shrunk_to_smaller_edge(self):
+        # 원문 하나에 여러 장이면 요청 전체 크기를 넘지 않게 장마다 더 줄인다
+        raw = self.image_bytes((2000, 1000), "PNG")
+        single, _ = image_prep.prepare(raw, "image/png")
+        multi, media = image_prep.prepare(raw, "image/png", multiple=True)
+        self.assertEqual(2000, Image.open(io.BytesIO(base64.b64decode(single))).size[0])
+        self.assertEqual(image_prep.MULTI_LONG_EDGE, Image.open(io.BytesIO(base64.b64decode(multi))).size[0])
+        self.assertEqual("image/jpeg", media)
+
     def test_small_supported_image_is_sent_as_is(self):
         raw = self.image_bytes((100, 80), "PNG")
         data, media = image_prep.prepare(raw, "image/png")
@@ -161,6 +174,19 @@ class StructurerTest(unittest.TestCase):
         self.assertNotIn("본문에 그 아이템의 소재가 직접 나온 것만", image)
         self.assertIn("본문에 그 아이템의 소재가 직접 나온 것만", text)
         self.assertNotIn("질감이 사진에서 분명할 때만", text)
+        self.assertNotIn("본문을 따른다", image + text)  # 본문+이미지 우선순위는 둘 다 있을 때만
+
+    def test_article_gets_both_rules_and_precedence(self):
+        messages = FakeMessages(fake_response())
+        structure(sample_input("TEXT", images=2), "k", client=SimpleNamespace(messages=messages))
+        system = messages.calls[0]["system"]
+        self.assertIn("본문에 그 아이템의 소재가 직접 나온 것만", system)
+        self.assertIn("질감이 사진에서 분명할 때만", system)
+        self.assertLess(system.index("질감이 사진에서 분명할 때만"), system.index("본문을 따른다"))  # 우선순위가 마지막
+        content = messages.calls[0]["messages"][0]["content"]
+        self.assertEqual(["image", "image", "text", "text"], [c["type"] for c in content])  # 이미지 → 본문 → 지시문
+        self.assertIn("<document>", content[2]["text"])
+        self.assertIn("함께 온 이미지", content[3]["text"])
 
     def test_successful_call_uses_structured_output(self):
         messages = FakeMessages(fake_response())
@@ -175,20 +201,20 @@ class StructurerTest(unittest.TestCase):
 
     def test_refusal_is_not_retryable(self):
         response = fake_response(stop_reason="refusal", stop_details=SimpleNamespace(category="cyber"))
-        with self.assertRaises(StructuringError) as ctx:
+        with self.assertRaises(AiServiceError) as ctx:
             structure(sample_input(), "k", client=SimpleNamespace(messages=FakeMessages(response)))
         self.assertFalse(ctx.exception.retryable)
         self.assertEqual(10, ctx.exception.usage["input_tokens"])  # 거절돼도 과금된 토큰은 넘긴다
 
     def test_truncated_or_broken_json_is_retryable(self):
         for response in (fake_response(stop_reason="max_tokens"), fake_response(text="{broken")):
-            with self.assertRaises(StructuringError) as ctx:
+            with self.assertRaises(AiServiceError) as ctx:
                 structure(sample_input(), "k", client=SimpleNamespace(messages=FakeMessages(response)))
             self.assertTrue(ctx.exception.retryable)
 
     def test_connection_error_is_retryable(self):
         error = anthropic.APIConnectionError(request=mock.Mock())
-        with self.assertRaises(StructuringError) as ctx:
+        with self.assertRaises(AiServiceError) as ctx:
             structure(sample_input(), "k", client=SimpleNamespace(messages=FakeMessages(error=error)))
         self.assertTrue(ctx.exception.retryable)
 
@@ -275,9 +301,9 @@ class PromptLoaderTest(unittest.TestCase):
                 prompt_loader.load("x", ["system", "task_text"])
 
     def test_prompt_files_are_what_claude_gets(self):
-        common = prompt_loader.load("structure-common", ["system"])
-        silhouette = prompt_loader.load("structure-silhouette", ["system"])
-        text_rules = prompt_loader.load("structure-text", ["system"])
+        common = prompt_loader.load("structure/common", ["system"])
+        silhouette = prompt_loader.load("structure/silhouette", ["system"])
+        text_rules = prompt_loader.load("structure/text", ["system"])
         messages = FakeMessages(fake_response())
         structure(sample_input("TEXT"), "k", client=SimpleNamespace(messages=messages))
         call = messages.calls[0]

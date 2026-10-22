@@ -16,6 +16,7 @@
 | 기능 | [`docs/llm/features/document-upload.md`](docs/llm/features/document-upload.md) | 이미지 업로드 · 텍스트 등록 · 원문 문서 |
 | 기능 | [`docs/llm/features/analysis-pipeline.md`](docs/llm/features/analysis-pipeline.md) | P-03 정형화 · P-04 저장·색인 · 임베딩·Chroma · 분석 로그 |
 | 기능 | [`docs/llm/features/trend-aggregation.md`](docs/llm/features/trend-aggregation.md) | P-05 주간 집계 · 급상승 기준 · 배치 · 샘플 데이터 |
+| 기능 | [`docs/llm/features/rag-search.md`](docs/llm/features/rag-search.md) | P-06 RAG 검색 · 근거 기준 유사도 · 근거 없음 처리 |
 
 작업을 시작할 때 `llm-analysis.md`를 먼저 읽고, 고칠 영역(backend / ai) 문서와 해당 기능 문서로 들어간다.
 코드를 쓰거나 고칠 때는 `llm-development.md`도 읽는다.

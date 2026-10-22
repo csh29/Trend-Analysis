@@ -4,6 +4,7 @@ import com.sjinc.trendanalysis.domain.SourceDocument;
 import com.sjinc.trendanalysis.domain.TrendItem;
 import com.sjinc.trendanalysis.domain.TrendItemValue;
 import com.sjinc.trendanalysis.domain.UploadedImage;
+import com.sjinc.trendanalysis.repository.UploadedImageRepository;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisSummary;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisView;
 import com.sjinc.trendanalysis.dto.analysis.TextDocumentRequest;
@@ -26,7 +27,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * 원문 문서 등록·조회·재분석·삭제. 등록하면 분석 대기열에 넣고(AnalysisRequestedEvent) 바로 돌아간다 — 정형화는
+ * 원문 문서 등록·조회·재분석·삭제. 원문 1건 = 본문 + 이미지 N장 — 이미지만 있으면 IMAGE, 본문이 있으면 TEXT(첨부 이미지 0~5장). 등록하면 분석 대기열에 넣고(AnalysisRequestedEvent) 바로 돌아간다 — 정형화는
  * AnalysisService가 분석 스레드에서 한다. 저장이 끝난(커밋된) 뒤에 이벤트를 내야 분석 스레드가 문서를 읽을 수 있으므로
  * 이 서비스의 등록 메서드는 트랜잭션으로 감싸지 않는다(저장마다 커밋).
  */
@@ -44,6 +45,7 @@ public class DocumentService {
     private final SourceDocumentRepository sourceDocumentRepository;
     private final TrendItemRepository trendItemRepository;
     private final ComCdRepository comCdRepository;
+    private final UploadedImageRepository uploadedImageRepository;
     private final AiClient aiClient;
     private final ApplicationEventPublisher eventPublisher;
 
@@ -67,7 +69,15 @@ public class DocumentService {
         requestAnalysis(ids);
     }
 
+    /** 본문만 있는 텍스트 원문 등록. 이미지를 같이 붙일 때는 TextRegistrationService가 saveText → 첨부 → requestAnalysis 순으로 부른다. */
     public TextDocumentView registerText(TextDocumentRequest request, String username) {
+        SourceDocument doc = saveText(request, username);
+        requestAnalysis(List.of(doc.getId()));
+        return TextDocumentView.of(doc, 0, AnalysisSummary.of(doc, null, null));
+    }
+
+    /** 텍스트 원문을 저장만 한다(분석 대기열에는 넣지 않는다). 첨부를 다 붙인 뒤 requestAnalysis를 불러야 분석이 이미지까지 본다. */
+    public SourceDocument saveText(TextDocumentRequest request, String username) {
         String body = request.body() == null ? "" : request.body().strip();
         if (body.isEmpty()) {
             throw new IllegalArgumentException("본문을 입력하세요.");
@@ -91,14 +101,25 @@ public class DocumentService {
                 .registeredBy(username)
                 .registeredAt(now)
                 .build());
-        requestAnalysis(List.of(doc.getId()));
-        return TextDocumentView.of(doc, AnalysisSummary.of(doc, null, null));
+        return doc;
+    }
+
+    /** 첨부 저장이 실패했을 때 방금 만든 원문을 되돌린다(분석 전이라 트렌드 항목·색인이 없다). */
+    public void discard(SourceDocument doc) {
+        sourceDocumentRepository.delete(doc);
+    }
+
+    public TextDocumentView view(SourceDocument doc, int imageCount) {
+        return TextDocumentView.of(doc, imageCount, AnalysisSummary.of(doc, null, null));
     }
 
     public List<TextDocumentView> getTexts() {
         List<SourceDocument> docs = sourceDocumentRepository.findByDocTypeOrderByRegisteredAtDescIdDesc(SourceDocument.TYPE_TEXT);
         Map<Long, AnalysisSummary> summaries = summarize(docs);
-        return docs.stream().map(doc -> TextDocumentView.of(doc, summaries.get(doc.getId()))).toList();
+        Map<Long, Long> imageCounts = uploadedImageRepository.findByDocumentIdIn(docs.stream().map(SourceDocument::getId).toList())
+                .stream().collect(Collectors.groupingBy(UploadedImage::getDocumentId, Collectors.counting()));
+        return docs.stream().map(doc -> TextDocumentView.of(doc, imageCounts.getOrDefault(doc.getId(), 0L).intValue(),
+                summaries.get(doc.getId()))).toList();
     }
 
     /** 이미지 업로드 그리드용 — 이미지 id → 분석 요약. */
@@ -173,7 +194,7 @@ public class DocumentService {
         return sourceDocumentRepository.save(saved);
     }
 
-    private void requestAnalysis(List<Long> documentIds) {
+    public void requestAnalysis(List<Long> documentIds) {
         if (!documentIds.isEmpty()) {
             eventPublisher.publishEvent(new AnalysisRequestedEvent(documentIds));
         }
@@ -214,9 +235,14 @@ public class DocumentService {
                     codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
                     item.getSentiment(), item.getSummary(), item.getModel(), item.getResultJson());
         }).orElse(null);
+        List<AnalysisView.Image> images = doc.isImage() ? List.of()
+                : uploadedImageRepository.findByDocumentIdOrderBySortOrderAscIdAsc(doc.getId()).stream()
+                .map(image -> new AnalysisView.Image(image.getId(), image.getOriginalName(),
+                        "/api/texts/" + doc.getId() + "/images/" + image.getId() + "/file"))
+                .toList();
         return new AnalysisView(doc.getId(), doc.getDocId(), doc.getDocType(), doc.getTitle(), doc.getStatus(),
                 doc.getFailReason(), doc.getAttempts(), doc.getAnalyzedAt(), doc.getMedia(), doc.getPublishedAt(),
-                doc.getUrl(), result);
+                doc.getUrl(), images, result);
     }
 
     /** 이름 표시용 — 사용 중지된 코드도 이름을 보여야 하므로 사용여부와 무관하게 읽는다. */

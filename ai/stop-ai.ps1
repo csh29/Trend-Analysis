@@ -27,7 +27,7 @@ Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinu
     if (-not $owner) { return }
     $cmd = "$($owner.CommandLine)".ToLower()
     $exe = "$($owner.ExecutablePath)".ToLower()
-    $isOurs = $cmd.Contains("uvicorn") -and $cmd.Contains("main:app") -and
+    $isOurs = $cmd.Contains("uvicorn") -and $cmd.Contains("app.main:app") -and
         ($exe.StartsWith($venvRoot) -or ($basePython -and $exe.StartsWith($basePython)))
     if ($isOurs) {
         $targets += $owner.ProcessId
