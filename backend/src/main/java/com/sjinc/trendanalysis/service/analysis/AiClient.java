@@ -48,8 +48,8 @@ public class AiClient {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record AllowedCodes(List<CodeOption> categories, List<CodeOption> materials, List<CodeOption> colors,
-                               List<CodeOption> silhouettes, List<CodeOption> seasons) {
+    public record AllowedCodes(List<CodeOption> categories, List<CodeOption> itemTypes, List<CodeOption> materials,
+                               List<CodeOption> colors, List<CodeOption> silhouettes, List<CodeOption> seasons) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -83,7 +83,26 @@ public class AiClient {
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AnswerRequest(String question, String model, int topK, double minScore, String statsWeek,
-                                List<StatRow> stats, String today) {
+                                List<StatRow> stats, String today, String mode, String category, AnswerPeriod period,
+                                List<String> trendFacts, List<String> evidenceDocIds) {
+
+        public static final String SEARCH = "SEARCH";
+        public static final String TREND = "TREND";
+    }
+
+    /** 질문 해석 힌트 — 코드값·이름·일상 표현(카테고리 속성). */
+    public record CodeHint(String value, String name, String words) {
+    }
+
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record InterpretRequest(String question, String model, String today, List<CodeHint> categories,
+                                   List<CodeHint> itemTypes) {
+    }
+
+    /** 작은 모델의 질문 해석. period는 질문에 기간이 있을 때만(없으면 null). */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
+                                    Map<String, Object> usage) {
     }
 
     /**
@@ -93,9 +112,9 @@ public class AiClient {
     public record AnswerPeriod(String from, String to, String label, boolean explicit, boolean stale) {
     }
 
-    /** n은 답변 본문의 인용 번호([1]), chunk는 그 문서에서 가장 비슷했던 청크. */
+    /** n은 답변 본문의 인용 번호([1]), chunk는 그 문서에서 가장 비슷했던 청크. score는 유행 질문(예시 원문)이면 null. */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record AnswerSource(int n, String docId, double score, String chunk) {
+    public record AnswerSource(int n, String docId, Double score, String chunk) {
     }
 
     /** 답의 한 줄과 그 줄의 근거 번호. */
@@ -128,6 +147,16 @@ public class AiClient {
                 .body(request)
                 .retrieve()
                 .body(AnswerResponse.class));
+    }
+
+    /** P-06 질문 해석(작은 모델). 실패하면 RagService가 규칙으로 대신한다. */
+    public InterpretResponse interpret(InterpretRequest request, String apiKey) {
+        return call(() -> restClient.post().uri("/interpret")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Claude-Api-Key", apiKey)
+                .body(request)
+                .retrieve()
+                .body(InterpretResponse.class));
     }
 
     /** P-04 색인. 넣은 청크 수. */

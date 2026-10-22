@@ -130,7 +130,7 @@ public class AnalysisService {
         TrendCodeBook codes = TrendCodeBook.of(group -> comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(group, "Y"));
         if (doc.isImage()) {
             // 사진으로 구분되는 소재만 허용 값으로 보낸다 — 요청(스키마 enum)과 검증이 같은 목록을 쓴다
-            codes = codes.restrict(TrendCodes.MATERIAL, TrendCodes.IMAGE_MATERIALS);
+            codes = codes.restrict(TrendCodes.MATERIAL, codes.imageMaterials());
         }
         if (!codes.emptyGroups().isEmpty()) {
             fail(doc, "사용중인 공통코드가 없는 그룹이 있습니다: " + String.join(", ", codes.emptyGroups()));
@@ -214,7 +214,8 @@ public class AnalysisService {
 
     private AiClient.StructureRequest buildRequest(SourceDocument doc, TrendCodeBook codes) {
         AiClient.AllowedCodes allowed = new AiClient.AllowedCodes(
-                options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.MATERIAL)),
+                options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.ITEM_TYPE)),
+                options(codes.codes(TrendCodes.MATERIAL)),
                 options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)),
                 options(codes.codes(TrendCodes.SEASON)));
         // 원문 1건 = 본문 + 이미지 — 텍스트 원문에 첨부한 이미지도 한 요청에 같이 보낸다
@@ -258,6 +259,7 @@ public class AnalysisService {
             for (int no = 0; no < v.items().size(); no++) {
                 TrendResultValidator.Garment g = v.items().get(no);
                 item.addGarmentValue(TrendItemValue.ITEM, g.item(), 0, no, g.category());
+                item.addGarmentValue(TrendItemValue.ITEM_TYPE, g.type(), 0, no, g.category());
                 addGarmentValues(item, TrendItemValue.MATERIAL, g.materials(), no, g.category());
                 addGarmentValues(item, TrendItemValue.COLOR, g.colors(), no, g.category());
                 addGarmentValues(item, TrendItemValue.SILHOUETTE, g.silhouettes(), no, g.category());
@@ -297,6 +299,7 @@ public class AnalysisService {
             Map<String, Object> garment = new LinkedHashMap<>();
             garment.put("category", g.category());
             garment.put("item", g.item());
+            garment.put("type", g.type());
             garment.put("materials", g.materials());
             garment.put("colors", g.colors());
             garment.put("silhouettes", g.silhouettes());

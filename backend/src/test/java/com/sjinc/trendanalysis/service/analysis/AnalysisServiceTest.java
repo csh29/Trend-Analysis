@@ -75,6 +75,7 @@ class AnalysisServiceTest {
         Map<String, Object> garment = new HashMap<>();
         garment.put("category", category);
         garment.put("item", name);
+        garment.put("type", category + "_ETC");
         garment.put("materials", materials);
         garment.put("colors", colors);
         garment.put("silhouettes", List.of());

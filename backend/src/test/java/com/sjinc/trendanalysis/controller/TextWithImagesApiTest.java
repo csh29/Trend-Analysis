@@ -75,7 +75,7 @@ class TextWithImagesApiTest {
     }
 
     private static MockHttpServletRequestBuilder register(String body, MockMultipartFile... files) {
-        String json = "{\"title\":\"가을 아우터\",\"body\":\"" + body + "\",\"media\":\"보그코리아\",\"url\":\"https://example.com/a\"}";
+        String json = "{\"title\":\"가을 아우터\",\"body\":\"" + body + "\",\"media\":\"보그코리아\",\"url\":\"https://example.com/a/" + SEQ.incrementAndGet() + "\"}"; // 원문마다 다른 URL(같은 URL은 중복으로 막힌다)
         var builder = multipart("/api/texts")
                 .file(new MockMultipartFile("request", "", MediaType.APPLICATION_JSON_VALUE, json.getBytes(StandardCharsets.UTF_8)));
         for (MockMultipartFile file : files) {

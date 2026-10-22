@@ -29,7 +29,7 @@
 | P-01 수집 · P-02 전처리 | 대신 이미지 업로드·텍스트 등록 화면이 원문을 넣는다(원문 1건 = 본문 + 이미지 최대 5장) | [`features/document-upload.md`](features/document-upload.md) |
 | P-03 AI 정형화 · P-04 저장·색인 | 구현 | [`features/analysis-pipeline.md`](features/analysis-pipeline.md) |
 | P-05 트렌드 집계 | 구현(주간 언급량·전주/전월 대비·급상승, 트렌드 분석 화면) | [`features/trend-aggregation.md`](features/trend-aggregation.md) |
-| P-06 RAG 검색 | 구현(홈 질문창 — 질문·답변·출처, 근거 없으면 차단. 만족도 평가는 P-08 때) | [`features/rag-search.md`](features/rag-search.md) |
+| P-06 RAG 검색 | 구현(홈 질문창 — AI 질문 해석, 유행 질문은 원문 수·매체 수 집계로, 그 밖은 근거 검색. 근거 없으면 차단. 만족도 평가는 P-08 때) | [`features/rag-search.md`](features/rag-search.md) |
 | P-07 브리핑 · P-08 로그·KPI | 아직 없음 | — |
 
 그 밖에 구현된 것: 화면 프레임워크, 로그인·권한, 관리 화면 5종, 홈 대시보드(트렌드 집계·분석 현황 카드 + RAG 질문창, `HomeService`).

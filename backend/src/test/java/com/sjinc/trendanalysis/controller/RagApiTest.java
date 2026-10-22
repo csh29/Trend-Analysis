@@ -17,7 +17,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import com.jayway.jsonpath.JsonPath;
 import org.springframework.http.MediaType;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -36,11 +38,16 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /** P-06 RAG 질문 API(홈 질문창). 검색·답변은 가짜 AiClient가 돌려주고, 여기서는 출처를 원문으로 되돌리는 규칙을 본다. */
-@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:ragapitest", "claude.api.key=test-key"})
+@SpringBootTest(properties = {"spring.datasource.url=jdbc:h2:mem:ragapitest", "claude.api.key=test-key",
+        "image.upload.dir=target/test-uploads-rag"})
 @AutoConfigureMockMvc
 class RagApiTest {
 
@@ -92,9 +99,12 @@ class RagApiTest {
                 0.71, Map.of("input_tokens", 100, "output_tokens", 20), null,
                 new AiClient.AnswerPeriod("2026-10-14", "2026-10-20", "최근 자료 우선", false, false)));
 
-        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question(" 와이드 팬츠 유행? ")))
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question(" 와이드 팬츠 코디? ")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.question").value("와이드 팬츠 유행?"))
+                .andExpect(jsonPath("$.question").value("와이드 팬츠 코디?"))
+                // 해석 AI(가짜 AiClient)가 답하지 않으면 규칙으로 해석한다 — 유행 질문이 아니라 문장 검색
+                .andExpect(jsonPath("$.interpretation.by").value("RULE"))
+                .andExpect(jsonPath("$.interpretation.trend").value(false))
                 .andExpect(jsonPath("$.grounded").value(true))
                 .andExpect(jsonPath("$.sources", hasSize(1)))
                 .andExpect(jsonPath("$.sources[0].n").value(1))
@@ -175,6 +185,53 @@ class RagApiTest {
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("질문")))
                 .andExpect(status().isOk());
+    }
+
+    /** 이미지 업로드로 이미지 원문을 만들고 분석 완료로 바꾼다(분석은 가짜 AiClient라 실패하므로 상태를 직접 맞춘다). */
+    private String doneImageDocument() throws Exception {
+        byte[] png = {(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13, 'I', 'H', 'D', 'R', 7, 7};
+        String body = mockMvc.perform(multipart("/api/images").file(new MockMultipartFile("files", "look.png", "image/png", png))
+                        .with(csrf()).with(user("admin")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String docId = JsonPath.read(body, "$.uploaded[0].analysis.docId");
+        // 업로드 직후 분석 스레드가 상태를 바꾸므로, 끝난 뒤 완료로 맞춘다
+        for (int i = 0; i < 50 && !SourceDocument.FAILED.equals(sourceDocumentRepository.findByDocId(docId).orElseThrow().getStatus()); i++) {
+            Thread.sleep(100);
+        }
+        SourceDocument doc = sourceDocumentRepository.findByDocId(docId).orElseThrow();
+        doc.markDone();
+        sourceDocumentRepository.save(doc);
+        return docId;
+    }
+
+    @Test
+    @WithMockUser(username = "nobody")
+    void 이미지_출처는_패널_주소로_주고_로그인만으로_사진을_연다() throws Exception {
+        String docId = doneImageDocument();
+        when(aiClient.answer(any(), any())).thenReturn(new AiClient.AnswerResponse(true, "결론",
+                List.of(new AiClient.AnswerPoint("줄", List.of(1, 2))),
+                List.of(new AiClient.AnswerSource(1, docId, 0.7, "사진 요약"),
+                        new AiClient.AnswerSource(2, "TXT-R-1", 0.65, "텍스트")), 0.7, null, null, null));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("질문")))
+                .andExpect(status().isOk())
+                // 이미지 원문: 새 탭 링크 대신 패널 주소, 텍스트 원문: 원문 링크(새 탭)
+                .andExpect(jsonPath("$.sources[0].imageUrl").value("/api/rag/sources/" + docId + "/image"))
+                .andExpect(jsonPath("$.sources[0].url").doesNotExist())
+                .andExpect(jsonPath("$.sources[1].url").value("https://example.com/TXT-R-1"))
+                .andExpect(jsonPath("$.sources[1].imageUrl").doesNotExist());
+
+        // 이미지 업로드 권한이 없는 사용자(nobody)도 홈 출처 사진은 연다
+        mockMvc.perform(get("/api/rag/sources/" + docId + "/image"))
+                .andExpect(status().isOk())
+                .andExpect(content().contentType("image/png"));
+    }
+
+    @Test
+    @WithMockUser(username = "nobody")
+    void 텍스트_원문이나_분석_전_원문은_사진으로_열지_않는다() throws Exception {
+        mockMvc.perform(get("/api/rag/sources/TXT-R-1/image")).andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/rag/sources/NO-SUCH/image")).andExpect(status().isBadRequest());
     }
 
     @Test

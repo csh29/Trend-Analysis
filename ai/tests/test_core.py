@@ -31,6 +31,7 @@ def sample_input(doc_type="TEXT", images=None) -> StructureInput:
         text="레더 재킷이 유행" if doc_type == "TEXT" else None,
         images=[ImageInput("AAAA", "image/png") for _ in range(images)],
         categories=[CodeOption("OUTER", "아우터"), CodeOption("ETC", "기타")],
+        item_types=[CodeOption("OUTER_PADDING", "패딩(숏패딩·푸퍼)"), CodeOption("OUTER_ETC", "기타 아우터"), CodeOption("ETC", "기타")],
         materials=[CodeOption("LEATHER", "레더(가죽)")],
         colors=[CodeOption("BROWN", "브라운")],
         silhouettes=[CodeOption("OVERSIZED", "오버사이즈")],
@@ -146,7 +147,8 @@ class StructurerTest(unittest.TestCase):
         self.assertEqual(["OUTER", "ETC"], item["properties"]["category"]["enum"])
         self.assertEqual(["LEATHER"], item["properties"]["materials"]["items"]["enum"])
         self.assertFalse(item["additionalProperties"])
-        self.assertEqual({"category", "item", "materials", "colors", "silhouettes"}, set(item["required"]))
+        self.assertEqual({"category", "item", "type", "materials", "colors", "silhouettes"}, set(item["required"]))
+        self.assertEqual(["OUTER_PADDING", "OUTER_ETC", "ETC"], item["properties"]["type"]["enum"])  # 아이템 종류(집계용)
         self.assertFalse(schema["additionalProperties"])
         self.assertNotIn("category", schema["properties"])  # 문서 단위 카테고리는 없다
         self.assertEqual(["FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])  # 시즌은 문서 단위
@@ -232,10 +234,11 @@ class FakeCollection:
 
 class IndexerTest(unittest.TestCase):
     structured = {"items": [
-        {"category": "OUTER", "item": "레더 재킷", "materials": ["LEATHER"], "colors": ["BROWN"], "silhouettes": []},
+        {"category": "OUTER", "item": "레더 재킷", "type": "OUTER_LEATHER_JACKET", "materials": ["LEATHER"], "colors": ["BROWN"],
+         "silhouettes": []},
         {"category": "BOTTOM", "item": "미니스커트", "materials": [], "colors": ["BLACK"], "silhouettes": []},
     ], "keywords": ["레더 재킷"], "seasons": ["FALL"], "summary": "레더 아우터가 주목받는다."}
-    names = {"OUTER": "아우터", "BOTTOM": "하의", "LEATHER": "레더(가죽)", "BROWN": "브라운", "BLACK": "블랙", "FALL": "가을"}
+    names = {"OUTER_LEATHER_JACKET": "레더 재킷(라이더)", "OUTER": "아우터", "BOTTOM": "하의", "LEATHER": "레더(가죽)", "BROWN": "브라운", "BLACK": "블랙", "FALL": "가을"}
 
     def test_image_gets_one_summary_chunk_with_code_names(self):
         collection = FakeCollection()
@@ -245,7 +248,7 @@ class IndexerTest(unittest.TestCase):
         ids, docs, metas = collection.added[0]
         self.assertEqual(["IMG-1#0"], ids)
         # 코드값이 아니라 이름으로(한국어 질문과 맞게), 속성은 그 아이템 줄에만
-        self.assertIn("아이템: 레더 재킷(아우터) — 소재 레더(가죽), 컬러 브라운", docs[0])
+        self.assertIn("아이템: 레더 재킷(아우터·레더 재킷(라이더)) — 소재 레더(가죽), 컬러 브라운", docs[0])  # 종류 이름도
         self.assertIn("아이템: 미니스커트(하의) — 컬러 블랙", docs[0])
         self.assertEqual("업로드", metas[0]["media"])
         self.assertEqual("OUTER", metas[0]["category"])

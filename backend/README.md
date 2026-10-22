@@ -82,6 +82,7 @@ AI 처리는 Python 서비스(`../ai`, FastAPI)가 하고 Spring이 호출한다
 | --- | --- |
 | `claude.api.key` | Claude API 키(이 파일은 커밋하지 않는다) |
 | `claude.model` | 기본 `claude-sonnet-5` |
+| `claude.interpret-model` | 홈 질문 해석용 작은 모델, 기본 `claude-haiku-5-5` |
 | `ai.server.url` | AI 서비스 주소, 기본 `http://127.0.0.1:8001` |
 | `ai.analysis.max-attempts` | 정형화 재시도 상한, 기본 3 |
 

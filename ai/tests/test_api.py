@@ -13,6 +13,7 @@ from tests.test_core import FakeCollection
 
 ALLOWED = {
     "categories": [{"value": "OUTER", "name": "아우터"}],
+    "item_types": [{"value": "OUTER_PADDING", "name": "패딩"}],
     "materials": [{"value": "LEATHER", "name": "레더"}],
     "colors": [{"value": "BROWN", "name": "브라운"}],
     "silhouettes": [{"value": "OVERSIZED", "name": "오버사이즈"}],

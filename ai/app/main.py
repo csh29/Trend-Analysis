@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.structuring import image_prep
 from app.indexing import indexer
 from app.rag import answer as rag
+from app.rag import interpret as interpreter
 from app.indexing import vector_store
 from app.core.config import settings
 from app.core.claude import AiServiceError
@@ -35,6 +36,7 @@ class CodeOptionModel(BaseModel):
 
 class AllowedCodes(BaseModel):
     categories: list[CodeOptionModel] = Field(min_length=1)
+    item_types: list[CodeOptionModel] = Field(min_length=1)  # 아이템 종류(카테고리_종류)
     materials: list[CodeOptionModel] = Field(min_length=1)
     colors: list[CodeOptionModel] = Field(min_length=1)
     silhouettes: list[CodeOptionModel] = Field(min_length=1)
@@ -88,6 +90,13 @@ class StatRowModel(BaseModel):
 MAX_QUESTION_LENGTH = 500
 
 
+class PeriodModel(BaseModel):
+    start: date = Field(alias="from")
+    end: date = Field(alias="to")
+    label: str
+    explicit: bool = False
+
+
 class AnswerRequest(BaseModel):
     question: str
     model: str
@@ -95,7 +104,27 @@ class AnswerRequest(BaseModel):
     min_score: float = Field(ge=0.0, le=1.0)
     stats_week: str | None = None
     stats: list[StatRowModel] = []
-    today: date | None = None  # "요즘"(최근 4주)의 기준일 — Spring 서버 날짜. 없으면 이 서버 날짜
+    today: date | None = None  # 최신성·기간의 기준일 — Spring 서버 날짜. 없으면 이 서버 날짜
+    # 질문 해석은 Spring이 한다(유행 질문인지·카테고리·기간 — QuestionInterpreter)
+    mode: str = Field(default="SEARCH", pattern="^(SEARCH|TREND)$")
+    category: str | None = None
+    period: PeriodModel | None = None
+    trend_facts: list[str] = []
+    evidence_doc_ids: list[str] = Field(default=[], max_length=20)
+
+
+class CodeHintModel(BaseModel):
+    value: str
+    name: str
+    words: str = ""
+
+
+class InterpretRequest(BaseModel):
+    question: str
+    model: str
+    today: date | None = None
+    categories: list[CodeHintModel] = []
+    item_types: list[CodeHintModel] = []
 
 
 @app.get("/health")
@@ -129,6 +158,7 @@ def structure_document(req: StructureRequest, x_claude_api_key: str | None = Hea
     data = StructureInput(
         doc_id=req.doc_id, doc_type=req.doc_type, model=req.model, title=req.title, text=req.text, images=images,
         categories=[CodeOption(o.value, o.name) for o in req.allowed.categories],
+        item_types=[CodeOption(o.value, o.name) for o in req.allowed.item_types],
         materials=[CodeOption(o.value, o.name) for o in req.allowed.materials],
         colors=[CodeOption(o.value, o.name) for o in req.allowed.colors],
         silhouettes=[CodeOption(o.value, o.name) for o in req.allowed.silhouettes],
@@ -202,10 +232,33 @@ def answer_question(req: AnswerRequest, x_claude_api_key: str | None = Header(de
         data = rag.AnswerInput(question=question, model=req.model, top_k=req.top_k, min_score=req.min_score,
                                stats_week=req.stats_week,
                                stats=[rag.StatRow(**s.model_dump()) for s in req.stats],
-                               today=req.today or date.today())
+                               today=req.today or date.today(), mode=req.mode, category=req.category,
+                               period=rag.Period(req.period.start, req.period.end, req.period.label, req.period.explicit)
+                               if req.period else None,
+                               trend_facts=req.trend_facts, evidence_doc_ids=req.evidence_doc_ids)
         return rag.answer(vector_store.get_collection(), data, x_claude_api_key)
     except AiServiceError as e:
         log.warning("RAG 답변 실패: %s", e)
+        detail = {"message": str(e), "retryable": e.retryable}
+        if e.usage:
+            detail["usage"] = e.usage
+        raise HTTPException(status_code=e.status_code, detail=detail)
+
+
+@app.post("/interpret")
+def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Header(default=None)):
+    """P-06 질문 해석(작은 모델). 실패하면 Spring이 규칙으로 대신한다."""
+    if not x_claude_api_key:
+        raise HTTPException(status_code=401, detail={"message": "Claude API 키가 없습니다(claude.api.key).", "retryable": False})
+    try:
+        question = rag.ensure_question(req.question, MAX_QUESTION_LENGTH)
+        data = interpreter.InterpretInput(
+            question=question, model=req.model, today=req.today or date.today(),
+            categories=[interpreter.CodeHint(c.value, c.name, c.words) for c in req.categories],
+            item_types=[interpreter.CodeHint(t.value, t.name) for t in req.item_types])
+        return interpreter.interpret(data, x_claude_api_key)
+    except AiServiceError as e:
+        log.warning("질문 해석 실패: %s", e)
         detail = {"message": str(e), "retryable": e.retryable}
         if e.usage:
             detail["usage"] = e.usage

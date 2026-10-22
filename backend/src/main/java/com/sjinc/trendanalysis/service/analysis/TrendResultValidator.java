@@ -21,8 +21,8 @@ public final class TrendResultValidator {
     static final int MAX_KEYWORD_LENGTH = 100;
     static final int MAX_SUMMARY_LENGTH = 1000;
 
-    /** 의류 아이템 하나. 다중 값은 중복을 빼고 순서를 지킨다. */
-    public record Garment(String category, String item, List<String> materials, List<String> colors,
+    /** 의류 아이템 하나. type은 아이템 종류 코드(OUTER_PADDING). 다중 값은 중복을 빼고 순서를 지킨다. */
+    public record Garment(String category, String item, String type, List<String> materials, List<String> colors,
                           List<String> silhouettes) {
     }
 
@@ -117,18 +117,26 @@ public final class TrendResultValidator {
         } else if (name.length() > MAX_ITEM_NAME_LENGTH) {
             name = name.substring(0, MAX_ITEM_NAME_LENGTH);
         }
-        return new Garment(category, name,
+        // 종류는 그 아이템 카테고리의 것이어야 한다(OUTER면 OUTER_…) — 아우터에 데님 팬츠가 붙으면 집계가 틀어진다
+        String type = text(map.get("type"));
+        if (!codes.contains(TrendCodes.ITEM_TYPE, type)) {
+            errors.add(prefix + "type이 공통코드에 없습니다: " + type);
+        } else if (!TrendCodes.categoryOfType(type).equals(category)) {
+            errors.add(prefix + "type이 카테고리(" + category + ")의 종류가 아닙니다: " + type);
+        }
+        return new Garment(category, name, type,
                 codeValues(map.get("materials"), prefix + "materials", TrendCodes.MATERIAL, codes, errors),
                 codeValues(map.get("colors"), prefix + "colors", TrendCodes.COLOR, codes, errors),
-                onePerAxis(codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors)));
+                onePerAxis(codeValues(map.get("silhouettes"), prefix + "silhouettes", TrendCodes.SILHOUETTE, codes, errors),
+                        codes.silhouetteAxes()));
     }
 
-    /** 실루엣은 축(핏·기장·형태)마다 처음 나온 값 하나만 — 실패로 돌리면 재시도 비용만 들어서 걸러 낸다. */
-    static List<String> onePerAxis(List<String> silhouettes) {
+    /** 실루엣은 축(핏·기장·형태 — 공통코드 속성)마다 처음 나온 값 하나만 — 실패로 돌리면 재시도 비용만 들어서 걸러 낸다. */
+    static List<String> onePerAxis(List<String> silhouettes, Map<String, String> axes) {
         Set<String> usedAxes = new java.util.HashSet<>();
         List<String> kept = new ArrayList<>();
         for (String code : silhouettes) {
-            String axis = TrendCodes.SILHOUETTE_AXES.get(code);
+            String axis = axes.get(code);
             if (axis == null || usedAxes.add(axis)) {
                 kept.add(code);
             }

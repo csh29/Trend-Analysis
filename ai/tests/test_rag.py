@@ -9,25 +9,31 @@ from fastapi.testclient import TestClient
 
 from app.indexing import indexer
 from app import main
-from app.rag import period
 from app.rag import answer as rag
 from tests.test_core import FakeMessages, fake_response
 
 
 class FakeQueryCollection:
-    """collection.query 결과(유사도 = 1 - 거리)를 정해 둔다. where는 published_num 범위($and·$gte·$lte)만 흉내 낸다."""
+    """collection.query/get 결과(유사도 = 1 - 거리)를 정해 둔다. where는 쓰는 것만 흉내 낸다:
+    $and, 값 비교($gte·$lte), 같음(cat_OUTER: True), $in(doc_id)."""
 
     def __init__(self, rows):  # rows: (chunk_id, document, metadata, distance)
-        self.rows, self.queries = rows, []
+        self.rows, self.queries, self.gets = rows, [], []
 
-    @staticmethod
-    def _match(meta, where):
+    @classmethod
+    def _match(cls, meta, where):
         if not where:
             return True
-        for cond in where["$and"]:
-            (key, ops), = cond.items()
-            value = meta.get(key, 0)
-            if "$gte" in ops and value < ops["$gte"] or "$lte" in ops and value > ops["$lte"]:
+        conditions = where["$and"] if "$and" in where else [where]
+        for cond in conditions:
+            (key, rule), = cond.items()
+            value = meta.get(key)
+            if isinstance(rule, dict):
+                if "$gte" in rule and (value or 0) < rule["$gte"] or "$lte" in rule and (value or 0) > rule["$lte"]:
+                    return False
+                if "$in" in rule and value not in rule["$in"]:
+                    return False
+            elif value != rule:
                 return False
         return True
 
@@ -37,10 +43,16 @@ class FakeQueryCollection:
         return {"ids": [[r[0] for r in rows]], "documents": [[r[1] for r in rows]],
                 "metadatas": [[r[2] for r in rows]], "distances": [[r[3] for r in rows]]}
 
+    def get(self, where=None, include=None):
+        self.gets.append(where)
+        rows = [r for r in self.rows if self._match(r[2], where)]
+        return {"ids": [r[0] for r in rows], "documents": [r[1] for r in rows], "metadatas": [r[2] for r in rows]}
 
-def meta(doc_id, doc_type="IMAGE", published="2026-10-20"):
+
+def meta(doc_id, doc_type="IMAGE", published="2026-10-20", categories=("BOTTOM",), chunk_index=0):
     return {"doc_id": doc_id, "doc_type": doc_type, "media": "직접 업로드", "published_at": published,
-            "published_num": indexer.date_number(published)}
+            "published_num": indexer.date_number(published), "chunk_index": chunk_index,
+            **indexer.category_flags(list(categories))}
 
 
 ROWS = [
@@ -54,49 +66,21 @@ ROWS = [
 TODAY = date(2026, 10, 22)
 
 
-def data(min_score=0.6, question="와이드 팬츠 유행?"):
+def data(min_score=0.6, question="와이드 팬츠 유행?", **kwargs):
     return rag.AnswerInput(question=question, model="claude-sonnet-5", top_k=8, min_score=min_score,
                            stats_week="2026-10-19",
-                           stats=[rag.StatRow("키워드", "와이드 팬츠", 9, 3, 200.0, True, False)], today=TODAY)
+                           stats=[rag.StatRow("키워드", "와이드 팬츠", 9, 3, 200.0, True, False)], today=TODAY, **kwargs)
+
+
+LAST_WEEK = rag.Period(date(2026, 10, 12), date(2026, 10, 18), "지난주", True)
 
 
 OLD_ROWS = [("TXT-OLD#0", "와이드 팬츠가 유행", meta("TXT-OLD", "TEXT", "2026-06-01"), 0.25)]
 GOOD = json.dumps({"summary": "와이드 팬츠", "grounded": True, "points": [{"text": "줄", "sources": [1]}]})
 
 
-class PeriodTest(unittest.TestCase):
-    """기간이 분명한 표현만 범위로 자른다. "요즘"·기간 없음은 자르지 않는다(최신성 가중치로 앞세운다)."""
-
-    def test_vague_questions_are_not_cut(self):
-        for q in ("요즘 유행하는 와이드 팬츠는?", "최근 트렌드", "와이드 팬츠"):
-            p = period.resolve(q, TODAY)
-            self.assertEqual((None, None, "최근 자료 우선", False), (p.start, p.end, p.label, p.explicit))
-            self.assertIsNone(period.where(p))
-
-    def test_explicit_periods(self):
-        cases = {
-            "지난주 키워드는?": (date(2026, 10, 12), date(2026, 10, 18)),
-            "이번 주 뭐가 떴어?": (date(2026, 10, 19), TODAY),
-            "지난달 컬러": (date(2026, 9, 1), date(2026, 9, 30)),
-            "이번달 소재": (date(2026, 10, 1), TODAY),
-            "최근 3개월 아우터": (date(2026, 7, 25), TODAY),
-            "최근 2주": (date(2026, 10, 9), TODAY),
-            "올해 유행": (date(2026, 1, 1), TODAY),
-            "작년 데님": (date(2025, 1, 1), date(2025, 12, 31)),
-        }
-        for q, expected in cases.items():
-            p = period.resolve(q, TODAY)
-            self.assertEqual(expected, (p.start, p.end), q)
-            self.assertTrue(p.explicit, q)
-
-    def test_comparison_word_is_not_a_period(self):
-        self.assertFalse(period.resolve("전월 대비 급상승 키워드는?", TODAY).explicit)
-
-    def test_season_words_look_back_six_months(self):
-        for q in ("올가을 아우터 트렌드", "26FW 컬러"):
-            p = period.resolve(q, TODAY)
-            self.assertEqual("최근 6개월(시즌 표현)", p.label, q)
-            self.assertEqual(date(2026, 4, 23), p.start)
+class DateNumberTest(unittest.TestCase):
+    """기간 해석은 Spring(QuestionInterpreter)이 한다. 여기서는 Chroma 필터용 게시일 숫자만."""
 
     def test_date_number(self):
         self.assertEqual(20261022, indexer.date_number("2026-10-22"))
@@ -191,29 +175,80 @@ class RagTest(unittest.TestCase):
         self.assertTrue(result["period"]["stale"])
         self.assertIn("오래됐다", messages.calls[0]["messages"][0]["content"])
 
-    def test_explicit_period_is_cut_and_not_widened(self):
+    def test_explicit_period_from_spring_is_cut_and_not_widened(self):
         collection = FakeQueryCollection(OLD_ROWS)
         messages = FakeMessages(fake_response(GOOD))
-        result = rag.answer(collection, data(question="지난주 와이드 팬츠"), "k", client=SimpleNamespace(messages=messages))
+        result = rag.answer(collection, data(question="지난주 와이드 팬츠", period=LAST_WEEK), "k",
+                            client=SimpleNamespace(messages=messages))
         self.assertEqual(1, len(collection.queries))
         self.assertEqual({"published_num": {"$gte": 20261012}}, collection.queries[0][2]["$and"][0])
         self.assertEqual("NO_EVIDENCE", result["reason"])
         self.assertEqual("지난주", result["period"]["label"])
         self.assertEqual([], messages.calls)
 
-    def test_backfill_adds_date_numbers_without_reembedding(self):
+    def test_category_filters_search(self):
+        rows = [("OUT#0", "와이드 팬츠와 재킷", meta("OUT", categories=("OUTER", "BOTTOM")), 0.25),
+                ("BOT#0", "와이드 팬츠", meta("BOT", categories=("BOTTOM",)), 0.20)]
+        collection = FakeQueryCollection(rows)
+        messages = FakeMessages(fake_response(GOOD))
+        rag.answer(collection, data(category="OUTER"), "k", client=SimpleNamespace(messages=messages))
+        self.assertEqual({"cat_OUTER": True}, collection.queries[0][2])
+        sent = messages.calls[0]["messages"][0]["content"]
+        self.assertIn("와이드 팬츠와 재킷", sent)
+        self.assertNotIn('"BOT"', sent)
+        self.assertNotIn("<source n=\"2\"", sent)  # 하의만 있는 원문은 빠진다
+
+    def test_trend_mode_uses_spring_facts_and_example_documents(self):
+        rows = [("IMG-9#0", "데님 트러커 재킷 요약", meta("IMG-9", categories=("OUTER",)), 0.9),
+                ("TXT-5#1", "본문 둘째", meta("TXT-5", "TEXT", categories=("OUTER",), chunk_index=1), 0.9),
+                ("TXT-5#0", "블루종 기사 요약", meta("TXT-5", "TEXT", categories=("OUTER",)), 0.9),
+                ("IMG-1#0", "관련 없음", meta("IMG-1"), 0.1)]
+        collection = FakeQueryCollection(rows)
+        body = json.dumps({"summary": "데님 재킷이 5건으로 가장 많다.", "grounded": True,
+                           "points": [{"text": "데님 재킷: 5건(매체 1곳)", "sources": [2]}]})
+        messages = FakeMessages(fake_response(body))
+        period = rag.Period(date(2026, 9, 25), TODAY, "최근 4주", False)
+        result = rag.answer(collection, data(question="요즘 유행하는 아우터는?", mode="TREND", category="OUTER", period=period,
+                                             trend_facts=["[아이템 종류] 데님 재킷 5건 · 매체 1곳 · 직전 1건"],
+                                             evidence_doc_ids=["TXT-5", "IMG-9", "NO-INDEX"]), "k",
+                            client=SimpleNamespace(messages=messages))
+
+        self.assertEqual([], collection.queries)  # 유행 질문은 문장 유사도로 고르지 않는다
+        sent = messages.calls[0]["messages"][0]["content"]
+        self.assertIn("<trend_facts>", sent)
+        self.assertIn("데님 재킷 5건 · 매체 1곳", sent)
+        self.assertIn("집계 기간: 최근 4주 (2026-09-25 ~ 2026-10-22)", sent)
+        self.assertLess(sent.index("블루종 기사 요약"), sent.index("본문 둘째"))  # 청크 순서대로
+        self.assertLess(sent.index('<source n="1"'), sent.index("데님 트러커 재킷 요약"))  # Spring이 정한 순서(TXT-5가 1번)
+        self.assertNotIn("관련 없음", sent)
+        self.assertTrue(result["grounded"])
+        self.assertEqual(["IMG-9"], [s["doc_id"] for s in result["sources"]])
+        self.assertIsNone(result["sources"][0]["score"])  # 유사도로 고른 게 아니다
+        self.assertEqual("최근 4주", result["period"]["label"])
+
+    def test_trend_mode_without_indexed_examples_is_no_evidence(self):
+        messages = FakeMessages(fake_response(GOOD))
+        period = rag.Period(date(2026, 9, 25), TODAY, "최근 4주", False)
+        result = rag.answer(FakeQueryCollection([]), data(mode="TREND", period=period, evidence_doc_ids=["X"]), "k",
+                            client=SimpleNamespace(messages=messages))
+        self.assertEqual("NO_EVIDENCE", result["reason"])
+        self.assertEqual([], messages.calls)
+
+    def test_backfill_adds_date_numbers_and_category_flags_without_reembedding(self):
         class Store:
             updated = None
 
             def get(self, include):
-                return {"ids": ["A#0", "B#0"], "metadatas": [{"published_at": "2026-10-01"},
-                                                             {"published_at": "2026-10-02", "published_num": 20261002}]}
+                return {"ids": ["A#0", "B#0"], "metadatas": [
+                    {"published_at": "2026-10-01", "categories": "OUTER,BOTTOM"},
+                    {"published_at": "2026-10-02", "published_num": 20261002, "cat_TOP": True, "meta_v": 2}]}
 
             def update(self, ids, metadatas):
                 Store.updated = (ids, metadatas)
 
         self.assertEqual(1, indexer.backfill_date_numbers(Store()))
-        self.assertEqual((["A#0"], [{"published_at": "2026-10-01", "published_num": 20261001}]), Store.updated)
+        self.assertEqual((["A#0"], [{"published_at": "2026-10-01", "categories": "OUTER,BOTTOM", "published_num": 20261001,
+                                     "cat_OUTER": True, "cat_BOTTOM": True, "meta_v": 2}]), Store.updated)
 
     def test_prompt_sections_loaded(self):
         self.assertIn("{week}", rag.PROMPT["stats_header"])
@@ -242,3 +277,62 @@ class RagApiTest(unittest.TestCase):
         self.assertEqual("secret", a.call_args.args[2])
         self.assertEqual("와이드 팬츠", a.call_args.args[1].stats[0].label)
         self.assertNotIn("secret", res.text)
+
+    def test_answer_accepts_spring_interpretation(self):
+        with mock.patch.object(main.rag, "answer", return_value={"grounded": False}) as a, \
+                mock.patch.object(main.vector_store, "get_collection", return_value=None):
+            self.client.post("/answer", headers={"X-Claude-Api-Key": "k"}, json={
+                "question": "지난주 유행 아우터", "model": "m", "min_score": 0.6, "mode": "TREND", "category": "OUTER",
+                "period": {"from": "2026-10-12", "to": "2026-10-18", "label": "지난주", "explicit": True},
+                "trend_facts": ["[아이템 종류] 패딩 3건"], "evidence_doc_ids": ["IMG-1"]})
+        sent = a.call_args.args[1]
+        self.assertEqual(("TREND", "OUTER", date(2026, 10, 12), True), (sent.mode, sent.category, sent.period.start,
+                                                                        sent.period.explicit))
+        self.assertEqual(["IMG-1"], sent.evidence_doc_ids)
+
+
+class InterpretTest(unittest.TestCase):
+    """질문 해석(작은 모델) — 고를 값은 공통코드 enum, 결과는 한 번 더 정리한다."""
+
+    def setUp(self):
+        from app.rag import interpret
+        self.interpret = interpret
+        self.data = interpret.InterpretInput(
+            question="지난달 유행한 패딩은?", model="claude-haiku-5-5", today=TODAY,
+            categories=[interpret.CodeHint("OUTER", "아우터", "재킷,점퍼"), interpret.CodeHint("BOTTOM", "하의", "바지")],
+            item_types=[interpret.CodeHint("OUTER_PADDING", "패딩(숏패딩·푸퍼)"), interpret.CodeHint("BOTTOM_DENIM", "데님 팬츠")])
+
+    def test_schema_limits_codes_and_prompt_lists_hints(self):
+        schema = self.interpret.build_schema(self.data)
+        self.assertEqual(["", "OUTER", "BOTTOM"], schema["properties"]["category"]["enum"])
+        self.assertEqual(["", "OUTER_PADDING", "BOTTOM_DENIM"], schema["properties"]["item_type"]["enum"])
+        content = self.interpret.build_content(self.data)
+        self.assertIn("OUTER=아우터(재킷,점퍼)", content)
+        self.assertIn("오늘: 2026-10-22 (목요일)", content)
+
+    def test_normalize_item_type_wins_and_bad_periods_are_dropped(self):
+        n = self.interpret.normalize
+        r = n({"trend": True, "category": "BOTTOM", "item_type": "OUTER_PADDING", "has_period": True,
+               "period_from": "2026-09-01", "period_to": "2026-09-30", "period_label": "지난달(9월)"}, self.data)
+        self.assertEqual(("OUTER", "OUTER_PADDING"), (r["category"], r["item_type"]))
+        self.assertEqual({"from": "2026-09-01", "to": "2026-09-30", "label": "지난달(9월)", "explicit": True}, r["period"])
+        for bad in (("2026-09-30", "2026-09-01"), ("2026-10-01", "2026-12-31"), ("어제", "오늘")):
+            r = n({"trend": False, "category": "", "item_type": "", "has_period": True,
+                   "period_from": bad[0], "period_to": bad[1], "period_label": "x"}, self.data)
+            self.assertIsNone(r["period"], bad)
+            self.assertIsNone(r["category"])
+
+    def test_interpret_calls_small_model_with_low_effort(self):
+        body = json.dumps({"trend": True, "category": "OUTER", "item_type": "", "has_period": False,
+                           "period_from": "", "period_to": "", "period_label": ""})
+        messages = FakeMessages(fake_response(body))
+        result = self.interpret.interpret(self.data, "k", client=SimpleNamespace(messages=messages))
+        self.assertEqual("claude-haiku-5-5", messages.calls[0]["model"])
+        self.assertEqual("low", messages.calls[0]["output_config"]["effort"])
+        self.assertTrue(result["trend"])
+        self.assertIsNone(result["period"])
+        self.assertIn("usage", result)
+
+    def test_api_requires_key(self):
+        res = TestClient(main.app).post("/interpret", json={"question": "q", "model": "m"})
+        self.assertEqual(401, res.status_code)

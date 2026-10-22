@@ -80,15 +80,7 @@
 <script>
     (function () {
         const API_URL = '/api/trends';
-        const TYPES = [
-            { value: 'KEYWORD', label: '키워드' },
-            { value: 'ITEM', label: '아이템' },
-            { value: 'MATERIAL', label: '소재' },
-            { value: 'COLOR', label: '컬러' },
-            { value: 'SILHOUETTE', label: '실루엣' },
-            { value: 'SEASON', label: '시즌' },
-            { value: 'CATEGORY', label: '카테고리' }
-        ];
+        // 유형 목록·이름은 공통코드 TREND_VALUE_TYPE(정렬순서대로)
         const gridBody = document.getElementById('trendGridBody');
         let current = null; // 마지막 조회 결과 — 근거 원문 기간에 쓴다
 
@@ -128,7 +120,7 @@
 
         // ── 조회영역 ───────────────────────────────────────────────
         const search = SearchForm.render(document.getElementById('searchArea'), [
-            { id: 'type', label: '유형', type: 'select', options: TYPES, defaultValue: 'KEYWORD', width: 110, onChange: searchTrend },
+            { id: 'type', label: '유형', type: 'select', optionsQuery: 'TREND_VALUE_TYPE', defaultValue: 'KEYWORD', width: 120, onChange: searchTrend },
             { id: 'category', label: '카테고리', type: 'select', optionsQuery: 'TREND_CATEGORY', withAll: true, width: 130, onChange: searchTrend },
             { id: 'baseWeek', label: '기준 주', type: 'select', options: WEEK_OPTIONS, defaultValue: WEEK_OPTIONS[1].value, width: 190, onChange: searchTrend },
             {

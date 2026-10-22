@@ -66,6 +66,7 @@ class StructureInput:
     text: str | None
     images: list[ImageInput]
     categories: list[CodeOption]
+    item_types: list[CodeOption]  # 코드값 = 카테고리_종류(OUTER_PADDING) — 유행 집계용
     materials: list[CodeOption]
     colors: list[CodeOption]
     silhouettes: list[CodeOption]
@@ -86,11 +87,13 @@ def build_schema(data: StructureInput) -> dict:
         "properties": {
             "category": {"type": "string", "enum": [o.value for o in data.categories]},
             "item": {"type": "string"},
+            # 카테고리와 맞는지(OUTER면 OUTER_…)는 스키마로 묶을 수 없어 Spring 검증이 본다
+            "type": {"type": "string", "enum": [o.value for o in data.item_types]},
             "materials": enum_array(data.materials),
             "colors": enum_array(data.colors),
             "silhouettes": enum_array(data.silhouettes),
         },
-        "required": ["category", "item", "materials", "colors", "silhouettes"],
+        "required": ["category", "item", "type", "materials", "colors", "silhouettes"],
         "additionalProperties": False,
     }
     return {
@@ -113,6 +116,7 @@ def _allowed_values_text(data: StructureInput) -> str:
 
     return COMMON["allowed_values_header"] + "\n" + "\n".join([
         line("category", data.categories),
+        line("type", data.item_types),
         line("materials", data.materials),
         line("colors", data.colors),
         line("silhouettes", data.silhouettes),
@@ -140,7 +144,7 @@ def build_content(data: StructureInput) -> list[dict]:
 
 def candidate_counts(data: StructureInput) -> str:
     """Claude가 판단할 후보(허용 코드) 건수 — 로그용."""
-    return (f"본문 {len(data.text or '')}자·이미지 {len(data.images)}장 / 카테고리 {len(data.categories)}·소재 {len(data.materials)}·컬러 {len(data.colors)}·"
+    return (f"본문 {len(data.text or '')}자·이미지 {len(data.images)}장 / 카테고리 {len(data.categories)}·종류 {len(data.item_types)}·소재 {len(data.materials)}·컬러 {len(data.colors)}·"
             f"실루엣 {len(data.silhouettes)}·시즌 {len(data.seasons)}")
 
 

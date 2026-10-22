@@ -85,6 +85,13 @@ public class DocumentService {
         if (body.length() > MAX_BODY_LENGTH) {
             throw new IllegalArgumentException("본문은 " + MAX_BODY_LENGTH + "자까지 등록할 수 있습니다.");
         }
+        // 같은 원문(정규화한 URL이 같은 것)은 다시 저장하지 않는다 — 두 번 저장되면 유행 집계에서 두 번 세진다
+        String url = SourceUrls.normalize(request.url());
+        if (url != null) {
+            sourceDocumentRepository.findFirstByUrl(url).ifPresent(existing -> {
+                throw new IllegalArgumentException("이미 등록된 원문입니다(같은 URL): " + existing.getDocId() + " " + existing.getTitle());
+            });
+        }
         String title = blankToNull(request.title());
         if (title == null) {
             title = body.substring(0, Math.min(30, body.length())).replaceAll("\\s+", " ");
@@ -96,7 +103,7 @@ public class DocumentService {
                 .body(body)
                 .media(blankToNull(request.media()) == null ? TEXT_MEDIA : request.media().trim())
                 .publishedAt(request.publishedAt() == null ? now.toLocalDate() : request.publishedAt())
-                .url(blankToNull(request.url()))
+                .url(url)
                 .status(SourceDocument.PENDING)
                 .registeredBy(username)
                 .registeredAt(now)
@@ -228,6 +235,7 @@ public class DocumentService {
             TrendCodeBook codes = codeBook();
             List<AnalysisView.Item> garments = item.garments().stream().map(g -> new AnalysisView.Item(
                     code(codes, TrendCodes.CATEGORY, g.category()), g.name(),
+                    g.type() == null ? null : code(codes, TrendCodes.ITEM_TYPE, g.type()),
                     codesOf(codes, TrendCodes.MATERIAL, g.materials()),
                     codesOf(codes, TrendCodes.COLOR, g.colors()),
                     codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()))).toList();

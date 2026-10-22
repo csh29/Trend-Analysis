@@ -51,7 +51,10 @@ class ViewControllerTest {
                 // 대시보드 카드(집계 전이면 빈 상태 문구)와 RAG 질문창
                 .andExpect(content().string(containsString("트렌드 집계")))
                 .andExpect(content().string(containsString("분석 현황")))
-                .andExpect(content().string(containsString("id=\"ragQuestion\"")));
+                .andExpect(content().string(containsString("id=\"ragQuestion\"")))
+                // 자동 새로고침은 카드 영역(.overview)만 바꿔 끼운다 — 그 영역이 홈 응답에 있어야 한다
+                .andExpect(content().string(containsString("id=\"homeAutoRefresh\"")))
+                .andExpect(content().string(containsString("class=\"overview\"")));
     }
 
     @Test

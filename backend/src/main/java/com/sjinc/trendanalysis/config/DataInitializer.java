@@ -95,20 +95,51 @@ public class DataInitializer implements CommandLineRunner {
     /** 트렌드 항목 표준 코드(카테고리·소재·컬러·실루엣) 초안. 그룹 단위로 없을 때만 넣는다 — 화면에서 고친 값을 덮어쓰지 않는다. */
     private void seedTrendCodesIfAbsent() {
         List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE,
-                TrendCodes.SEASON);
-        List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣", "트렌드 시즌");
+                TrendCodes.SEASON, TrendCodes.ITEM_TYPE, TrendCodes.VALUE_TYPE, TrendCodes.TREND_WORD);
+        List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣", "트렌드 시즌", "트렌드 아이템 종류",
+                "트렌드 값 종류", "유행 질문 단어");
         for (int g = 0; g < groups.size(); g++) {
             String group = groups.get(g);
-            if (comCdGroupRepository.existsById(group)) continue;
+            if (comCdGroupRepository.existsById(group)) {
+                fillAttributesIfBlank(group);
+                continue;
+            }
             comCdGroupRepository.save(ComCdGroup.builder()
                     .codeGroup(group).groupName(names.get(g)).sortOrder(10 + g).useYn("Y")
-                    .remark("AI 정형화(P-03)가 이 코드값 중에서만 고른다. 이름의 괄호는 같은 뜻의 다른 표기 힌트").build());
+                    .remark(GROUP_REMARKS.getOrDefault(group,
+                            "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 이름의 괄호는 같은 뜻의 다른 표기 힌트")).build());
             int sort = 1;
             for (String[] code : TrendCodes.SEED.get(group)) {
                 comCdRepository.save(ComCd.builder().codeGroup(group)
-                        .codeValue(code[0]).codeName(code[1]).sortOrder(sort++).useYn("Y").build());
+                        .codeValue(code[0]).codeName(code[1]).attr1(code.length > 2 ? code[2] : null).sortOrder(sort++).useYn("Y").build());
             }
             log.info("공통코드 {}({})를 추가했습니다.", group, names.get(g));
+        }
+    }
+
+    /** 그룹 비고 — 속성(attr1)을 쓰는 그룹은 무엇을 쓰는지 적는다. */
+    private static final java.util.Map<String, String> GROUP_REMARKS = java.util.Map.of(
+            TrendCodes.MATERIAL, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 IMAGE = 사진의 질감으로 구분되는 소재(이미지만 있는 원문은 이것만)",
+            TrendCodes.SILHOUETTE, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 축(FIT·LENGTH·SHAPE) — 축마다 하나만 남긴다",
+            TrendCodes.CATEGORY, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 질문에서 이 카테고리를 알아보는 일상 표현(쉼표)",
+            TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
+            TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다. 속성 RAG = 질문 답변에 참고 집계로 보낸다",
+            TrendCodes.TREND_WORD, "질문에 이 말(코드명)이 있으면 유행 질문으로 본다 — AI 질문 해석이 실패했을 때 쓰는 규칙");
+
+    /** 이미 있는 그룹: 초안에 속성이 있는데 DB 코드의 속성이 비었으면 채운다(공통코드 속성 칸 도입 전 DB, 2026-10-22). */
+    private void fillAttributesIfBlank(String group) {
+        java.util.Map<String, String> defaults = new java.util.HashMap<>();
+        TrendCodes.SEED.get(group).stream().filter(c -> c.length > 2).forEach(c -> defaults.put(c[0], c[2]));
+        if (defaults.isEmpty()) return;
+        int filled = 0;
+        for (ComCd code : comCdRepository.findByCodeGroupOrderBySortOrderAsc(group)) {
+            if (code.fillAttr1IfBlank(defaults.get(code.getCodeValue()))) {
+                comCdRepository.save(code);
+                filled++;
+            }
+        }
+        if (filled > 0) {
+            log.info("공통코드 {}의 속성 {}개를 기본값으로 채웠습니다.", group, filled);
         }
     }
 

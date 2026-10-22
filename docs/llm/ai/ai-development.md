@@ -76,11 +76,11 @@ ai/
 │  │  ├─ embedding.py      임베딩 함수(Qwen3-VL / fastembed)
 │  │  └─ vector_store.py   Chroma 클라이언트를 만드는 유일한 곳
 │  └─ rag/                 P-06 검색·답변
-│     ├─ period.py         질문 기간 해석(콕 집은 기간만 자른다)
-│     └─ answer.py         검색·최신성 가중치(반감기 4주)·기준 유사도·Claude 답변
+│     ├─ interpret.py      질문 해석(작은 모델 — 유행 질문인지·카테고리·종류·기간, 공통코드 enum)
+│     └─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
-│  └─ rag/answer.md        답변 모양·기간·근거 규칙
+│  └─ rag/                 interpret.md(질문 해석) · answer.md(답변 모양·유행 판단·기간·근거 규칙)
 ├─ tests/                  test_core · test_api · test_rag
 ├─ start-ai.* / stop-ai.*  기동·종료 스크립트(ai 폴더에 둔다 — 더블클릭)
 └─ requirements.txt        버전 고정. torch는 CPU 빌드

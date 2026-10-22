@@ -106,6 +106,9 @@ public class TrendAggregationService {
             for (TrendItem.Garment g : item.garments()) {
                 mentions.add(new TrendAggregator.Mention(id, date, g.category(), TrendWeeklyStat.CATEGORY, g.category()));
                 add(mentions, id, date, g.category(), TrendItemValue.ITEM, g.name());
+                if (g.type() != null) {
+                    add(mentions, id, date, g.category(), TrendItemValue.ITEM_TYPE, g.type());
+                }
                 g.materials().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.MATERIAL, v));
                 g.colors().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.COLOR, v));
                 g.silhouettes().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.SILHOUETTE, v));

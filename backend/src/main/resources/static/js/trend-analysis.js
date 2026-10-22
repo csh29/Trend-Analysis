@@ -16,6 +16,7 @@
     const SENTIMENT = { positive: '긍정', neutral: '중립', negative: '부정' };
     const ITEM_COLUMNS = [
         { id: 'category', label: '카테고리', width: 90, align: 'center' },
+        { id: 'type', label: '종류', width: 110, align: 'center' },
         { id: 'name', label: '아이템', width: 140 },
         { id: 'materials', label: '소재', title: true },
         { id: 'colors', label: '컬러', title: true },
@@ -140,6 +141,7 @@
             Grid.render(tbody, ITEM_COLUMNS, r.items.map(function (item) {
                 return {
                     category: item.category ? item.category.name : '',
+                    type: item.type ? item.type.name : '-',
                     name: item.name || '-',
                     materials: names(item.materials),
                     colors: names(item.colors),

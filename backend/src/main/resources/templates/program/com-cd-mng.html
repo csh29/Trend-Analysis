@@ -130,6 +130,8 @@
             { id: 'sortOrder', label: '정렬순서', type: 'number', width: 80 },
             { id: 'useYn', label: '사용', type: 'checkbox', width: 70, align: 'center' },
             // 폭을 주지 않아 나머지 공간을 전부 쓴다 — 설정 스위치 코드(AI_CONFIG 등)는 비고에 설명이 길게 들어간다.
+            // 속성: 프로그램이 읽는 값(실루엣 축, 이미지 소재 여부, 카테고리 일상 표현 등 — 그룹 비고 참고)
+            { id: 'attr1', label: '속성', type: 'text', width: 220 },
             { id: 'remark', label: '비고', type: 'text' }
         ];
 
@@ -218,7 +220,8 @@
                     codeName: codeName,
                     sortOrder: row.sortOrder ? Number(row.sortOrder) : null,
                     useYn: row.useYn,
-                    remark: row.remark
+                    remark: row.remark,
+                    attr1: row.attr1
                 };
 
                 requests.push(fetch(CODES_URL, {

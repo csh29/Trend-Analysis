@@ -4,7 +4,6 @@ import com.sjinc.trendanalysis.domain.TrendItemValue;
 
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * 트렌드 항목 표준 코드(공통코드 그룹). 카테고리·소재·컬러·실루엣 값은 이 그룹들의 코드값만 저장한다 — 가죽/레더 같은
@@ -17,50 +16,66 @@ public final class TrendCodes {
     public static final String COLOR = "TREND_COLOR";
     public static final String SILHOUETTE = "TREND_SILHOUETTE";
     public static final String SEASON = "TREND_SEASON";
+    /**
+     * 아이템 종류(패딩·블루종·데님 팬츠…) — "유행 = 많이 입는 것"을 세려면 아이템명(LLM 자유 문장)으로는 "데님 트러커 재킷"과
+     * "트러커 재킷"이 갈라져서, 집계용으로 정한 목록에서 고르게 한다(2026-10-22 사용자 결정). 코드값은 "카테고리_종류"(OUTER_PADDING)라
+     * 앞부분으로 어느 카테고리 것인지 안다 — 검증이 아이템 카테고리와 맞는지 본다. 기타 카테고리는 "ETC" 하나.
+     */
+    public static final String ITEM_TYPE = "TREND_ITEM";
 
     /** 카테고리가 맞는 것이 없을 때 LLM이 쓰는 코드(프롬프트 규칙과 같아야 한다). */
     public static final String CATEGORY_ETC = "ETC";
 
-    /**
-     * 실루엣 코드의 축(핏·기장·형태). 축마다 하나만 남긴다(TrendResultValidator) — 프롬프트로 "축마다 최대 1개"를 지시해도
-     * 오버사이즈·레귤러를 함께 내는 경우가 있었다(2026-10-20 DB 확인). 판단 기준은 ai/prompts/structure-silhouette.md.
-     * 여기 없는 코드(공통코드 관리에서 새로 넣은 것)는 축 제한 없이 둔다.
-     */
-    public static final Map<String, String> SILHOUETTE_AXES = Map.of(
-            "OVERSIZED", "FIT", "REGULAR", "FIT", "SLIM", "FIT",
-            "CROPPED", "LENGTH", "LONG", "LENGTH",
-            "BOXY", "SHAPE", "WIDE", "SHAPE", "A_LINE", "SHAPE", "H_LINE", "SHAPE", "FLARE", "SHAPE");
+    /** 값 종류(키워드·아이템 종류·소재…) 이름과 쓰임 — 트렌드 분석 화면 유형 목록, RAG 참고 집계(속성 RAG). */
+    public static final String VALUE_TYPE = "TREND_VALUE_TYPE";
+    /** 유행을 묻는 말(유행·인기·뜨는…) — 질문 해석의 규칙 대체용(AI 해석이 실패했을 때). */
+    public static final String TREND_WORD = "RAG_TREND_WORD";
 
-    /**
-     * 이미지에서 고를 수 있는 소재 — 사진의 질감으로 구분되는 것만(2026-10-20 사용자 결정). 면·울·캐시미어·폴리에스터·실크·린넨·나일론은
-     * 원료라서 사진으로 가릴 수 없는데, 프롬프트로 막아도 면을 추측해 넣었다(DB 확인). 그래서 이미지 분석에는 이 코드만 허용 값으로 보낸다
-     * (스키마 enum에 없으니 고를 수 없다). 텍스트는 본문에 나오므로 전부 허용한다.
-     */
-    public static final Set<String> IMAGE_MATERIALS = Set.of(
-            "LEATHER", "SUEDE", "DENIM", "KNIT", "FUR", "FLEECE", "TWEED", "CORDUROY", "SATIN");
+    /** 코드 속성(ComCd.attr1) 값. */
+    public static final String ATTR_IMAGE = "IMAGE";
+    public static final String ATTR_RAG = "RAG";
 
-    /** 다중 값 종류 → 공통코드 그룹. */
+    /** 아이템 종류 코드가 속한 카테고리(코드값 앞부분). "ETC"는 기타 카테고리. */
+    public static String categoryOfType(String typeCode) {
+        if (typeCode == null || typeCode.isBlank()) {
+            return "";
+        }
+        int cut = typeCode.indexOf('_');
+        return cut < 0 ? typeCode : typeCode.substring(0, cut);
+    }
+
+    /** 값 종류 → 공통코드 그룹. */
     public static final Map<String, String> VALUE_TYPE_GROUPS = Map.of(
+            TrendItemValue.ITEM_TYPE, ITEM_TYPE,
             TrendItemValue.MATERIAL, MATERIAL,
             TrendItemValue.COLOR, COLOR,
             TrendItemValue.SILHOUETTE, SILHOUETTE,
             TrendItemValue.SEASON, SEASON);
 
     /**
-     * 기본 데이터 초안(DataInitializer가 그룹이 없을 때만 넣는다). 이름의 괄호는 LLM이 같은 뜻의 다른 표기를 이 코드로 옮기게 하는 힌트다.
+     * 기본 데이터 초안 {코드값, 이름, 속성(없으면 생략)}. DataInitializer가 그룹이 없을 때 넣고, 이미 있는 그룹은 속성이 빈 코드에만
+     * 속성을 채운다. 이름의 괄호는 LLM이 같은 뜻의 다른 표기를 이 코드로 옮기게 하는 힌트다.
      * 카테고리는 의류만 둔다(신발·가방·액세서리 제외, 2026-10-20 사용자 결정). 이미 넣은 DB는 공통코드 관리에서 사용 안 함으로 바꾼다.
+     * <ul>
+     *   <li>소재 속성 IMAGE: 사진의 질감으로 구분되는 소재 — 이미지만 있는 원문은 이것만 고를 수 있다(2026-10-20 사용자 결정. 면·울 등은
+     *       프롬프트로 막아도 추측해 넣어서 허용 값에서 뺀다).</li>
+     *   <li>실루엣 속성: 축(FIT·LENGTH·SHAPE). 축마다 하나만 남긴다(검증) — 오버사이즈·레귤러를 함께 내는 경우가 있었다. 속성이 없는
+     *       코드는 축 제한이 없다. 판단 기준은 ai/prompts/structure/silhouette.md.</li>
+     *   <li>카테고리 속성: 질문에서 카테고리를 알아보는 일상 표현(쉼표).</li>
+     * </ul>
      */
     public static final Map<String, List<String[]>> SEED = Map.of(
             CATEGORY, List.of(
-                    new String[]{"OUTER", "아우터"}, new String[]{"TOP", "상의"}, new String[]{"BOTTOM", "하의"},
-                    new String[]{"DRESS", "원피스"}, new String[]{"SETUP", "셋업·수트"}, new String[]{"ETC", "기타"}),
+                    new String[]{"OUTER", "아우터", "겉옷,재킷,자켓,점퍼,잠바"}, new String[]{"TOP", "상의", "윗옷,탑"},
+                    new String[]{"BOTTOM", "하의", "바지,팬츠,치마"}, new String[]{"DRESS", "원피스", "드레스"},
+                    new String[]{"SETUP", "셋업·수트", "정장"}, new String[]{"ETC", "기타"}),
             MATERIAL, List.of(
                     new String[]{"COTTON", "면(코튼)"}, new String[]{"LINEN", "린넨(마)"}, new String[]{"WOOL", "울"},
-                    new String[]{"CASHMERE", "캐시미어"}, new String[]{"LEATHER", "레더(가죽)"}, new String[]{"SUEDE", "스웨이드"},
-                    new String[]{"DENIM", "데님"}, new String[]{"SILK", "실크"}, new String[]{"KNIT", "니트"},
-                    new String[]{"FUR", "퍼(모피·페이크퍼)"}, new String[]{"FLEECE", "플리스"}, new String[]{"TWEED", "트위드"},
-                    new String[]{"CORDUROY", "코듀로이(골덴)"}, new String[]{"NYLON", "나일론"},
-                    new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴"}),
+                    new String[]{"CASHMERE", "캐시미어"}, new String[]{"LEATHER", "레더(가죽)", ATTR_IMAGE}, new String[]{"SUEDE", "스웨이드", ATTR_IMAGE},
+                    new String[]{"DENIM", "데님", ATTR_IMAGE}, new String[]{"SILK", "실크"}, new String[]{"KNIT", "니트", ATTR_IMAGE},
+                    new String[]{"FUR", "퍼(모피·페이크퍼)", ATTR_IMAGE}, new String[]{"FLEECE", "플리스", ATTR_IMAGE}, new String[]{"TWEED", "트위드", ATTR_IMAGE},
+                    new String[]{"CORDUROY", "코듀로이(골덴)", ATTR_IMAGE}, new String[]{"NYLON", "나일론"},
+                    new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴", ATTR_IMAGE}),
             COLOR, List.of(
                     new String[]{"BLACK", "블랙"}, new String[]{"WHITE", "화이트"}, new String[]{"IVORY", "아이보리"},
                     new String[]{"GRAY", "그레이"}, new String[]{"BEIGE", "베이지"}, new String[]{"BROWN", "브라운"},
@@ -69,14 +84,48 @@ public final class TrendCodes {
                     new String[]{"BURGUNDY", "버건디"}, new String[]{"PINK", "핑크"}, new String[]{"PURPLE", "퍼플"},
                     new String[]{"YELLOW", "옐로우"}, new String[]{"ORANGE", "오렌지"}, new String[]{"MULTI", "멀티컬러(패턴)"}),
             SILHOUETTE, List.of(
-                    new String[]{"OVERSIZED", "오버사이즈"}, new String[]{"REGULAR", "레귤러"}, new String[]{"SLIM", "슬림"},
-                    new String[]{"BOXY", "박시"}, new String[]{"WIDE", "와이드"}, new String[]{"CROPPED", "크롭"},
-                    new String[]{"LONG", "롱"}, new String[]{"A_LINE", "A라인"}, new String[]{"H_LINE", "H라인"},
-                    new String[]{"FLARE", "플레어"}),
+                    new String[]{"OVERSIZED", "오버사이즈", "FIT"}, new String[]{"REGULAR", "레귤러", "FIT"}, new String[]{"SLIM", "슬림", "FIT"},
+                    new String[]{"BOXY", "박시", "SHAPE"}, new String[]{"WIDE", "와이드", "SHAPE"}, new String[]{"CROPPED", "크롭", "LENGTH"},
+                    new String[]{"LONG", "롱", "LENGTH"}, new String[]{"A_LINE", "A라인", "SHAPE"}, new String[]{"H_LINE", "H라인", "SHAPE"},
+                    new String[]{"FLARE", "플레어", "SHAPE"}),
             // 여러 개를 고른다(간절기 = 봄·가을). SS/FW는 이 값들을 묶어 본다
             SEASON, List.of(
                     new String[]{"SPRING", "봄"}, new String[]{"SUMMER", "여름"}, new String[]{"FALL", "가을"},
-                    new String[]{"WINTER", "겨울"}));
+                    new String[]{"WINTER", "겨울"}),
+            // 핏·기장(오버사이즈·크롭·와이드)은 실루엣에서 따로 다루므로 종류에 넣지 않는다
+            ITEM_TYPE, List.of(
+                    new String[]{"OUTER_PADDING", "패딩(숏패딩·푸퍼·패딩 점퍼)"}, new String[]{"OUTER_COAT", "코트(울 코트·롱 코트)"},
+                    new String[]{"OUTER_TRENCH", "트렌치코트"}, new String[]{"OUTER_BLAZER", "블레이저(테일러드 재킷)"},
+                    new String[]{"OUTER_BLOUSON", "블루종(봄버·항공 점퍼)"}, new String[]{"OUTER_DENIM_JACKET", "데님 재킷(트러커)"},
+                    new String[]{"OUTER_LEATHER_JACKET", "레더 재킷(라이더)"}, new String[]{"OUTER_HOOD_ZIPUP", "후드 집업"},
+                    new String[]{"OUTER_FLEECE", "플리스(후리스)"}, new String[]{"OUTER_PARKA", "파카(아노락·바람막이·후드 파카)"},
+                    new String[]{"OUTER_TRACK_JACKET", "트랙 재킷(저지)"}, new String[]{"OUTER_WORK_JACKET", "워크 재킷(초어·셔츠 재킷)"},
+                    new String[]{"OUTER_VEST", "베스트(조끼·패딩 조끼)"}, new String[]{"OUTER_ETC", "기타 아우터"},
+                    new String[]{"TOP_TSHIRT", "티셔츠"}, new String[]{"TOP_SHIRT", "셔츠·블라우스"},
+                    new String[]{"TOP_KNIT", "니트·스웨터"}, new String[]{"TOP_CARDIGAN", "카디건"},
+                    new String[]{"TOP_SWEATSHIRT", "맨투맨"}, new String[]{"TOP_HOODIE", "후드티"},
+                    new String[]{"TOP_SLEEVELESS", "민소매·탑(나시·캐미솔)"}, new String[]{"TOP_POLO", "폴로"},
+                    new String[]{"TOP_ETC", "기타 상의"},
+                    new String[]{"BOTTOM_DENIM", "데님 팬츠(청바지)"}, new String[]{"BOTTOM_SLACKS", "슬랙스"},
+                    new String[]{"BOTTOM_CHINO", "면바지(치노)"}, new String[]{"BOTTOM_CARGO", "카고 팬츠"},
+                    new String[]{"BOTTOM_TRACK", "트랙·조거 팬츠"}, new String[]{"BOTTOM_SHORTS", "반바지"},
+                    new String[]{"BOTTOM_SKIRT", "스커트"}, new String[]{"BOTTOM_LEGGINGS", "레깅스"},
+                    new String[]{"BOTTOM_ETC", "기타 하의"},
+                    new String[]{"DRESS_DRESS", "원피스"}, new String[]{"DRESS_JUMPSUIT", "점프수트"},
+                    new String[]{"SETUP_SUIT", "수트·셋업"}, new String[]{"SETUP_TRACKSUIT", "트레이닝 셋업"},
+                    new String[]{"ETC", "기타"}),
+            // 트렌드 분석 화면 유형 목록(정렬순서대로)·RAG 참고 집계(속성 RAG). 코드값은 집계 값 종류라 바꾸지 않는다
+            VALUE_TYPE, List.of(
+                    new String[]{TrendItemValue.KEYWORD, "키워드", ATTR_RAG}, new String[]{TrendItemValue.ITEM_TYPE, "아이템 종류", ATTR_RAG},
+                    new String[]{TrendItemValue.ITEM, "아이템명"}, new String[]{TrendItemValue.MATERIAL, "소재", ATTR_RAG},
+                    new String[]{TrendItemValue.COLOR, "컬러", ATTR_RAG}, new String[]{TrendItemValue.SILHOUETTE, "실루엣", ATTR_RAG},
+                    new String[]{TrendItemValue.SEASON, "시즌"}, new String[]{"CATEGORY", "카테고리"}),
+            // 유행을 묻는 말 — AI 해석이 실패했을 때 규칙으로 알아본다(질문에 이 말이 들어 있으면 유행 질문)
+            TREND_WORD, List.of(
+                    new String[]{"TREND", "유행"}, new String[]{"TREND2", "트렌드"}, new String[]{"POPULAR", "인기"},
+                    new String[]{"RISING", "뜨는"}, new String[]{"RISING2", "떠오르"}, new String[]{"HOT", "핫한"},
+                    new String[]{"MAINSTREAM", "대세"}, new String[]{"WORN", "많이 입"}, new String[]{"SEEN", "많이 보이"},
+                    new String[]{"SELLING", "잘 나가"}));
 
     private TrendCodes() {
     }

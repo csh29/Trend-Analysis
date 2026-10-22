@@ -71,6 +71,19 @@ class TextDocumentApiTest {
     }
 
     @Test
+    @WithMockUser(username = "admin")
+    void 같은_URL의_원문은_다시_등록하지_않는다() throws Exception {
+        mockMvc.perform(post("/api/texts").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"첫 등록\",\"url\":\"https://www.example.com/news/1/?utm_source=ig\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.url").value("https://example.com/news/1")); // 정규화해서 저장
+        mockMvc.perform(post("/api/texts").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"같은 기사 공유 링크\",\"url\":\"http://example.com/news/1#comments\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().string(containsString("이미 등록된 원문")));
+    }
+
+    @Test
     @WithMockUser(username = "nobody")
     void text_upload_권한이_없으면_403() throws Exception {
         mockMvc.perform(get("/api/texts")).andExpect(status().isForbidden());

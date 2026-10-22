@@ -33,7 +33,8 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 public class TrendQueryService {
 
-    public static final Set<String> VALUE_TYPES = Set.of(TrendItemValue.KEYWORD, TrendItemValue.ITEM, TrendItemValue.MATERIAL,
+    public static final Set<String> VALUE_TYPES = Set.of(TrendItemValue.KEYWORD, TrendItemValue.ITEM, TrendItemValue.ITEM_TYPE,
+            TrendItemValue.MATERIAL,
             TrendItemValue.COLOR, TrendItemValue.SILHOUETTE, TrendItemValue.SEASON, TrendWeeklyStat.CATEGORY);
     /** 차트에 그리는 값 수 — 많으면 선이 겹쳐 읽을 수 없다. */
     static final int SERIES_SIZE = 5;
@@ -144,6 +145,7 @@ public class TrendQueryService {
         return switch (valueType) {
             case TrendWeeklyStat.CATEGORY -> g.category() == null ? List.of() : List.of(g.category());
             case TrendItemValue.ITEM -> List.of(g.name());
+            case TrendItemValue.ITEM_TYPE -> g.type() == null ? List.of() : List.of(g.type());
             case TrendItemValue.MATERIAL -> g.materials();
             case TrendItemValue.COLOR -> g.colors();
             case TrendItemValue.SILHOUETTE -> g.silhouettes();

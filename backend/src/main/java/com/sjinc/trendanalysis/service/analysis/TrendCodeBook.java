@@ -16,8 +16,8 @@ public record TrendCodeBook(Map<String, List<ComCd>> groups) {
 
     public static TrendCodeBook of(Function<String, List<ComCd>> loader) {
         Map<String, List<ComCd>> groups = new LinkedHashMap<>();
-        for (String group : List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE,
-                TrendCodes.SEASON)) {
+        for (String group : List.of(TrendCodes.CATEGORY, TrendCodes.ITEM_TYPE, TrendCodes.MATERIAL, TrendCodes.COLOR,
+                TrendCodes.SILHOUETTE, TrendCodes.SEASON)) {
             groups.put(group, loader.apply(group));
         }
         return new TrendCodeBook(groups);
@@ -49,6 +49,19 @@ public record TrendCodeBook(Map<String, List<ComCd>> groups) {
         Map<String, String> names = new LinkedHashMap<>();
         groups.values().forEach(codes -> codes.forEach(code -> names.putIfAbsent(code.getCodeValue(), code.getCodeName())));
         return names;
+    }
+
+    /** 이미지만 있는 원문이 고를 수 있는 소재 — 속성 IMAGE(사진의 질감으로 구분되는 것). */
+    public Set<String> imageMaterials() {
+        return codes(TrendCodes.MATERIAL).stream().filter(c -> c.attrValues().contains(TrendCodes.ATTR_IMAGE))
+                .map(ComCd::getCodeValue).collect(java.util.stream.Collectors.toSet());
+    }
+
+    /** 실루엣 코드 → 축(속성). 속성이 없는 코드는 빠진다(축 제한 없음). */
+    public Map<String, String> silhouetteAxes() {
+        Map<String, String> axes = new LinkedHashMap<>();
+        codes(TrendCodes.SILHOUETTE).forEach(c -> c.attrValues().stream().findFirst().ifPresent(a -> axes.put(c.getCodeValue(), a)));
+        return axes;
     }
 
     /** 비어 있는 그룹 — 하나라도 비면 정형화할 수 없다(LLM이 고를 값이 없다). */

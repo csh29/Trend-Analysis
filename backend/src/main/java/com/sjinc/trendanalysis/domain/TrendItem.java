@@ -83,8 +83,8 @@ public class TrendItem {
         return values.stream().filter(v -> v.getValueType().equals(valueType)).map(TrendItemValue::getValue).toList();
     }
 
-    /** 의류 아이템 하나 — 같은 garmentNo의 값을 모은 것. */
-    public record Garment(int no, String category, String name, List<String> materials, List<String> colors,
+    /** 의류 아이템 하나 — 같은 garmentNo의 값을 모은 것. type은 아이템 종류 코드(종류 도입 전 결과는 null). */
+    public record Garment(int no, String category, String name, String type, List<String> materials, List<String> colors,
                           List<String> silhouettes) {
     }
 
@@ -124,7 +124,9 @@ public class TrendItem {
                 .orElse(fallbackCategory);
         String name = sorted.stream().filter(v -> TrendItemValue.ITEM.equals(v.getValueType())).map(TrendItemValue::getValue)
                 .findFirst().orElse("");
-        return new Garment(no, garmentCategory, name, of(sorted, TrendItemValue.MATERIAL), of(sorted, TrendItemValue.COLOR),
+        String type = sorted.stream().filter(v -> TrendItemValue.ITEM_TYPE.equals(v.getValueType())).map(TrendItemValue::getValue)
+                .findFirst().orElse(null);
+        return new Garment(no, garmentCategory, name, type, of(sorted, TrendItemValue.MATERIAL), of(sorted, TrendItemValue.COLOR),
                 of(sorted, TrendItemValue.SILHOUETTE));
     }
 

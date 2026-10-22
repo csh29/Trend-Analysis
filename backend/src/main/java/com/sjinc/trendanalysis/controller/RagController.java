@@ -3,15 +3,25 @@ package com.sjinc.trendanalysis.controller;
 import com.sjinc.trendanalysis.dto.rag.RagAnswerView;
 import com.sjinc.trendanalysis.dto.rag.RagQuestionRequest;
 import com.sjinc.trendanalysis.service.rag.RagService;
+import com.sjinc.trendanalysis.service.image.ImageService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.Resource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.nio.charset.StandardCharsets;
+
 /**
  * 홈의 질문창(P-06 RAG)이 호출하는 REST API. 홈은 프로그램이 아니라서 로그인만 요구한다(@RequiresProgram 없음).
- * 답의 근거는 분석이 끝난 원문 요약이다 — 업로드 화면 권한이 없어도 요약·출처는 보인다(원문 이미지는 권한이 있어야 열린다).
+ * 답의 근거는 분석이 끝난 원문 요약이다 — 업로드 화면 권한이 없어도 요약·출처와 이미지 출처의 사진은 보인다.
  */
 @RestController
 @RequiredArgsConstructor
@@ -24,5 +34,16 @@ public class RagController {
     @PostMapping("/ask")
     public RagAnswerView ask(@RequestBody RagQuestionRequest request) {
         return ragService.ask(request.question());
+    }
+
+    /** 이미지 출처 보기(홈 오른쪽 슬라이드 패널). 분석이 끝난 이미지 원문만 열린다. */
+    @GetMapping("/sources/{docId}/image")
+    public ResponseEntity<Resource> sourceImage(@PathVariable String docId) {
+        ImageService.ImageFile file = ragService.sourceImage(docId);
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(file.contentType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION, ContentDisposition.inline()
+                        .filename(file.originalName(), StandardCharsets.UTF_8).build().toString())
+                .body(file.resource());
     }
 }

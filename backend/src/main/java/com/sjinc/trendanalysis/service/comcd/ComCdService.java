@@ -39,6 +39,7 @@ public class ComCdService {
                 .sortOrder(request.sortOrder())
                 .useYn(request.useYn())
                 .remark(request.remark())
+                .attr1(request.attr1() == null || request.attr1().isBlank() ? null : request.attr1().trim())
                 .build();
         return comCdRepository.save(code);
     }

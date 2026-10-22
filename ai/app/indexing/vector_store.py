@@ -47,6 +47,6 @@ def get_collection():
                 "CHROMA_COLLECTION을 바꾸거나 재색인하세요.")
         filled = indexer.backfill_date_numbers(collection)
         if filled:
-            log.info("예전 청크 %d개에 게시일 숫자(published_num)를 채웠습니다 — RAG 기간 필터용", filled)
+            log.info("예전 청크 %d개에 게시일 숫자·카테고리 플래그 메타를 채웠습니다 — RAG 기간·카테고리 필터용", filled)
         _collection = collection
     return _collection

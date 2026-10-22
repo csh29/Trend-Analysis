@@ -33,6 +33,8 @@ public class TrendItemValue {
     public static final String SEASON = "SEASON";
     /** 의류 아이템 이름(예: "니트 카디건"). LLM이 쓴 문자열이다. */
     public static final String ITEM = "ITEM";
+    /** 아이템 종류(공통코드 TREND_ITEM, 예: OUTER_PADDING). 유행 집계는 이것으로 센다 — 아이템명은 표기가 흔들린다. */
+    public static final String ITEM_TYPE = "ITEM_TYPE";
     public static final String MATERIAL = "MATERIAL";
     public static final String COLOR = "COLOR";
     public static final String SILHOUETTE = "SILHOUETTE";

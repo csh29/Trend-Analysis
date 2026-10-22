@@ -22,12 +22,16 @@ class TrendResultValidatorTest {
             TrendCodes.MATERIAL, List.of(code(TrendCodes.MATERIAL, "LEATHER", "레더(가죽)")),
             TrendCodes.COLOR, List.of(code(TrendCodes.COLOR, "BROWN", "브라운"), code(TrendCodes.COLOR, "BLACK", "블랙")),
             TrendCodes.SILHOUETTE, List.of(code(TrendCodes.SILHOUETTE, "OVERSIZED", "오버사이즈")),
-            TrendCodes.SEASON, List.of(code(TrendCodes.SEASON, "FALL", "가을"), code(TrendCodes.SEASON, "WINTER", "겨울"))));
+            TrendCodes.SEASON, List.of(code(TrendCodes.SEASON, "FALL", "가을"), code(TrendCodes.SEASON, "WINTER", "겨울")),
+            TrendCodes.ITEM_TYPE, List.of(code(TrendCodes.ITEM_TYPE, "OUTER_ETC", "기타 아우터"),
+                    code(TrendCodes.ITEM_TYPE, "OUTER_PADDING", "패딩"), code(TrendCodes.ITEM_TYPE, "BOTTOM_ETC", "기타 하의"),
+                    code(TrendCodes.ITEM_TYPE, "BOTTOM_DENIM", "데님 팬츠"), code(TrendCodes.ITEM_TYPE, "ETC", "기타"))));
 
     private static Map<String, Object> item(String category, String name, List<String> materials, List<String> colors) {
         Map<String, Object> item = new HashMap<>();
         item.put("category", category);
         item.put("item", name);
+        item.put("type", "ETC".equals(category) ? "ETC" : category + "_ETC"); // 아이템 종류는 그 카테고리 것
         item.put("materials", materials);
         item.put("colors", colors);
         item.put("silhouettes", List.of());
@@ -107,10 +111,12 @@ class TrendResultValidatorTest {
     @Test
     void 실루엣은_축마다_처음_값_하나만_남긴다() {
         // 프롬프트 지시에도 오버사이즈·레귤러(둘 다 핏)를 함께 내던 실제 사례
-        assertThat(TrendResultValidator.onePerAxis(List.of("OVERSIZED", "REGULAR", "CROPPED", "BOXY", "WIDE")))
+        Map<String, String> axes = Map.of("OVERSIZED", "FIT", "REGULAR", "FIT", "SLIM", "FIT", "CROPPED", "LENGTH",
+                "BOXY", "SHAPE", "WIDE", "SHAPE"); // 공통코드 실루엣 속성
+        assertThat(TrendResultValidator.onePerAxis(List.of("OVERSIZED", "REGULAR", "CROPPED", "BOXY", "WIDE"), axes))
                 .containsExactly("OVERSIZED", "CROPPED", "BOXY");
         // 축이 정해지지 않은 코드(공통코드에 새로 넣은 것)는 그대로 둔다
-        assertThat(TrendResultValidator.onePerAxis(List.of("REGULAR", "NEW_CODE", "SLIM")))
+        assertThat(TrendResultValidator.onePerAxis(List.of("REGULAR", "NEW_CODE", "SLIM"), axes))
                 .containsExactly("REGULAR", "NEW_CODE");
     }
 
@@ -148,6 +154,22 @@ class TrendResultValidatorTest {
         raw.put("keywords", List.of("a", "b", "c", "d", "e", "f", "g", "h", "i", "j"));
 
         assertThat(TrendResultValidator.validate(raw, codes).validated().keywords()).hasSize(TrendResultValidator.MAX_KEYWORDS);
+    }
+
+    @Test
+    void 아이템_종류는_그_카테고리의_코드여야_한다() {
+        TrendResultValidator.Outcome ok = TrendResultValidator.validate(valid(), codes);
+        assertThat(ok.validated().items().get(0).type()).isEqualTo("OUTER_ETC");
+
+        Map<String, Object> mismatch = valid();
+        @SuppressWarnings("unchecked")
+        Map<String, Object> outer = (Map<String, Object>) ((List<?>) mismatch.get("items")).get(0);
+        outer.put("type", "BOTTOM_DENIM"); // 아우터에 데님 팬츠 — 집계가 틀어진다
+        assertThat(TrendResultValidator.validate(mismatch, codes).errors())
+                .anyMatch(e -> e.contains("items[0].type") && e.contains("카테고리"));
+
+        outer.put("type", "OUTER_UNKNOWN");
+        assertThat(TrendResultValidator.validate(mismatch, codes).errors()).anyMatch(e -> e.contains("공통코드에 없습니다"));
     }
 
     @Test

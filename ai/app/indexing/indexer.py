@@ -22,7 +22,9 @@ def summary_chunk(structured: dict, names: dict[str, str]) -> str:
         attrs = [f"{label} {labels(item[key])}"
                  for key, label in (("materials", "소재"), ("colors", "컬러"), ("silhouettes", "실루엣")) if item.get(key)]
         category = names.get(item.get("category"), item.get("category") or "")
-        parts.append(f"아이템: {item.get('item', '')}({category})" + (" — " + ", ".join(attrs) if attrs else ""))
+        kind = names.get(item.get("type"), "") if item.get("type") else ""  # 아이템 종류 이름(예: 데님 재킷(트러커))
+        label = f"{category}·{kind}" if kind else category
+        parts.append(f"아이템: {item.get('item', '')}({label})" + (" — " + ", ".join(attrs) if attrs else ""))
     return "\n".join(p for p in parts if p)
 
 
@@ -32,14 +34,25 @@ def date_number(value: str | None) -> int:
     return int(digits) if len(digits) == 8 and digits.isdigit() else 0
 
 
+# 메타 형식 버전 — 2: 게시일 숫자(published_num, 기간 필터) + 카테고리 플래그(cat_OUTER: True, 카테고리 필터)
+META_VERSION = 2
+
+
+def category_flags(categories: list[str]) -> dict:
+    """Chroma 메타는 목록을 못 담고 문자열 부분 일치 필터도 없어서, 아이템 카테고리마다 cat_<코드>: True를 둔다."""
+    return {f"cat_{c}": True for c in categories if c}
+
+
 def backfill_date_numbers(collection) -> int:
-    """published_num이 생기기 전에 색인한 청크에 채운다(메타만 고친다 — 다시 임베딩하지 않는다). 채운 청크 수."""
+    """메타 형식이 예전인 청크에 게시일 숫자·카테고리 플래그를 채운다(메타만 고친다 — 다시 임베딩하지 않는다). 채운 청크 수."""
     got = collection.get(include=["metadatas"])
     ids, metas = [], []
     for chunk_id, meta in zip(got["ids"], got["metadatas"]):
-        if meta is not None and "published_num" not in meta:
+        if meta is not None and meta.get("meta_v", 1) < META_VERSION:
             ids.append(chunk_id)
-            metas.append({**meta, "published_num": date_number(meta.get("published_at"))})
+            categories = [c for c in (meta.get("categories") or "").split(",") if c]
+            metas.append({**meta, "published_num": date_number(meta.get("published_at")), **category_flags(categories),
+                          "meta_v": META_VERSION})
     if ids:
         collection.update(ids=ids, metadatas=metas)
     return len(ids)
@@ -77,6 +90,8 @@ def index_document(collection, doc_id: str, doc_type: str, text: str | None, str
         "category": (item_categories(structured) or [""])[0],
         "categories": ",".join(item_categories(structured)),
         "seasons": ",".join(structured.get("seasons") or []),
+        **category_flags(item_categories(structured)),
+        "meta_v": META_VERSION,
     }
     collection.add(
         ids=[f"{doc_id}#{i}" for i in range(len(chunks))],
