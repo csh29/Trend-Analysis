@@ -65,8 +65,8 @@ class TrendApiTest {
                 .docType(SourceDocument.TYPE_TEXT).docId("TXT-T-9").title("실패").body("본문").media("샘플")
                 .publishedAt(BASE.plusDays(1)).status(SourceDocument.FAILED)
                 .registeredBy("admin").registeredAt(LocalDateTime.now()).build());
-        TrendItem item = TrendItem.builder().documentId(failed.getId()).category("OUTER").sentiment("neutral")
-                .summary("요약").resultJson("{}").model("m").createdAt(LocalDateTime.now()).build();
+        TrendItem item = TrendItem.builder().documentId(failed.getId()).category("OUTER")
+                .summary("요약").resultJson("{}").createdAt(LocalDateTime.now()).build();
         item.addValue(TrendItemValue.MATERIAL, "LEATHER", 0);
         trendItemRepository.save(item);
     }
@@ -76,8 +76,8 @@ class TrendApiTest {
                 .docType(SourceDocument.TYPE_TEXT).docId(docId).title(docId + " 제목").body("본문").media("샘플 매거진")
                 .publishedAt(publishedAt).url("https://example.com/" + docId).status(SourceDocument.DONE)
                 .registeredBy("admin").registeredAt(LocalDateTime.now()).build());
-        TrendItem item = TrendItem.builder().documentId(doc.getId()).category(category).sentiment("positive")
-                .summary(docId + " 요약").resultJson("{}").model("m").createdAt(LocalDateTime.now()).build();
+        TrendItem item = TrendItem.builder().documentId(doc.getId()).category(category)
+                .summary(docId + " 요약").resultJson("{}").createdAt(LocalDateTime.now()).build();
         item.addValue(TrendItemValue.MATERIAL, material, 0);
         item.addValue(TrendItemValue.KEYWORD, keyword, 0);
         trendItemRepository.save(item);
@@ -88,8 +88,8 @@ class TrendApiTest {
                 .docType(SourceDocument.TYPE_IMAGE).docId(docId).title(docId + " 제목").media("직접 업로드")
                 .publishedAt(publishedAt).status(SourceDocument.DONE)
                 .registeredBy("admin").registeredAt(LocalDateTime.now()).build());
-        TrendItem item = TrendItem.builder().documentId(doc.getId()).category("TOP").sentiment("neutral")
-                .summary(docId + " 요약").resultJson("{}").model("m").createdAt(LocalDateTime.now()).build();
+        TrendItem item = TrendItem.builder().documentId(doc.getId()).category("TOP")
+                .summary(docId + " 요약").resultJson("{}").createdAt(LocalDateTime.now()).build();
         item.addValue(TrendItemValue.KEYWORD, "캠퍼스룩", 0);
         item.addValue(TrendItemValue.SEASON, "FALL", 0);
         item.addGarmentValue(TrendItemValue.ITEM, "니트 카디건", 0, 0, "TOP");
@@ -180,9 +180,9 @@ class TrendApiTest {
                 .andExpect(jsonPath("$.rows[?(@.value == 'FALL')].label").value("가을"));
         mockMvc.perform(get("/api/trends").param("type", "SEASON").param("category", "BOTTOM").param("baseWeek", BASE.toString()))
                 .andExpect(jsonPath("$.rows[?(@.value == 'FALL')].count").value(1));
-        // 아이템명도 집계된다
+        // 아이템명은 유형이 아니다(아이템 종류와 뜻이 겹쳐 뺐다)
         mockMvc.perform(get("/api/trends").param("type", "ITEM").param("baseWeek", BASE.toString()))
-                .andExpect(jsonPath("$.rows[?(@.value == '니트 카디건')].count").value(1));
+                .andExpect(status().isBadRequest());
         // 근거 원문도 같은 기준 — 하의 그레이는 없다
         mockMvc.perform(get("/api/trends/evidence").param("type", "COLOR").param("value", "GRAY").param("category", "BOTTOM")
                         .param("from", BASE.toString()).param("to", BASE.plusDays(6).toString()))

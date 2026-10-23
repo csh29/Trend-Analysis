@@ -47,7 +47,7 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 
 | 위치 | 역할 |
 | --- | --- |
-| `templates/home.html` | 홈 대시보드(요약 카드 + 트렌드 챗봇) 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
+| `templates/home.html` | 홈 대시보드(요약 카드 + 트렌드 챗봇, "홈 편집"으로 패널 배치를 바꿔 계정별 저장) 겸 탭 셸. 사이드바 메뉴를 iframe 탭(`?embed=1`)으로 연다(`js/tabs.js`) |
 | `templates/fragments/sidebar.html` | 사이드바. 메뉴는 프로그램 관리(DB)와 공통코드 `MENU_GROUP`이 정한다(`SidebarModelAdvice`) |
 | `templates/login.html` | 로그인 화면 |
 | `templates/fragments/topbar.html` | 상단바(로고·사이드바 접기·탭 목록·로그인 사용자·비밀번호 변경·로그아웃) |
@@ -87,7 +87,7 @@ AI 처리는 Python 서비스(`../ai`, FastAPI)가 하고 Spring이 호출한다
 | `ai.server.url` | AI 서비스 주소, 기본 `http://127.0.0.1:8001` |
 | `ai.analysis.max-attempts` | 정형화 재시도 상한, 기본 3 |
 
-AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끈다(더블클릭 가능). 처음 실행하면 가상환경과 패키지를 설치한다.
+AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끄며, 프롬프트·코드를 고친 뒤에는 `ai/restart-ai.cmd`로 다시 띄운다(더블클릭 가능). 처음 실행하면 가상환경과 패키지를 설치한다.
 로그는 `ai/logs/`에 남는다. 직접 띄울 때는 `ai` 폴더에서:
 
 ```bash

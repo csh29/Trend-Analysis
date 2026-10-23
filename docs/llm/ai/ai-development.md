@@ -4,7 +4,7 @@
 
 ## 1. 실행
 
-평소에는 `ai/start-ai.cmd`(기동)·`ai/stop-ai.cmd`(종료)를 쓴다(더블클릭 가능, 본체는 같은 이름의 `.ps1`).
+평소에는 `ai/start-ai.cmd`(기동)·`ai/stop-ai.cmd`(종료)·`ai/restart-ai.cmd`(종료 후 기동 — 프롬프트·코드 수정 뒤)를 쓴다(더블클릭 가능, 본체는 같은 이름의 `.ps1`). `.cmd`는 인자를 그대로 `.ps1`에 넘기므로 아무 말이나 붙이면 첫 매개변수(`-BindHost`)가 된다 — 옵션은 이름을 붙여 쓴다(`restart-ai.cmd -Port 8001`). 종료는 포트와 상관없이 `.ai-server.pid`의 프로세스도 끈다. 재기동은 종료 뒤 포트가 비었는지로 성공을 본다(`stop-ai.ps1`은 정상 종료 때 `exit`를 쓰지 않아 종료 코드가 `taskkill` 값으로 남는다).
 
 - 기동은 백그라운드로 띄우고 `/health`가 응답할 때까지 기다린다. 이미 떠 있으면 다시 띄우지 않는다. `.venv`가 없으면 만들고 패키지를 설치한다.
 - 로그는 `ai/logs/ai-server.log`·`ai-server.err.log`(uvicorn·분석 로그는 err 쪽), PID는 `ai/.ai-server.pid` — 둘 다 커밋 제외. 기동할 때 이전 로그는 `ai/logs/archive/`에 날짜를 붙여 옮긴다(최근 20개).
@@ -72,7 +72,7 @@ ai/
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
 │  └─ rag/                 interpret.md(질문 해석) · answer.md(답변 모양·유행 판단·기간·근거 규칙)
 ├─ tests/                  test_core · test_api · test_rag
-├─ start-ai.* / stop-ai.*  기동·종료 스크립트(ai 폴더에 둔다 — 더블클릭)
+├─ start-ai.* / stop-ai.* / restart-ai.*  기동·종료·재기동 스크립트(ai 폴더에 둔다 — 더블클릭)
 └─ requirements.txt        버전 고정. torch는 CPU 빌드
 ```
 

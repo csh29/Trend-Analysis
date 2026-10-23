@@ -20,7 +20,6 @@ from app.core.claude import create_message, parse_json, usage_of
 
 log = logging.getLogger("trend-ai")
 
-SENTIMENTS = ["positive", "neutral", "negative"]
 MAX_TOKENS = 16000
 
 # Claude가 읽는 글(규칙·지시문)은 prompts/structure/*.md에 있다. 여기서는 그 글을 조립만 한다.
@@ -114,10 +113,9 @@ def build_schema(data: StructureInput) -> dict:
             "items": {"type": "array", "items": item},
             "keywords": {"type": "array", "items": {"type": "string"}},
             "seasons": enum_array(data.seasons),  # 문서 단위 — 이 자료가 다루는 트렌드의 시즌
-            "sentiment": {"type": "string", "enum": SENTIMENTS},
             "summary": {"type": "string"},
         },
-        "required": ["items", "keywords", "seasons", "sentiment", "summary"],
+        "required": ["items", "keywords", "seasons", "summary"],
         "additionalProperties": False,
     }
 

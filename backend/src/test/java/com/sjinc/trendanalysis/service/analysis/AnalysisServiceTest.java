@@ -66,7 +66,6 @@ class AnalysisServiceTest {
                 garment("BOTTOM", "미니스커트", List.of(), List.of("BLACK"))));
         result.put("keywords", List.of("레더 재킷"));
         result.put("seasons", List.of("FALL"));
-        result.put("sentiment", "positive");
         result.put("summary", "레더 아우터가 주목받는다.");
         return result;
     }
@@ -105,6 +104,19 @@ class AnalysisServiceTest {
         // 정형 JSON에는 원문 문서의 출처가 붙는다(LLM이 만들지 않는다)
         assertThat(item.getResultJson()).contains("\"media\" : \"보그코리아\"").contains("\"doc_id\" : \"" + done.getDocId() + "\"");
         verify(aiClient).index(any());
+    }
+
+    @Test
+    void 같은_문서가_두_번_실려도_한_번만_분석한다() {
+        // 2026-10-23: 샘플 37건이 등록 이벤트와 기동 재대기에 함께 실려 끝난 문서를 다시 분석했다
+        SourceDocument doc = textDocument();
+        when(aiClient.structure(any(), eq("test-key"))).thenReturn(response(validResult()));
+
+        analysisService.analyze(doc.getId());
+        analysisService.analyze(doc.getId());
+
+        verify(aiClient, times(1)).structure(any(), any());
+        assertThat(sourceDocumentRepository.findById(doc.getId()).orElseThrow().getStatus()).isEqualTo(SourceDocument.DONE);
     }
 
     @Test

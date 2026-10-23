@@ -73,7 +73,8 @@ public final class TrendCodes {
                     new String[]{"COTTON", "면(코튼)"}, new String[]{"LINEN", "린넨(마)"}, new String[]{"WOOL", "울"},
                     new String[]{"CASHMERE", "캐시미어"}, new String[]{"LEATHER", "레더(가죽)", ATTR_IMAGE}, new String[]{"SUEDE", "스웨이드", ATTR_IMAGE},
                     new String[]{"DENIM", "데님", ATTR_IMAGE}, new String[]{"SILK", "실크"}, new String[]{"KNIT", "니트", ATTR_IMAGE},
-                    new String[]{"FUR", "퍼(모피·페이크퍼)", ATTR_IMAGE}, new String[]{"FLEECE", "플리스", ATTR_IMAGE}, new String[]{"TWEED", "트위드", ATTR_IMAGE},
+                    new String[]{"FUR", "퍼(모피·페이크퍼)", ATTR_IMAGE},
+                    new String[]{"SHEARLING", "무스탕(시어링·양털 가죽)", ATTR_IMAGE}, new String[]{"FLEECE", "플리스", ATTR_IMAGE}, new String[]{"TWEED", "트위드", ATTR_IMAGE},
                     new String[]{"CORDUROY", "코듀로이(골덴)", ATTR_IMAGE}, new String[]{"NYLON", "나일론"},
                     new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴", ATTR_IMAGE}),
             COLOR, List.of(
@@ -100,7 +101,7 @@ public final class TrendCodes {
             ITEM_TYPE, List.of(
                     new String[]{"OUTER_PADDING", "패딩(숏패딩·푸퍼·패딩 점퍼)"}, new String[]{"OUTER_COAT", "코트(울 코트·롱 코트)"},
                     new String[]{"OUTER_TRENCH", "트렌치코트"}, new String[]{"OUTER_BLAZER", "블레이저(테일러드 재킷)"},
-                    new String[]{"OUTER_BLOUSON", "블루종(봄버·항공 점퍼)"}, new String[]{"OUTER_DENIM_JACKET", "데님 재킷(트러커)"},
+                    new String[]{"OUTER_BLOUSON", "블루종(봄버·항공 점퍼·스타디움 재킷)"}, new String[]{"OUTER_DENIM_JACKET", "데님 재킷(트러커)"},
                     new String[]{"OUTER_LEATHER_JACKET", "레더 재킷(라이더)"}, new String[]{"OUTER_HOOD_ZIPUP", "후드 집업"},
                     new String[]{"OUTER_FLEECE", "플리스(후리스)"}, new String[]{"OUTER_PARKA", "파카(아노락·바람막이·후드 파카)"},
                     new String[]{"OUTER_TRACK_JACKET", "트랙 재킷(저지)"}, new String[]{"OUTER_WORK_JACKET", "워크 재킷(초어·셔츠 재킷)"},
@@ -116,12 +117,14 @@ public final class TrendCodes {
                     new String[]{"BOTTOM_SKIRT", "스커트"}, new String[]{"BOTTOM_LEGGINGS", "레깅스"},
                     new String[]{"BOTTOM_ETC", "기타 하의"},
                     new String[]{"DRESS_DRESS", "원피스"}, new String[]{"DRESS_JUMPSUIT", "점프수트"},
-                    new String[]{"SETUP_SUIT", "수트·셋업"}, new String[]{"SETUP_TRACKSUIT", "트레이닝 셋업"},
+                    new String[]{"SETUP_SUIT", "수트(테일러드 재킷+같은 원단 하의)"},
+                    new String[]{"SETUP_TRACKSUIT", "트레이닝 셋업(트랙 재킷+트랙 팬츠)"},
                     new String[]{"ETC", "기타"}),
-            // 트렌드 분석 화면 유형 목록(정렬순서대로)·RAG 참고 집계(속성 RAG). 코드값은 집계 값 종류라 바꾸지 않는다
+            // 트렌드 분석 화면 유형 목록(정렬순서대로)·RAG 참고 집계(속성 RAG). 코드값은 집계 값 종류라 바꾸지 않는다.
+            // 아이템명(ITEM)은 없다 — 아이템 종류와 뜻이 겹쳐 헷갈린다(2026-10-23 사용자 결정)
             VALUE_TYPE, List.of(
                     new String[]{TrendItemValue.KEYWORD, "키워드", ATTR_RAG}, new String[]{TrendItemValue.ITEM_TYPE, "아이템 종류", ATTR_RAG},
-                    new String[]{TrendItemValue.ITEM, "아이템명"}, new String[]{TrendItemValue.MATERIAL, "소재", ATTR_RAG},
+                    new String[]{TrendItemValue.MATERIAL, "소재", ATTR_RAG},
                     new String[]{TrendItemValue.COLOR, "컬러", ATTR_RAG}, new String[]{TrendItemValue.SILHOUETTE, "실루엣", ATTR_RAG},
                     new String[]{TrendItemValue.SEASON, "시즌"}, new String[]{"CATEGORY", "카테고리"}),
             // 유행을 묻는 말 — AI 해석이 실패했을 때 규칙으로 알아본다(질문에 이 말이 들어 있으면 유행 질문)

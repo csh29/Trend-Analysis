@@ -23,7 +23,7 @@ public record AnalysisView(Long documentId, String docId, String docType, String
     public record Item(Code category, String name, Code type, List<Code> materials, List<Code> colors, List<Code> silhouettes) {
     }
 
-    public record Result(List<Item> items, List<String> keywords, List<Code> seasons, String sentiment, String summary,
-                         String model, String json) {
+    public record Result(List<Item> items, List<String> keywords, List<Code> seasons, String summary,
+                         String json) {
     }
 }

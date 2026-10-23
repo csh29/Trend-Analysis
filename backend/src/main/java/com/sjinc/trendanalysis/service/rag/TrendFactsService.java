@@ -38,6 +38,17 @@ import java.util.stream.Collectors;
  *   <li>기간: 질문이 정한 기간, 없으면 오늘까지 4주. 그 안에 원문이 없으면 범위 원문 중 가장 최근 게시일까지 4주로 옮기고(8주 넘게
  *       오래됐으면 stale), 직전 같은 길이 기간과 비교한다.</li>
  *   <li>예시 원문: 첫 번째 축(아이템 종류, 없으면 카테고리) 상위 값마다 최근 원문 2건 — 답변의 출처가 된다.</li>
+ *   <li>기타(OUTER_ETC·ETC 등): 목록에 없는 옷이 한데 모여 "기타 아우터 7건"만으로는 무엇이 뜨는지 알 수 없다 — 그 안의
+ *       아이템명(Claude 자유 문장)을 원문 수로 세어 상위 몇 개를 같이 준다(2026-10-23 사용자 결정. 새 종류 코드를 만들기 전에도 답이 비지 않게).</li>
+ *   <li>질문 단어(해석이 코드로 못 옮긴 말 — 무스탕·발마칸…): 키워드·아이템명에 그 말이 들어간 원문을 센다(2026-10-23 사용자 결정).
+ *       코드가 없으면 해석이 그 말을 버려 "무스탕 유행해?"가 "아우터 유행"으로 넓어졌다. 범위(카테고리)와 상관없이 세고, 실제로 나온
+ *       표현을 같이 준다 — "무스탕 칼라"처럼 옷 자체가 아닌 언급도 걸리므로 옷 개수가 아니라 언급 수다. 그 원문을 예시 원문 앞에 둔다.</li>
+ *   <li>시즌(질문이 F/W·올가을처럼 시즌을 가리킬 때): 원문의 시즌 값(정형화 seasons)이 그 시즌인 원문만 센다 — 게시일 기간(6개월)만으로는
+ *       S/S 자료가 섞인다. 시즌 값이 없는 원문은 빠진다(2026-10-23 사용자 결정).</li>
+ *   <li>묻는 축(해석의 focus — "요즘 유행하는 핏은?"이면 실루엣)이 있으면 그 축이 첫 축이 된다 — 화면의 막대와 예시 원문이 그 축의
+ *       상위 값으로 나온다. 없으면 아이템 종류(종류를 콕 집었으면 소재)가 첫 축이다(2026-10-23).</li>
+ *   <li>소재·컬러·실루엣 값마다 그 값으로 나온 아이템 종류 상위(같은 의류 아이템 기준)를 같이 센다 — "컬러별 활용하기 좋은 아이템" 같은
+ *       교차 질문의 근거다. 종류를 콕 집은 질문은 종류가 하나라 세지 않는다.</li>
  * </ul>
  */
 @Service
@@ -50,13 +61,27 @@ public class TrendFactsService {
     static final int EXAMPLES_PER_VALUE = 2;
     static final int MAX_EXAMPLES = 6;
     static final int STALE_DAYS = 56;
+    static final int ETC_NAMES = 3;
+    static final int CROSS_ITEMS = 3;
 
     private final SourceDocumentRepository sourceDocumentRepository;
     private final TrendItemRepository trendItemRepository;
     private final ComCdRepository comCdRepository;
 
-    /** 값 하나의 집계. prevCount는 직전 같은 길이 기간의 원문 수. */
-    public record Row(String value, String label, int count, int mediaCount, int prevCount) {
+    /**
+     * 값 하나의 집계. prevCount는 직전 같은 길이 기간의 원문 수. names는 기타 값일 때만 — 그 안의 아이템명 상위(원문 수 순).
+     * items는 소재·컬러·실루엣 값일 때만 — 그 값으로 나온 아이템 종류 이름 상위(원문 수 순).
+     */
+    public record Row(String value, String label, int count, int mediaCount, int prevCount, List<NameCount> names,
+                      List<NameCount> items) {
+    }
+
+    /** 기타 안의 아이템명 하나와 그 이름이 나온 원문 수. */
+    public record NameCount(String name, int count) {
+    }
+
+    /** 질문 단어 하나의 언급 집계. expressions는 그 말이 들어간 키워드·아이템명 상위(원문 수 순). */
+    public record TermRow(String term, int count, int mediaCount, int prevCount, List<NameCount> expressions) {
     }
 
     /** 축 하나(아이템 종류·소재…)의 상위 값들. */
@@ -69,7 +94,7 @@ public class TrendFactsService {
      * @param prevDocCount 직전 기간 범위 원문 수
      */
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
-                        int prevDocCount, List<Dimension> dimensions, List<String> evidenceDocIds) {
+                        int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds) {
 
         /** AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. */
         public List<String> lines() {
@@ -78,16 +103,27 @@ public class TrendFactsService {
             for (Dimension d : dimensions) {
                 if (d.rows().isEmpty()) continue;
                 lines.add("[" + d.label() + "] " + d.rows().stream()
-                        .map(r -> r.label() + " " + r.count() + "건 · 매체 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건")
+                        .map(r -> r.label() + " " + r.count() + "건 · 매체 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건"
+                                + (r.names().isEmpty() ? "" : " (아이템명: " + r.names().stream()
+                                .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")")
+                                + (r.items().isEmpty() ? "" : " [주요 아이템: " + r.items().stream()
+                                .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + "]"))
                         .collect(Collectors.joining(" / ")));
+            }
+            for (TermRow t : terms) {
+                lines.add("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] " + t.term() + " " + t.count() + "건 · 매체 " + t.mediaCount()
+                        + "곳 · 직전 " + t.prevCount() + "건" + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
+                        .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")"));
             }
             return lines;
         }
     }
 
     public Facts count(QuestionInterpreter.Interpretation question, LocalDate today) {
-        Scope scope = new Scope(question.category(), question.itemType());
-        QuestionInterpreter.Period period = question.period() != null ? question.period() : QuestionInterpreter.recentWeeks(today);
+        Scope scope = new Scope(question.category(), question.itemType(), Set.copyOf(question.seasons()), question.focus());
+        // 시즌을 정했는데 기간이 비었으면(해석이 가끔 빠뜨린다) 시즌 기간 — 최근 4주로 세면 F/W 자료 대부분이 빠진다
+        QuestionInterpreter.Period period = question.period() != null ? question.period()
+                : !question.seasons().isEmpty() ? QuestionInterpreter.seasonWindow(today) : QuestionInterpreter.recentWeeks(today);
         Facts facts = countIn(period, scope, question, false);
         if (facts.docCount() == 0 && question.period() == null) {
             // 최근 4주에 없으면 범위 원문 중 가장 최근 게시일까지 4주로 옮긴다(오래된 자료라고 알린다)
@@ -102,9 +138,14 @@ public class TrendFactsService {
         return facts;
     }
 
-    private record Scope(String category, String itemType) {
+    private record Scope(String category, String itemType, Set<String> seasons, String focus) {
         boolean matches(TrendItem.Garment g) {
             return (category == null || category.equals(g.category())) && (itemType == null || itemType.equals(g.type()));
+        }
+
+        /** 질문이 시즌을 정했으면 원문의 시즌 값 중 하나가 그 시즌이어야 한다(시즌 값이 없는 원문은 빠진다). */
+        boolean inSeason(TrendItem item) {
+            return seasons.isEmpty() || item.valuesOf(TrendItemValue.SEASON).stream().anyMatch(seasons::contains);
         }
     }
 
@@ -114,6 +155,8 @@ public class TrendFactsService {
         final Set<String> media = new HashSet<>();
         final Set<Long> prevDocs = new HashSet<>();
         final List<SourceDocument> examples = new ArrayList<>();
+        final Map<String, Set<Long>> names = new LinkedHashMap<>(); // 기타 값일 때만 — 아이템명별 원문(기간 안)
+        final Map<String, Set<Long>> items = new LinkedHashMap<>(); // 소재·컬러·실루엣 값일 때만 — 아이템 종류별 원문(기간 안)
     }
 
     private Facts countIn(QuestionInterpreter.Period period, Scope scope, QuestionInterpreter.Interpretation question, boolean stale) {
@@ -134,7 +177,7 @@ public class TrendFactsService {
         docs.sort(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getId, Comparator.reverseOrder()));
         for (SourceDocument doc : docs) {
             TrendItem item = items.get(doc.getId());
-            if (item == null) continue;
+            if (item == null || !scope.inSeason(item)) continue;
             List<TrendItem.Garment> garments = item.garments().stream().filter(scope::matches).toList();
             if (garments.isEmpty()) continue;
             LocalDate date = TrendAggregationService.statDate(doc);
@@ -155,6 +198,14 @@ public class TrendFactsService {
                             t.examples.add(doc);
                         }
                         t.media.add(doc.getMedia());
+                        if (scope.itemType() == null && isAttribute(type)) { // 같은 의류 아이템의 종류 — 컬러별 아이템
+                            garments.stream().filter(g -> g.type() != null && valuesOf(g, type).contains(value))
+                                    .forEach(g -> t.items.computeIfAbsent(g.type(), k -> new HashSet<>()).add(doc.getId()));
+                        }
+                        if (isEtc(type, value)) {
+                            garments.stream().filter(g -> valuesOf(g, type).contains(value)).map(g -> itemName(g.name()))
+                                    .filter(n -> !n.isEmpty()).forEach(n -> t.names.computeIfAbsent(n, k -> new HashSet<>()).add(doc.getId()));
+                        }
                     } else {
                         t.prevDocs.add(doc.getId());
                     }
@@ -163,6 +214,7 @@ public class TrendFactsService {
         }
 
         Map<String, String> typeLabels = names(TrendCodes.VALUE_TYPE);
+        Map<String, String> itemTypeNames = names(TrendCodes.ITEM_TYPE);
         List<Dimension> dimensions = new ArrayList<>();
         List<String> evidence = new ArrayList<>();
         for (String type : types) {
@@ -175,7 +227,9 @@ public class TrendFactsService {
                     .limit(TOP).toList();
             dimensions.add(new Dimension(type, typeLabels.getOrDefault(type, type), ranked.stream()
                     .map(e -> new Row(e.getKey(), labels.getOrDefault(e.getKey(), e.getKey()), e.getValue().docs.size(),
-                            e.getValue().media.size(), e.getValue().prevDocs.size()))
+                            e.getValue().media.size(), e.getValue().prevDocs.size(), topNames(e.getValue().names),
+                            topNames(e.getValue().items, CROSS_ITEMS).stream()
+                                    .map(n -> new NameCount(shortName(itemTypeNames.getOrDefault(n.name(), n.name())), n.count())).toList()))
                     .toList()));
             if (evidence.isEmpty() && !ranked.isEmpty()) { // 첫 번째 축의 상위 값마다 최근 원문
                 ranked.stream().limit(EXAMPLE_VALUES).forEach(e -> e.getValue().examples.stream().limit(EXAMPLES_PER_VALUE)
@@ -186,11 +240,40 @@ public class TrendFactsService {
             evidence.clear();
             docs.stream().filter(d -> scopeDocs.contains(d.getId())).limit(MAX_EXAMPLES).map(SourceDocument::getDocId).forEach(evidence::add);
         }
-        return new Facts(period, stale, scopeLabel(question), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
-                dimensions, evidence.stream().limit(MAX_EXAMPLES).toList());
+        List<TermRow> terms = new ArrayList<>();
+        List<String> termEvidence = new ArrayList<>();
+        for (String term : question.terms()) {
+            String key = compact(term);
+            if (key.isEmpty()) continue;
+            Tally t = new Tally();
+            for (SourceDocument doc : docs) { // 최신 원문부터
+                TrendItem item = items.get(doc.getId());
+                List<String> hits = item == null || !scope.inSeason(item) ? List.of() : mentions(item, key);
+                if (hits.isEmpty()) continue;
+                if (TrendAggregationService.statDate(doc).isBefore(period.from())) {
+                    t.prevDocs.add(doc.getId());
+                    continue;
+                }
+                t.docs.add(doc.getId());
+                t.media.add(doc.getMedia());
+                t.examples.add(doc);
+                hits.forEach(h -> t.names.computeIfAbsent(h, k -> new HashSet<>()).add(doc.getId()));
+            }
+            terms.add(new TermRow(term, t.docs.size(), t.media.size(), t.prevDocs.size(), topNames(t.names)));
+            t.examples.stream().limit(EXAMPLES_PER_VALUE).map(SourceDocument::getDocId)
+                    .filter(id -> !termEvidence.contains(id)).forEach(termEvidence::add);
+        }
+        // 질문 단어가 나온 원문을 앞에 — 답이 그 말을 다룰 근거가 된다
+        List<String> merged = new ArrayList<>(termEvidence);
+        evidence.stream().filter(id -> !merged.contains(id)).forEach(merged::add);
+        return new Facts(period, stale, scopeLabel(question) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
+                dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList());
     }
 
-    /** 범위에 따라 셀 축 — 종류를 콕 집었으면 종류 축은 빼고, 카테고리를 정했으면 카테고리 축은 뺀다. */
+    /**
+     * 범위에 따라 셀 축 — 종류를 콕 집었으면 종류 축은 빼고, 카테고리를 정했으면 카테고리 축은 뺀다. 묻는 축이 남아 있으면 맨 앞으로
+     * (첫 축이 판단 근거의 막대·예시 원문이 된다).
+     */
     private static List<String> dimensionTypes(Scope scope) {
         List<String> types = new ArrayList<>();
         if (scope.category() == null) types.add(TrendWeeklyStat.CATEGORY);
@@ -200,7 +283,61 @@ public class TrendFactsService {
             types.remove(TrendWeeklyStat.CATEGORY);
             types.add(1, TrendWeeklyStat.CATEGORY);
         }
+        if (scope.focus() != null && types.remove(scope.focus())) {
+            types.add(0, scope.focus());
+        }
         return types;
+    }
+
+    private static boolean isAttribute(String type) {
+        return TrendItemValue.MATERIAL.equals(type) || TrendItemValue.COLOR.equals(type) || TrendItemValue.SILHOUETTE.equals(type);
+    }
+
+    /** 종류 이름의 괄호 힌트를 뗀다 — "블루종(봄버·항공 점퍼)" → "블루종". */
+    private static String shortName(String name) {
+        int i = name.indexOf('(');
+        return i > 0 ? name.substring(0, i).strip() : name;
+    }
+
+    /** 범위 이름 뒤에 붙는 시즌(예: " · 가을·겨울 시즌"). 시즌을 정하지 않았으면 빈 문자열. */
+    private String seasonLabel(Scope scope) {
+        if (scope.seasons().isEmpty()) return "";
+        return " · " + comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.SEASON).stream()
+                .filter(c -> scope.seasons().contains(c.getCodeValue())).map(ComCd::getCodeName)
+                .collect(Collectors.joining("·")) + " 시즌";
+    }
+
+    /** 기타 묶음인지 — 카테고리 ETC, 아이템 종류 ETC·OUTER_ETC 같은 카테고리 기타. */
+    static boolean isEtc(String type, String value) {
+        return (TrendWeeklyStat.CATEGORY.equals(type) || TrendItemValue.ITEM_TYPE.equals(type))
+                && ("ETC".equals(value) || value.endsWith("_ETC"));
+    }
+
+    /** 질문 단어가 들어간 키워드·아이템명(공백 정리한 표현, 중복 없이). 비교는 공백·대소문자를 무시한다. */
+    private static List<String> mentions(TrendItem item, String key) {
+        List<String> texts = new ArrayList<>(item.valuesOf(TrendItemValue.KEYWORD));
+        item.garments().forEach(g -> texts.add(g.name()));
+        return texts.stream().filter(v -> v != null && compact(v).contains(key)).map(TrendFactsService::itemName).distinct().toList();
+    }
+
+    private static String compact(String text) {
+        return text.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** 아이템명 비교용 — 앞뒤·중간 공백만 정리한다(표기 흔들림은 그대로 둔다. 같은 이름끼리만 합친다). */
+    private static String itemName(String name) {
+        return name == null ? "" : name.strip().replaceAll("\\s+", " ");
+    }
+
+    private static List<NameCount> topNames(Map<String, Set<Long>> names) {
+        return topNames(names, ETC_NAMES);
+    }
+
+    private static List<NameCount> topNames(Map<String, Set<Long>> names, int limit) {
+        return names.entrySet().stream()
+                .sorted(Comparator.comparingInt((Map.Entry<String, Set<Long>> e) -> e.getValue().size()).reversed()
+                        .thenComparing(Map.Entry::getKey))
+                .limit(limit).map(e -> new NameCount(e.getKey(), e.getValue().size())).toList();
     }
 
     private static List<String> valuesOf(TrendItem.Garment g, String type) {
@@ -220,7 +357,8 @@ public class TrendFactsService {
         Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(done.stream().map(SourceDocument::getId).toList())
                 .stream().collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
         return done.stream()
-                .filter(d -> items.containsKey(d.getId()) && items.get(d.getId()).garments().stream().anyMatch(scope::matches))
+                .filter(d -> items.containsKey(d.getId()) && scope.inSeason(items.get(d.getId()))
+                        && items.get(d.getId()).garments().stream().anyMatch(scope::matches))
                 .map(TrendAggregationService::statDate)
                 .max(Comparator.naturalOrder()).orElse(null);
     }

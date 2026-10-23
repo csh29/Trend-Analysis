@@ -138,6 +138,7 @@ class InterpretRequest(BaseModel):
     categories: list[CodeHintModel] = []
     item_types: list[CodeHintModel] = []
     history: list[TurnModel] = []  # 오래된 것 → 최근 순
+    seasons: list[CodeHintModel] = []  # 시즌 코드 — 예전 Spring은 보내지 않는다
 
 
 @app.get("/health")
@@ -269,6 +270,7 @@ def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Hea
             question=question, model=req.model, today=req.today or date.today(),
             categories=[interpreter.CodeHint(c.value, c.name, c.words or "") for c in req.categories],
             item_types=[interpreter.CodeHint(t.value, t.name) for t in req.item_types],
+            seasons=[interpreter.CodeHint(s.value, s.name) for s in req.seasons],
             # 앞 대화는 최근 몇 건만, 질문은 상한까지만 — 화면이 보낸 값이라 길이를 믿지 않는다
             history=[interpreter.Turn(h.question[:MAX_QUESTION_LENGTH], h.trend, h.category or "", h.item_type or "",
                                       h.period_label or "", h.period_from or "", h.period_to or "")

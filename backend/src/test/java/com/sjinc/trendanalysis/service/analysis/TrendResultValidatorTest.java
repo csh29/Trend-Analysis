@@ -45,7 +45,6 @@ class TrendResultValidatorTest {
                 item("BOTTOM", "미니스커트", List.of(), List.of("BLACK"))));
         raw.put("keywords", List.of(" 레더 재킷 ", "뉴트로", "레더 재킷"));
         raw.put("seasons", List.of("FALL", "WINTER", "FALL"));
-        raw.put("sentiment", "positive");
         raw.put("summary", "레더 아우터가 주목받는다.");
         return raw;
     }
@@ -149,16 +148,15 @@ class TrendResultValidatorTest {
     }
 
     @Test
-    void 빈_키워드_잘못된_감성_빈_요약은_거부한다() {
+    void 빈_키워드_빈_요약은_거부한다() {
         Map<String, Object> raw = valid();
         raw.put("keywords", List.of(" "));
-        raw.put("sentiment", "happy");
         raw.put("summary", "");
 
         TrendResultValidator.Outcome outcome = TrendResultValidator.validate(raw, codes);
 
         assertThat(outcome.ok()).isFalse();
-        assertThat(outcome.errors()).hasSize(3);
+        assertThat(outcome.errors()).hasSize(2);
     }
 
     @Test

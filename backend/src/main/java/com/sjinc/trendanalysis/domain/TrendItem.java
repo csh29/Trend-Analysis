@@ -46,9 +46,6 @@ public class TrendItem {
     @Column(nullable = false, length = 30)
     private String category;
 
-    @Column(nullable = false, length = 20)
-    private String sentiment;
-
     @Column(nullable = false, length = 1000)
     private String summary;
 
@@ -56,9 +53,6 @@ public class TrendItem {
     @Lob
     @Column(name = "result_json", nullable = false)
     private String resultJson;
-
-    @Column(nullable = false)
-    private String model;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

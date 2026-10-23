@@ -1,15 +1,18 @@
 package com.sjinc.trendanalysis.controller;
 
+import com.sjinc.trendanalysis.dto.user.HomeLayout;
 import com.sjinc.trendanalysis.dto.user.PasswordChangeRequest;
 import com.sjinc.trendanalysis.dto.user.UserRequest;
 import com.sjinc.trendanalysis.dto.user.UserResponse;
 import com.sjinc.trendanalysis.security.RequiresProgram;
+import com.sjinc.trendanalysis.service.user.HomeLayoutService;
 import com.sjinc.trendanalysis.service.user.UserService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -27,6 +30,7 @@ import java.util.List;
 public class UserController {
 
     private final UserService userService;
+    private final HomeLayoutService homeLayoutService;
 
     @GetMapping
     @RequiresProgram({"user-mng", "user-permission-mng"})
@@ -53,6 +57,25 @@ public class UserController {
     @PostMapping("/me/password")
     public void changeMyPassword(@RequestBody PasswordChangeRequest request, Principal principal) {
         userService.changeMyPassword(principal.getName(), request);
+    }
+
+    /**
+     * 홈 배치(개인화) — 본인 것만, 로그인만 필요(비밀번호 변경과 같은 이유). 대상은 Principal이라 다른 계정 배치를 건드릴 수 없다.
+     * 저장한 적이 없으면 기본 배치, DELETE는 "기본 배치로".
+     */
+    @GetMapping("/me/home-layout")
+    public HomeLayout getMyHomeLayout(Principal principal) {
+        return homeLayoutService.get(principal.getName());
+    }
+
+    @PutMapping("/me/home-layout")
+    public HomeLayout saveMyHomeLayout(@RequestBody HomeLayout layout, Principal principal) {
+        return homeLayoutService.save(principal.getName(), layout);
+    }
+
+    @DeleteMapping("/me/home-layout")
+    public HomeLayout resetMyHomeLayout(Principal principal) {
+        return homeLayoutService.reset(principal.getName());
     }
 
     @DeleteMapping("/{id}")

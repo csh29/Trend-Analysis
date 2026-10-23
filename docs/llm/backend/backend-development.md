@@ -51,6 +51,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
 
 - 입력 검증 실패와 업무 규칙 위반은 서비스에서 `IllegalArgumentException`(한국어 사유)을 던진다. `ApiExceptionAdvice`가 400으로 바꾸고 사유 문구를 응답 본문에 담는다. 화면에서 사유를 보여주려면 `res.text()`를 읽는다.
 - `ApiExceptionAdvice`는 `@RestController`에만 적용된다. 화면 컨트롤러 오류를 문자열로 내보내지 않기 위해서다.
+- AI 서비스 호출 실패(`AiCallException`)는 502와 **일반 안내 문구만** 내보낸다. 예외 메시지에는 서버 주소·실행 스크립트·설정 키 같은 내부 정보가 들어 있어 로그에만 남긴다(분석 실패 사유는 관리 화면 기록이라 따로 저장한다).
 - 권한 거부는 직접 응답을 만들지 않고 `AccessDeniedException`을 던진다. Spring Security가 처리한다(화면 403, API 403, 미로그인은 401·로그인 이동).
 - 존재하지 않는 대상을 수정·삭제하려 하면 조용히 넘어가지 않고 `IllegalArgumentException`을 던진다.
 - 외부 HTTP 호출을 `@Transactional` 안에 두지 않는다. 조회·외부 호출을 먼저 끝내고 쓰기만 트랜잭션에서 한다(`AnalysisService`가 그 예다).

@@ -13,11 +13,9 @@
         DONE: { label: '완료', css: 'success' },
         FAILED: { label: '실패', css: 'failed' }
     };
-    const SENTIMENT = { positive: '긍정', neutral: '중립', negative: '부정' };
     const ITEM_COLUMNS = [
         { id: 'category', label: '카테고리', width: 90, align: 'center' },
         { id: 'type', label: '종류', width: 110, align: 'center' },
-        { id: 'name', label: '아이템', width: 140 },
         { id: 'materials', label: '소재', title: true },
         { id: 'colors', label: '컬러', title: true },
         { id: 'silhouettes', label: '실루엣', title: true }
@@ -122,12 +120,11 @@
             addRow(dl, '요약', r.summary);
             addRow(dl, '키워드', (r.keywords || []).join(', '));
             addRow(dl, '시즌', names(r.seasons));
-            addRow(dl, '감성', SENTIMENT[r.sentiment] || r.sentiment);
-            addRow(dl, '모델', r.model);
         }
         body.appendChild(dl);
 
-        // 의류 아이템마다 카테고리·소재·컬러·실루엣이 따로 있다(코디 사진의 상의·하의 속성이 섞이지 않게)
+        // 의류 아이템마다 카테고리·소재·컬러·실루엣이 따로 있다(코디 사진의 상의·하의 속성이 섞이지 않게).
+        // 아이템명은 보이지 않는다 — 종류와 뜻이 겹쳐 헷갈린다(2026-10-23 사용자 결정). 데이터는 기타 종류 설명·집계용으로 남긴다
         if (r && r.items && r.items.length) {
             const title = document.createElement('h3');
             title.textContent = '의류 아이템 ' + r.items.length + '개';
@@ -142,7 +139,6 @@
                 return {
                     category: item.category ? item.category.name : '',
                     type: item.type ? item.type.name : '-',
-                    name: item.name || '-',
                     materials: names(item.materials),
                     colors: names(item.colors),
                     silhouettes: names(item.silhouettes)

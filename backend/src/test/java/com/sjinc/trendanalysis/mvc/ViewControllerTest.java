@@ -52,9 +52,11 @@ class ViewControllerTest {
                 .andExpect(content().string(containsString("트렌드 집계")))
                 .andExpect(content().string(containsString("분석 현황")))
                 .andExpect(content().string(containsString("id=\"ragQuestion\"")))
-                // 자동 새로고침은 카드 영역(.overview)만 바꿔 끼운다 — 그 영역이 홈 응답에 있어야 한다
+                // 자동 새로고침은 패널 내용(data-panel-body)과 숫자 띠만 바꿔 끼운다 — 그 부분이 홈 응답에 있어야 한다
                 .andExpect(content().string(containsString("id=\"homeAutoRefresh\"")))
-                .andExpect(content().string(containsString("class=\"overview\"")));
+                .andExpect(content().string(containsString("data-panel-body=\"trend\"")))
+                .andExpect(content().string(containsString("data-panel-body=\"analysis\"")))
+                .andExpect(content().string(containsString("class=\"summary-strip\"")));
     }
 
     @Test

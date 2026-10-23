@@ -40,9 +40,32 @@ public final class QuestionInterpreter {
      * @param category 카테고리 코드(없으면 null)
      * @param itemType 아이템 종류 코드(없으면 null). 있으면 category는 그 종류의 카테고리다
      * @param period   질문에 기간이 있으면 그 기간, 없으면 null
+     * @param terms    카테고리·종류 코드로 옮기지 못한 패션 단어(AI 해석만 — 규칙 해석은 비어 있다). 유행 집계가 키워드·아이템명에서 센다
+     * @param seasons  질문이 가리키는 시즌 코드(F/W → FALL·WINTER, AI 해석만). 유행 집계가 원문의 시즌 값으로 거른다
+     * @param focus    유행 질문이 묻는 축(SILHOUETTE·COLOR…, AI 해석만 — 없으면 null). 판단 근거의 첫 축·예시 원문이 이 축이 된다
      */
     public record Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
-                                 Period period) {
+                                 Period period, List<String> terms, List<String> seasons, String focus) {
+
+        public Interpretation {
+            terms = terms == null ? List.of() : List.copyOf(terms);
+            seasons = seasons == null ? List.of() : List.copyOf(seasons);
+        }
+
+        public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
+                              Period period, List<String> terms, List<String> seasons) {
+            this(trend, category, categoryName, itemType, itemTypeName, period, terms, seasons, null);
+        }
+
+        public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
+                              Period period, List<String> terms) {
+            this(trend, category, categoryName, itemType, itemTypeName, period, terms, List.of(), null);
+        }
+
+        public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
+                              Period period) {
+            this(trend, category, categoryName, itemType, itemTypeName, period, List.of(), List.of(), null);
+        }
     }
 
     /** 게시일 기간(양 끝 포함). explicit=질문이 정한 기간. */
@@ -105,9 +128,14 @@ public final class QuestionInterpreter {
         }
         // 시즌 기사는 몇 달 앞서 나온다 — 시즌 표현은 최근 6개월
         if (SEASON.matcher(question).find()) {
-            return new Period(today.minusDays(SEASON_DAYS - 1L), today, "최근 6개월(시즌 표현)", true);
+            return seasonWindow(today);
         }
         return null;
+    }
+
+    /** 시즌 표현의 기간 — 시즌 기사는 몇 달 앞서 나와 오늘까지 6개월을 본다. */
+    public static Period seasonWindow(LocalDate today) {
+        return new Period(today.minusDays(SEASON_DAYS - 1L), today, "최근 6개월(시즌 표현)", true);
     }
 
     /** 기간이 없는 유행 질문의 기본 기간 — 오늘까지 4주(집계의 전월 대비와 같은 길이). */

@@ -322,6 +322,38 @@ class InterpretTest(unittest.TestCase):
             self.assertIsNone(r["period"], bad)
             self.assertIsNone(r["category"])
 
+    def test_seasons_are_optional_and_limited_to_codes(self):
+        # 시즌 코드를 받으면 스키마·프롬프트에 넣고 허용 코드만 남긴다. 예전 Spring(시즌 안 보냄)이면 칸이 없다
+        self.assertNotIn("seasons", self.interpret.build_schema(self.data)["properties"])
+        data = self.interpret.InterpretInput(
+            question="26FW 핵심 컬러는?", model="m", today=TODAY, categories=self.data.categories, item_types=self.data.item_types,
+            seasons=[self.interpret.CodeHint("SPRING", "봄"), self.interpret.CodeHint("FALL", "가을"), self.interpret.CodeHint("WINTER", "겨울")])
+        schema = self.interpret.build_schema(data)
+        self.assertEqual(["SPRING", "FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])
+        self.assertIn("seasons", schema["required"])
+        self.assertIn("- seasons: SPRING=봄, FALL=가을, WINTER=겨울", self.interpret.build_content(data))
+        r = self.interpret.normalize({"trend": True, "category": "", "item_type": "", "has_period": False,
+                                      "seasons": ["WINTER", "SUMMER", "FALL", "WINTER"]}, data)
+        self.assertEqual(["FALL", "WINTER"], r["seasons"])
+
+    def test_focus_is_limited_to_axes(self):
+        # 묻는 축 — 정해진 값만, 아니면 None
+        n = self.interpret.normalize
+        base = {"trend": True, "category": "", "item_type": "", "has_period": False}
+        self.assertEqual("SILHOUETTE", n({**base, "focus": "SILHOUETTE"}, self.data)["focus"])
+        self.assertIsNone(n({**base, "focus": ""}, self.data)["focus"])
+        self.assertIsNone(n({**base, "focus": "KEYWORD"}, self.data)["focus"])
+        self.assertEqual([""] + self.interpret.FOCUS, self.interpret.build_schema(self.data)["properties"]["focus"]["enum"])
+
+    def test_terms_are_cleaned_deduped_and_capped(self):
+        # 코드로 못 옮긴 단어 — 공백 정리, 공백·대소문자만 다른 중복·빈 값·너무 긴 값은 빼고 3개까지. 빠지면 빈 배열
+        n = self.interpret.normalize
+        r = n({"trend": True, "category": "OUTER", "item_type": "", "has_period": False,
+               "terms": [" 무스탕 ", "무 스탕", "", "가" * 21, "발마칸  코트", "고프코어", "카고 포켓"]}, self.data)
+        self.assertEqual(["무스탕", "발마칸 코트", "고프코어"], r["terms"])
+        self.assertEqual([], n({"trend": False, "category": "", "item_type": "", "has_period": False}, self.data)["terms"])
+        self.assertIn("terms", self.interpret.build_schema(self.data)["required"])
+
     def test_history_goes_into_prompt_and_rewritten_question_comes_back(self):
         # 이어 묻기 — 앞 질문·해석을 프롬프트에 넣고, 다시 쓴 질문을 돌려준다(비었거나 너무 길면 원래 질문)
         data = self.interpret.InterpretInput(

@@ -24,11 +24,12 @@ class TrendCodeBookTest {
     }
 
     private static final java.util.Set<String> IMAGE = java.util.Set.of(
-            "LEATHER", "SUEDE", "DENIM", "KNIT", "FUR", "FLEECE", "TWEED", "CORDUROY", "SATIN");
+            "LEATHER", "SUEDE", "DENIM", "KNIT", "FUR", "FLEECE", "TWEED", "CORDUROY", "SATIN", "SHEARLING");
 
     @Test
     void 이미지_허용_소재는_공통코드_속성_IMAGE로_정한다() {
-        assertThat(seedBook().imageMaterials()).isEqualTo(IMAGE); // 2026-10-20 사용자가 승인한 목록
+        // 2026-10-20 사용자가 승인한 목록 + 무스탕(2026-10-23 — 양털 결이 사진에서 보인다)
+        assertThat(seedBook().imageMaterials()).isEqualTo(IMAGE);
     }
 
     @Test
@@ -64,7 +65,7 @@ class TrendCodeBookTest {
         Map<String, Object> garment = new HashMap<>(Map.of("category", "TOP", "item", "티셔츠", "type", "TOP_TSHIRT",
                 "materials", List.of("COTTON"), "colors", List.of("WHITE"), "silhouettes", List.of()));
         Map<String, Object> raw = new HashMap<>(Map.of("items", List.of(garment), "keywords", List.of("티셔츠"),
-                "seasons", List.of(), "sentiment", "neutral", "summary", "흰 티셔츠"));
+                "seasons", List.of(), "summary", "흰 티셔츠"));
 
         assertThat(TrendResultValidator.validate(raw, image).errors())
                 .anyMatch(e -> e.contains("materials") && e.contains("COTTON"));

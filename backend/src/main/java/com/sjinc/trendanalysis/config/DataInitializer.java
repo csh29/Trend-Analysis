@@ -3,6 +3,7 @@ package com.sjinc.trendanalysis.config;
 import com.sjinc.trendanalysis.domain.ComCd;
 import com.sjinc.trendanalysis.domain.ComCdGroup;
 import com.sjinc.trendanalysis.domain.Program;
+import com.sjinc.trendanalysis.domain.TrendItemValue;
 import com.sjinc.trendanalysis.domain.User;
 import com.sjinc.trendanalysis.domain.UserProgramPermission;
 import com.sjinc.trendanalysis.repository.ComCdGroupRepository;
@@ -17,6 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,10 +47,12 @@ public class DataInitializer implements CommandLineRunner {
     private final ComCdGroupRepository comCdGroupRepository;
     private final ComCdRepository comCdRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     @Transactional // 권한 일괄 삭제(@Modifying 쿼리)는 트랜잭션 안에서만 돈다
     public void run(String... args) {
+        dropRetiredColumns();
         seedRoleIfAbsent();
         seedMenuGroupIfAbsent();
         seedTrendMenuGroupIfAbsent();
@@ -59,6 +63,49 @@ public class DataInitializer implements CommandLineRunner {
         // 기존 DB에 새로 등록한 프로그램은 관리자에게 바로 권한을 준다(사용자별 권한관리에서 조정).
         userRepository.findByUsername("admin").ifPresent(admin ->
                 added.forEach(program -> userProgramPermissionRepository.save(allButtonsPermission(admin, program))));
+    }
+
+    /**
+     * 엔티티에서 뺀 컬럼을 기존 파일 DB에서 지운다 — ddl-auto=update는 컬럼을 지우지 않고, NOT NULL로 남으면 새 행 저장이 깨진다.
+     * 분석이 다시 대기열에 들어가기(ApplicationReadyEvent) 전에 돈다.
+     */
+    private void dropRetiredColumns() {
+        // 2026-10-23 사용자 결정: 어느 모델이 분석했는지는 보관할 필요가 없다(화면에서도 뺐다). 모델은 설정 claude.model과 로그로 안다
+        jdbcTemplate.execute("ALTER TABLE trend_items DROP COLUMN IF EXISTS model");
+        // 2026-10-23 사용자 결정: 감성(긍정·중립·부정)은 트렌드 판단에 쓰지 않아 뽑지도 저장하지도 않는다
+        jdbcTemplate.execute("ALTER TABLE trend_items DROP COLUMN IF EXISTS sentiment");
+        // 2026-10-23 사용자 결정: 트렌드 분석 유형에서 아이템명을 뺐다(아이템 종류와 뜻이 겹친다) — 지난 집계 줄도 지운다
+        jdbcTemplate.update("DELETE FROM trend_weekly_stats WHERE value_type = ?", TrendItemValue.ITEM);
+    }
+
+    /** 초안에 나중에 더한 코드 — 기존 DB에 없으면 그룹 끝에 넣는다(그룹 → 코드값). 화면에서 지운 코드도 다시 들어온다. */
+    private static final java.util.Map<String, List<String>> NEW_CODES = java.util.Map.of(
+            // 2026-10-23 사용자 결정: 무스탕을 따로 센다(몸판이 무스탕일 때만 — 깃·안감만이면 주 소재 규칙으로 빠진다)
+            TrendCodes.MATERIAL, List.of("SHEARLING"));
+
+    private void addNewCodes(String group) {
+        List<ComCd> codes = comCdRepository.findByCodeGroupOrderBySortOrderAsc(group);
+        int sort = codes.stream().mapToInt(c -> c.getSortOrder() == null ? 0 : c.getSortOrder()).max().orElse(0);
+        for (String value : NEW_CODES.getOrDefault(group, List.of())) {
+            if (codes.stream().anyMatch(c -> c.getCodeValue().equals(value))) continue;
+            String[] code = TrendCodes.SEED.get(group).stream().filter(c -> c[0].equals(value)).findFirst().orElseThrow();
+            comCdRepository.save(ComCd.builder().codeGroup(group).codeValue(value).codeName(code[1])
+                    .attr1(code.length > 2 ? code[2] : null).sortOrder(++sort).useYn("Y").build());
+            log.info("공통코드 {}에 {}({})를 추가했습니다.", group, value, code[1]);
+        }
+    }
+
+    /** 초안에서 뺀 코드 — 기존 DB에 남아 있으면 지운다(그룹 → 코드값). */
+    private static final java.util.Map<String, List<String>> RETIRED_CODES = java.util.Map.of(
+            TrendCodes.VALUE_TYPE, List.of(TrendItemValue.ITEM));
+
+    private void deleteRetiredCodes(String group) {
+        List<String> retired = RETIRED_CODES.getOrDefault(group, List.of());
+        comCdRepository.findByCodeGroupOrderBySortOrderAsc(group).stream().filter(c -> retired.contains(c.getCodeValue()))
+                .forEach(c -> {
+                    comCdRepository.delete(c);
+                    log.info("공통코드 {}의 {}({})를 지웠습니다.", group, c.getCodeValue(), c.getCodeName());
+                });
     }
 
     /** 역할(공통코드 ROLE) — 사용자 관리 화면의 select. 정렬순서가 등급이다(작을수록 높음). */
@@ -102,6 +149,9 @@ public class DataInitializer implements CommandLineRunner {
             String group = groups.get(g);
             if (comCdGroupRepository.existsById(group)) {
                 fillAttributesIfBlank(group);
+                renameOldDefaults(group);
+                deleteRetiredCodes(group);
+                addNewCodes(group);
                 continue;
             }
             comCdGroupRepository.save(ComCdGroup.builder()
@@ -125,6 +175,29 @@ public class DataInitializer implements CommandLineRunner {
             TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
             TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다. 속성 RAG = 질문 답변에 참고 집계로 보낸다",
             TrendCodes.TREND_WORD, "질문에 이 말(코드명)이 있으면 유행 질문으로 본다 — AI 질문 해석이 실패했을 때 쓰는 규칙");
+
+    /**
+     * 초안에서 이름을 바꾼 코드의 예전 기본 이름(그룹 → 코드값 → 예전 이름). 기존 DB에서 이름이 아직 예전 기본값이면 새 이름으로 바꾼다 —
+     * 이름의 괄호는 AI가 다른 표기를 그 코드로 옮기는 힌트라, 기존 DB에도 들어가야 분석이 바뀐다.
+     */
+    private static final java.util.Map<String, java.util.Map<String, String>> OLD_DEFAULT_NAMES = java.util.Map.of(
+            // 2026-10-23 사용자 결정: 스타디움(바시티) 재킷은 블루종으로 센다(기타 아우터로 빠졌다)
+            // 2026-10-23 사용자 결정: 셋업은 수트·트레이닝 셋업만이다 — 플리스·니트 매칭 세트까지 셋업으로 빨려 들어가 이름에 범위를 넣었다
+            TrendCodes.ITEM_TYPE, java.util.Map.of("OUTER_BLOUSON", "블루종(봄버·항공 점퍼)",
+                    "SETUP_SUIT", "수트·셋업", "SETUP_TRACKSUIT", "트레이닝 셋업"));
+
+    private void renameOldDefaults(String group) {
+        java.util.Map<String, String> oldNames = OLD_DEFAULT_NAMES.get(group);
+        if (oldNames == null) return;
+        for (ComCd code : comCdRepository.findByCodeGroupOrderBySortOrderAsc(group)) {
+            String newName = TrendCodes.SEED.get(group).stream().filter(c -> c[0].equals(code.getCodeValue()))
+                    .map(c -> c[1]).findFirst().orElse(null);
+            if (code.renameIfStill(oldNames.get(code.getCodeValue()), newName)) {
+                comCdRepository.save(code);
+                log.info("공통코드 {}의 {} 이름을 '{}'로 바꿨습니다.", group, code.getCodeValue(), newName);
+            }
+        }
+    }
 
     /** 이미 있는 그룹: 초안에 속성이 있는데 DB 코드의 속성이 비었으면 채운다(공통코드 속성 칸 도입 전 DB, 2026-10-22). */
     private void fillAttributesIfBlank(String group) {

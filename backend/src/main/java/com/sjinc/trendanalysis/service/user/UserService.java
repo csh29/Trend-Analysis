@@ -6,6 +6,7 @@ import com.sjinc.trendanalysis.dto.user.PasswordChangeRequest;
 import com.sjinc.trendanalysis.dto.user.UserRequest;
 import com.sjinc.trendanalysis.dto.user.UserResponse;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
+import com.sjinc.trendanalysis.repository.UserPreferenceRepository;
 import com.sjinc.trendanalysis.repository.UserProgramPermissionRepository;
 import com.sjinc.trendanalysis.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final UserProgramPermissionRepository userProgramPermissionRepository;
+    private final UserPreferenceRepository userPreferenceRepository;
     private final ComCdRepository comCdRepository;
     private final PasswordEncoder passwordEncoder;
 
@@ -157,6 +159,7 @@ public class UserService {
         }
 
         userProgramPermissionRepository.deleteByUserId(id);
+        userPreferenceRepository.deleteByUserId(id); // 개인 설정(홈 배치 등) — FK
         userRepository.deleteById(id);
     }
 

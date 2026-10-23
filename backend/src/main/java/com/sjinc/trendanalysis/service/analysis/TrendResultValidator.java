@@ -18,7 +18,6 @@ import java.util.Set;
  */
 public final class TrendResultValidator {
 
-    public static final List<String> SENTIMENTS = List.of("positive", "neutral", "negative");
     static final int MAX_ITEMS = 5;
     static final int MAX_ITEM_NAME_LENGTH = 50;
     static final int MAX_KEYWORDS = 8;
@@ -32,8 +31,7 @@ public final class TrendResultValidator {
     }
 
     /** 검증을 통과한 결과. items의 첫 번째가 대표 아이템이다. */
-    public record Validated(List<Garment> items, List<String> keywords, List<String> seasons, String sentiment,
-                            String summary) {
+    public record Validated(List<Garment> items, List<String> keywords, List<String> seasons, String summary) {
         public String mainCategory() {
             return items.get(0).category();
         }
@@ -93,11 +91,6 @@ public final class TrendResultValidator {
         // 시즌은 판단할 수 없으면 비어도 된다(사계절 옷만 있는 사진 등)
         List<String> seasons = codeValues(raw.get("seasons"), "seasons", TrendCodes.SEASON, codes, errors);
 
-        String sentiment = text(raw.get("sentiment"));
-        if (!SENTIMENTS.contains(sentiment)) {
-            errors.add("sentiment가 허용 값이 아닙니다: " + sentiment);
-        }
-
         String summary = text(raw.get("summary")).trim();
         if (summary.isEmpty()) {
             errors.add("summary가 비어 있습니다.");
@@ -108,7 +101,7 @@ public final class TrendResultValidator {
         if (!errors.isEmpty()) {
             return new Outcome(null, errors);
         }
-        return new Outcome(new Validated(List.copyOf(items), List.copyOf(keywords), seasons, sentiment, summary), List.of());
+        return new Outcome(new Validated(List.copyOf(items), List.copyOf(keywords), seasons, summary), List.of());
     }
 
     private static Garment garment(Object raw, int index, TrendCodeBook codes, List<String> errors) {

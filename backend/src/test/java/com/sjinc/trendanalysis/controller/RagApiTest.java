@@ -171,11 +171,20 @@ class RagApiTest {
 
     @Test
     @WithMockUser(username = "admin")
-    void AI_서비스_실패는_502와_사유() throws Exception {
-        when(aiClient.answer(any(), any())).thenThrow(new AiCallException("AI 서비스에 연결하지 못했습니다.", true));
-
+    void AI_서비스_실패는_502와_일반_안내_서버_정보는_숨긴다() throws Exception {
+        // 실제 연결 실패 사유에는 AI 서비스 주소와 실행 스크립트가 들어 있다 — 화면(챗봇)에 그대로 보이면 안 된다
+        when(aiClient.answer(any(), any())).thenThrow(new AiCallException(
+                "AI 서비스(http://127.0.0.1:8001)에 연결하지 못했습니다. ai 폴더의 start-ai.cmd로 서비스를 띄웠는지 확인하세요.", true));
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("질문")))
-                .andExpect(status().isBadGateway());
+                .andExpect(status().isBadGateway())
+                .andExpect(content().string("AI 서비스가 잠시 응답하지 않습니다. 잠시 후 다시 시도해 주세요."));
+
+        // 다시 해도 안 되는 실패(키 오류 등)도 설정 이름을 숨긴다
+        org.mockito.Mockito.doThrow(new AiCallException("Claude API 키가 올바르지 않습니다(claude.api.key).", false))
+                .when(aiClient).answer(any(), any());
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("질문")))
+                .andExpect(status().isBadGateway())
+                .andExpect(content().string(org.hamcrest.Matchers.not(org.hamcrest.Matchers.containsString("claude.api.key"))));
     }
 
     @Test

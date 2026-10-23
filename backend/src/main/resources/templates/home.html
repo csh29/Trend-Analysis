@@ -8,15 +8,78 @@
     <style>
         /* 화면 공통 뼈대(:root, .app-shell 등)는 common-ui.css가 담당한다. 여기는 이 화면 전용
            위젯(요약 카드, 막대 차트, 질문창·답변)만 남긴다. security-monitoring 홈과 같은 구조다. */
-        #homePanel{ display:flex; flex-direction:column; gap:20px; }
+        /* 홈은 화면 높이에 맞춘다 — 챗봇이 남은 높이를 채워 페이지 스크롤 없이 입력창이 보이게(2026-10-23 사용자 요청) */
+        #homePanel{ display:flex; flex-direction:column; gap:16px; flex:1; min-height:0; }
 
-        /* 자동 새로고침 — 카드 위 오른쪽에 작게. 갱신 실패는 경고색으로 시각과 함께 남긴다. */
-        .refresh-bar{ display:flex; align-items:center; justify-content:flex-end; gap:12px; margin-bottom:-8px; font-size:12px; color:var(--text-sub); }
+        /* 새로고침 줄 끝의 버튼(요약 접기, 홈 편집) */
+        .home-toggle{ border:1px solid var(--accent); background:var(--card); color:var(--accent); border-radius:6px;
+            padding:5px 10px; font:inherit; font-size:12px; font-weight:700; cursor:pointer; }
+        .home-toggle:hover, .home-toggle:focus-visible{ background:var(--accent-soft); outline:none; }
+        .home-toggle:disabled{ opacity:.4; cursor:default; background:var(--card); }
+        .home-toggle[hidden]{ display:none; }
+
+        /* 요약 접기 — 접으면 카드 패널이 숫자 한 줄(.summary-strip)이 되고 챗봇이 넓어진다. 누르면 펼친다 */
+        .summary-strip{ display:none; align-items:center; flex-wrap:wrap; gap:6px 16px; width:100%;
+            background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md); padding:10px 18px;
+            font:inherit; font-size:12px; color:var(--text-sub); text-align:left; cursor:pointer; }
+        .summary-strip:hover, .summary-strip:focus-visible{ border-color:var(--accent); outline:none; }
+        .summary-strip b{ margin-left:4px; font-size:14px; font-weight:800; color:var(--navy); }
+        .summary-strip .hot b, .summary-strip b.warn{ color:var(--accent); }
+        .summary-strip .sep{ width:1px; height:14px; background:var(--line); }
+        .summary-strip .more{ margin-left:auto; font-weight:700; color:var(--accent); }
+        #homePanel.is-collapsed .summary-strip{ display:flex; }
+
+        /* 패널 격자(사용자별 홈 배치, 2026-10-23) — 순서·넓이(half/full)·숨김은 사용자 설정이고, 줄·칸은 스크립트(placePanels)가
+           grid-row/column으로 정한다. 챗봇이 있는 줄만 남은 높이를 채운다(1fr). */
+        .home-grid{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:20px; flex:1; min-height:0; }
+        .home-grid > .panel{ min-width:0; }
+        .home-grid > .panel.is-hidden{ display:none; }
+        #homePanel.is-collapsed .home-grid > .panel:not([data-panel="chat"]){ display:none; }
+        .panel-body{ display:contents; } /* 자동 새로고침이 갈아 끼우는 단위 — 편집 도구(.panel-tools)는 그대로 둔다 */
+
+        /* 홈 편집 — 이때만 손잡이·넓이·숨기기가 보인다(평소에 실수로 끌리지 않게). 숨긴 패널은 흐리게 보여 다시 켤 수 있게 한다 */
+        .edit-banner{ display:flex; align-items:center; gap:10px; background:var(--navy); color:#fff; border-radius:10px;
+            padding:10px 14px; font-size:12.5px; }
+        .edit-banner[hidden]{ display:none; }
+        .edit-banner .hint{ color:#c9c9e6; font-size:11.5px; }
+        .edit-banner .actions{ margin-left:auto; display:flex; gap:6px; }
+        .edit-banner .btn.primary{ background:var(--accent); border-color:var(--accent); } /* 공통 primary(남색)는 배너와 같은 색이라 */
+        .panel-tools{ display:none; align-items:center; gap:8px; font-size:12px; color:var(--text-sub); }
+        .chat > .panel-tools{ padding:12px 16px 0; }
+        .panel-tools .name{ font-weight:800; color:var(--navy); }
+        .panel-tools .chips{ margin-left:auto; display:flex; gap:4px; }
+        .panel-handle{ flex:none; width:28px; height:28px; border:1px solid var(--line); border-radius:6px; background:var(--bg);
+            color:#8b8bb3; font-size:15px; line-height:1; cursor:grab; }
+        .panel-handle:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+        .panel-chip{ border:1px solid var(--line); background:var(--card); border-radius:12px; padding:3px 10px; font:inherit;
+            font-size:11.5px; color:var(--text-sub); cursor:pointer; }
+        .panel-chip[aria-pressed="true"]{ border-color:var(--navy); color:var(--navy); font-weight:700; }
+        .panel-chip:disabled{ opacity:.4; cursor:not-allowed; }
+        #homePanel.is-editing .panel-tools{ display:flex; }
+        #homePanel.is-editing .home-grid > .panel{ border:1.5px dashed #b9b9d6; }
+        #homePanel.is-editing .home-grid > .panel.is-hidden{ display:flex; opacity:.45; }
+        /* 편집 중엔 질문·링크를 막는다(.panel-body는 display:contents라 그 자식에 건다) */
+        #homePanel.is-editing .home-grid > .panel > :not(.panel-tools):not(.panel-body),
+        #homePanel.is-editing .panel-body > *{ pointer-events:none; opacity:.55; }
+        #homePanel.is-editing .home-grid > .panel[draggable="true"]{ cursor:grab; }
+        #homePanel.is-editing .home-grid > .panel .panel-chip{ cursor:pointer; }
+        .home-grid > .panel.is-dragging{ opacity:.35; cursor:grabbing; }
+        .home-grid > .panel{ position:relative; }
+        .home-grid > .panel.is-drop{ border-color:var(--accent) !important; box-shadow:0 0 0 3px var(--accent-soft); }
+        .home-grid > .panel.is-drop::after{ content:'여기와 자리 바꾸기'; position:absolute; inset:0; display:flex; align-items:center;
+            justify-content:center; border-radius:inherit; background:rgba(255,228,236,.75); color:var(--accent); font-size:14px;
+            font-weight:800; pointer-events:none; }
+        .home-toast{ position:fixed; right:24px; bottom:24px; z-index:950; background:var(--navy); color:#fff; border-radius:8px;
+            padding:10px 14px; font-size:12.5px; box-shadow:0 4px 12px rgba(25,25,64,.25); opacity:0; transition:opacity .2s; pointer-events:none; }
+        .home-toast.show{ opacity:1; }
+
+        /* 자동 새로고침·홈 버튼 줄 — 새로고침 쪽은 왼쪽, 요약 접기·홈 편집은 오른쪽(2026-10-23 사용자 요청). 갱신 실패는 경고색으로 시각과 함께 남긴다. */
+        .refresh-bar{ display:flex; align-items:center; justify-content:flex-start; flex-wrap:wrap; gap:12px; margin-bottom:-4px; font-size:12px; color:var(--text-sub); }
         .refresh-bar label{ display:flex; align-items:center; gap:4px; cursor:pointer; }
+        .refresh-bar #homeSummaryToggle{ margin-left:auto; } /* 갱신 시각·자동 새로고침·새로고침은 왼쪽, 요약 접기·홈 편집은 오른쪽 */
         .refresh-bar .is-error{ color:var(--accent); font-weight:700; }
 
-        /* 트렌드 집계(P-05)와 분석 현황(P-03)을 좌우 카드로 나란히 둔다. */
-        .overview{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:20px; }
+        /* 트렌드 집계(P-05)와 분석 현황(P-03) 카드 */
         .domain-card{
             background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
             padding:20px 22px; display:flex; flex-direction:column; gap:16px;
@@ -55,7 +118,7 @@
         /* 트렌드 챗봇(P-06 RAG) — 대화형(2026-10-22 사용자 요청). 질문은 오른쪽 말풍선, 답은 왼쪽 AI 말풍선으로 쌓인다.
            이어 묻기("그럼 하의는?")를 알아듣게 최근 질문·해석 몇 건을 같이 보낸다. 대화는 이 화면에만 있고 저장하지 않는다. */
         .chat{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-md);
-            display:flex; flex-direction:column; height:clamp(480px, 74vh, 780px); }
+            display:flex; flex-direction:column; min-height:360px; }
         .chat-head{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:16px 22px; border-bottom:1px solid var(--line); }
         .chat-log{ position:relative; flex:1; min-height:0; overflow-y:auto; padding:20px 22px; display:flex; flex-direction:column; gap:18px; }
         .msg{ display:flex; gap:10px; align-items:flex-start; }
@@ -148,8 +211,23 @@
             font-size:18px; line-height:1; color:var(--text-sub); cursor:pointer; }
         .src-drawer .drawer-close:hover{ background:var(--bg); color:var(--text); }
         .src-drawer .drawer-body{ flex:1; overflow:auto; padding:16px 18px; display:flex; flex-direction:column; gap:14px; }
-        .src-drawer .drawer-img{ display:block; width:100%; max-height:60vh; object-fit:contain; background:var(--bg); border-radius:10px; }
+        .src-drawer .drawer-img{ display:block; width:100%; max-height:42vh; object-fit:contain; background:var(--bg); border-radius:10px; }
         .src-drawer .drawer-text{ font-size:12.5px; line-height:1.7; color:var(--text); white-space:pre-wrap; }
+        /* 분석 요약 — 색인용 문장(요약·"키워드: …"·"아이템: …")을 나눠 요약·키워드·시즌·아이템 카드로 보인다 */
+        .src-drawer .drawer-sec-list{ display:flex; flex-direction:column; gap:16px; }
+        .src-drawer .drawer-sec{ display:flex; flex-direction:column; gap:6px; }
+        .src-drawer .drawer-sec > h4{ margin:0; font-size:11.5px; font-weight:700; color:var(--text-sub); }
+        .src-drawer .drawer-summary{ margin:0; font-size:13.5px; line-height:1.75; color:var(--text); }
+        .src-drawer .drawer-chips{ display:flex; flex-wrap:wrap; gap:6px; }
+        .src-drawer .drawer-chips span{ padding:3px 9px; border-radius:999px; background:var(--bg); border:1px solid var(--line);
+            font-size:12px; color:var(--text); }
+        .src-drawer .drawer-items{ display:flex; flex-direction:column; gap:8px; }
+        .src-drawer .drawer-item{ border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+        .src-drawer .drawer-item .kind{ font-size:13px; font-weight:800; color:var(--navy); }
+        .src-drawer .drawer-item .kind small{ margin-left:6px; font-size:11.5px; font-weight:400; color:var(--text-sub); }
+        .src-drawer .drawer-item dl{ display:grid; grid-template-columns:44px 1fr; gap:4px 8px; margin:8px 0 0; font-size:12.5px; }
+        .src-drawer .drawer-item dt{ color:var(--text-sub); }
+        .src-drawer .drawer-item dd{ margin:0; color:var(--text); }
         .answer-sources .info{ flex:none; font-size:11.5px; color:var(--text-sub); white-space:nowrap; }
         .answer-sources .excerpt{ margin-top:2px; font-size:12px; line-height:1.5; color:var(--text-sub);
             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
@@ -161,11 +239,16 @@
         .facts-box .bars{ margin-top:0; gap:6px; }
         .facts-box .bar-row{ grid-template-columns:150px 1fr; }
         .facts-box .facts-line{ font-size:12px; color:var(--text); line-height:1.6; }
+        .facts-box .bar-sub{ font-size:11px; color:var(--text-sub); margin:-2px 0 2px 12px; }
         .facts-box .facts-line b{ color:var(--text-sub); font-weight:700; margin-right:6px; }
 
         /* 좁으면 위아래로 */
         @media (max-width:1100px){
-            .overview{ grid-template-columns:1fr; }
+            .home-grid{ grid-template-columns:1fr; }
+        }
+        /* 아주 좁으면 화면이 높이를 고정하지 않고 늘어난다(common-ui) — 챗봇 높이를 따로 준다 */
+        @media (max-width:760px){
+            .chat{ height:75vh; }
         }
 
         /* 홈 화면이 탭 셸 역할도 한다 — 사이드바에서 홈 외 메뉴를 열면 이 안에 탭(iframe)이
@@ -189,11 +272,36 @@
                 <span id="homeRefreshedAt"></span>
                 <label><input type="checkbox" id="homeAutoRefresh"> 자동 새로고침(1분)</label>
                 <button type="button" class="btn" id="homeRefreshNow">새로고침</button>
+                <button type="button" class="home-toggle" id="homeSummaryToggle" aria-expanded="true">요약 접기 ▲</button>
+                <button type="button" class="home-toggle" id="homeEditToggle">✎ 홈 편집</button>
             </div>
-            <!-- 카드 링크는 사이드바 메뉴를 대신 눌러 탭으로 연다(tabs.js — 홈이 탭 셸이라 일반 링크로 가면 탭 화면을 벗어난다).
+            <!-- 홈 편집(사용자별 배치) — 저장하면 로그인한 계정에 남아 다른 PC에서도 같은 배치가 열린다 -->
+            <div class="edit-banner" id="homeEditBanner" hidden>
+                <span>✎ 홈 편집 중</span>
+                <span class="hint">패널을 잡아 다른 패널 위에 놓으면 자리가 바뀝니다 · 키보드는 ⠿에서 ↑↓ · 넓이·숨기기는 패널 오른쪽</span>
+                <span class="actions">
+                    <button type="button" class="btn" id="homeEditDefault">기본 배치로</button>
+                    <button type="button" class="btn" id="homeEditCancel">취소</button>
+                    <button type="button" class="btn primary" id="homeEditSave">저장</button>
+                </span>
+            </div>
+            <!-- 접었을 때만 보이는 숫자 한 줄. 자동 새로고침이 패널 내용과 같이 갈아 끼운다. 누르면 펼친다 -->
+            <button type="button" class="summary-strip" title="요약 펼치기" th:with="h=${home}">
+                <span class="hot">급상승<b th:text="${h.surgeKeywordCount}">0</b></span>
+                <span>신규<b th:text="${h.newKeywordCount}">0</b></span>
+                <span>키워드<b th:text="${h.keywordCount}">0</b></span>
+                <span class="sep"></span>
+                <span>분석 완료<b th:text="${h.doneCount}">0</b></span>
+                <span>대기<b th:text="${h.pendingCount}">0</b></span>
+                <span>실패<b th:classappend="${h.failedCount > 0} ? 'warn'" th:text="${h.failedCount}">0</b></span>
+                <span class="more">펼치기 ▼</span>
+            </button>
+            <!-- 패널 격자 — data-panel 이름은 서버 HomeLayoutService.PANELS와 같다(패널을 더하면 둘 다).
+                 카드 링크는 사이드바 메뉴를 대신 눌러 탭으로 연다(tabs.js — 홈이 탭 셸이라 일반 링크로 가면 탭 화면을 벗어난다).
                  권한이 없어 메뉴가 없으면 눌러도 아무 일도 없다. -->
-            <div class="overview" th:with="h=${home}">
-                <section class="domain-card">
+            <div class="home-grid" id="homeGrid" th:attr="data-layout=${homeLayout}" th:with="h=${home}">
+                <section class="domain-card panel" data-panel="trend" aria-label="트렌드 집계">
+                    <div class="panel-body" data-panel-body="trend">
                     <div class="domain-head">
                         <div>
                             <div class="domain-title">트렌드 집계</div>
@@ -215,9 +323,11 @@
                         <div class="domain-bars-title">키워드 언급 TOP 5</div>
                         <div th:replace="~{fragments/rank-bars :: rankBars(${h.topKeywords}, '기준 주에 집계된 키워드가 없습니다.')}"></div>
                     </div>
+                    </div>
                 </section>
 
-                <section class="domain-card">
+                <section class="domain-card panel" data-panel="analysis" aria-label="분석 현황">
+                    <div class="panel-body" data-panel-body="analysis">
                     <div class="domain-head">
                         <div>
                             <div class="domain-title">분석 현황</div>
@@ -237,12 +347,12 @@
                         <div class="domain-bars-title">카테고리 언급 TOP 5 (기준 주)</div>
                         <div th:replace="~{fragments/rank-bars :: rankBars(${h.topCategories}, '기준 주에 집계된 카테고리가 없습니다.')}"></div>
                     </div>
+                    </div>
                 </section>
-            </div>
 
-            <!-- P-06 RAG 트렌드 챗봇: 분석이 끝난 자료 안에서만 답하고, 근거가 기준 유사도에 못 미치면 "근거 자료 없음",
-                 패션·트렌드 질문이 아니면 답하지 않는다. -->
-            <section class="chat" aria-label="트렌드 챗봇">
+                <!-- P-06 RAG 트렌드 챗봇: 분석이 끝난 자료 안에서만 답하고, 근거가 기준 유사도에 못 미치면 "근거 자료 없음",
+                     패션·트렌드 질문이 아니면 답하지 않는다. 숨길 수 없다(홈의 핵심). -->
+                <section class="chat panel" data-panel="chat" aria-label="트렌드 챗봇">
                 <div class="chat-head">
                     <div>
                         <div class="domain-title">트렌드 챗봇</div>
@@ -269,8 +379,10 @@
                     <button type="button" class="chat-send" id="ragAsk" title="보내기 (Enter)" aria-label="보내기" disabled>↑</button>
                 </label>
                 <div class="chat-foot"><span>Enter 보내기 · Shift+Enter 줄바꿈</span><span id="chatCount">0 / 500</span></div>
-            </section>
+                </section>
+            </div>
         </div>
+        <div class="home-toast" id="homeToast" role="status" aria-live="polite"></div>
 
         <div id="tabPanels"></div>
     </main>
@@ -301,15 +413,305 @@
     });
 
     /**
-     * 자동 새로고침(security-monitoring 홈과 같은 방식). 페이지를 다시 읽으면 열린 탭과 질문창의 답이 사라지므로, 서버가 그린
-     * 홈을 받아 카드 영역(.overview)만 바꿔 끼운다. 홈이 보일 때만 돌고(다시 보일 때 주기가 지났으면 바로 갱신),
-     * 켜고 끈 상태는 이 브라우저에만 기억한다. 분석이 끝나거나 집계가 돌면 숫자가 바뀐다.
+     * 홈 배치(사용자별) + 요약 접기 + 자동 새로고침. 배치·접기·자동 새로고침 켜기는 로그인한 계정에 저장한다
+     * (`/api/users/me/home-layout`, 2026-10-23 사용자 결정) — 다른 PC·브라우저에서도 같은 홈이 열린다.
+     * 처음 그릴 배치는 서버가 #homeGrid의 data-layout에 넣어 준다(따로 불러오면 기본 배치가 잠깐 보였다가 바뀐다).
      */
     (function () {
-        const INTERVAL_MS = 60 * 1000;
-        const STORAGE_KEY = 'home.autoRefresh';
+        const API = '/api/users/me/home-layout';
         const panel = document.getElementById('homePanel');
-        const toggle = document.getElementById('homeAutoRefresh');
+        const grid = document.getElementById('homeGrid');
+        const narrow = window.matchMedia('(max-width:1100px)'); // 좁으면 한 줄에 하나, 끌기 없음
+        const NAMES = { trend: '트렌드 집계', analysis: '분석 현황', chat: '트렌드 챗봇' };
+        const DEFAULT_PANELS = [{ id: 'trend', width: 'half', hidden: false }, { id: 'analysis', width: 'half', hidden: false },
+            { id: 'chat', width: 'full', hidden: false }];
+        const CHAT_ROW = 'minmax(360px, 1fr)';
+
+        let layout = parse(grid.dataset.layout); // 저장된 배치
+        let draft = null;                        // 편집 중인 배치(편집 중이 아니면 null)
+
+        function copyPanels(panels) {
+            return panels.map(function (p) { return { id: p.id, width: p.width, hidden: !!p.hidden }; });
+        }
+
+        function parse(json) {
+            try {
+                const l = JSON.parse(json);
+                if (l && Array.isArray(l.panels)) return l;
+            } catch (e) { /* 아래 기본 배치 */ }
+            return { panels: copyPanels(DEFAULT_PANELS), summaryCollapsed: false, autoRefresh: true };
+        }
+
+        function current() { return draft || layout; }
+        function panelEl(id) { return grid.querySelector('.panel[data-panel="' + id + '"]'); }
+
+        // ── 배치 그리기 ──────────────────────────────────────────
+        /** 순서대로 줄을 채운다 — half 둘이 한 줄, full은 한 줄 전체. 챗봇이 있는 줄만 남은 높이를 채운다. */
+        function placePanels() {
+            const l = current();
+            const editing = !!draft;
+            const collapsed = !editing && l.summaryCollapsed;
+            panel.classList.toggle('is-collapsed', collapsed);
+            let row = 1, col = 0, chatRow = 0;
+            l.panels.forEach(function (p) {
+                const el = panelEl(p.id);
+                if (!el) return;
+                el.classList.toggle('is-hidden', !!p.hidden);
+                // 편집 중엔 패널 전체를 잡아 끈다(2026-10-23 사용자 요청 — 손잡이만 잡는 게 불편). 내용은 편집 중 눌리지 않으므로 클릭과 섞이지 않는다
+                el.draggable = editing && !narrow.matches;
+                updateTools(el, p);
+                const visible = editing || (!p.hidden && !(collapsed && p.id !== 'chat'));
+                if (!visible) {
+                    el.style.gridRow = '';
+                    el.style.gridColumn = '';
+                    return;
+                }
+                if (narrow.matches || p.width === 'full') {
+                    if (col > 0) { row++; col = 0; }
+                    el.style.gridRow = String(row);
+                    el.style.gridColumn = '1 / -1';
+                    if (p.id === 'chat') chatRow = row;
+                    row++;
+                } else {
+                    el.style.gridRow = String(row);
+                    el.style.gridColumn = String(col + 1);
+                    if (p.id === 'chat') chatRow = row;
+                    if (++col === 2) { row++; col = 0; }
+                }
+            });
+            const rows = col > 0 ? row : row - 1;
+            const tracks = [];
+            for (let r = 1; r <= rows; r++) tracks.push(r === chatRow ? CHAT_ROW : 'auto');
+            grid.style.gridTemplateRows = tracks.join(' ');
+            document.getElementById('homeSummaryToggle').textContent = collapsed ? '요약 펼치기 ▼' : '요약 접기 ▲';
+            document.getElementById('homeSummaryToggle').setAttribute('aria-expanded', String(!collapsed));
+        }
+
+        // ── 편집 도구(패널마다 손잡이·넓이·숨기기) ──────────────────────
+        function chip(text, onClick) {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'panel-chip';
+            b.textContent = text;
+            b.addEventListener('click', onClick);
+            return b;
+        }
+
+        function draftPanel(id) { return draft.panels.find(function (p) { return p.id === id; }); }
+
+        grid.querySelectorAll('.panel').forEach(function (el) {
+            const id = el.dataset.panel;
+            const tools = document.createElement('div');
+            tools.className = 'panel-tools';
+            const handle = document.createElement('button');
+            handle.type = 'button';
+            handle.className = 'panel-handle';
+            handle.textContent = '⠿';
+            handle.title = '끌어서 옮기기 (키보드 ↑↓)';
+            handle.setAttribute('aria-label', NAMES[id] + ' 옮기기');
+            const name = document.createElement('span');
+            name.className = 'name';
+            name.textContent = NAMES[id] || id;
+            const chips = document.createElement('span');
+            chips.className = 'chips';
+            const half = chip('반', function () { draftPanel(id).width = 'half'; placePanels(); });
+            const full = chip('전체', function () { draftPanel(id).width = 'full'; placePanels(); });
+            const hide = chip('숨기기', function () { const p = draftPanel(id); p.hidden = !p.hidden; placePanels(); });
+            half.dataset.role = 'half';
+            full.dataset.role = 'full';
+            hide.dataset.role = 'hide';
+            if (id === 'chat') { hide.disabled = true; hide.title = '트렌드 챗봇은 숨길 수 없습니다'; }
+            chips.append(half, full, hide);
+            tools.append(handle, name, chips);
+            el.prepend(tools);
+
+            // 끌기는 편집 중 패널 어디를 잡아도 된다(placePanels가 draggable을 켠다). 손잡이는 키보드로 옮길 때 쓴다
+            handle.addEventListener('keydown', function (e) {
+                if (!draft) return;
+                const step = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : 0;
+                if (!step) return;
+                e.preventDefault();
+                move(id, draft.panels.findIndex(function (p) { return p.id === id; }) + step);
+                handle.focus();
+            });
+        });
+
+        function updateTools(el, p) {
+            el.querySelectorAll('.panel-chip').forEach(function (c) {
+                const on = c.dataset.role === 'hide' ? !!p.hidden : c.dataset.role === p.width;
+                c.setAttribute('aria-pressed', String(on));
+            });
+        }
+
+        /** 패널을 to번째 자리로 옮긴다(편집 중 배치). */
+        function move(id, to) {
+            const from = draft.panels.findIndex(function (p) { return p.id === id; });
+            to = Math.max(0, Math.min(draft.panels.length - 1, to));
+            if (from < 0 || from === to) return;
+            const moved = draft.panels.splice(from, 1)[0];
+            draft.panels.splice(to, 0, moved);
+            placePanels();
+        }
+
+        /**
+         * 두 패널의 자리를 바꾼다 — 순서와 넓이를 같이 바꿔 놓인 칸 모양이 그대로다(2026-10-23 사용자 요청: 놓은 패널과 자리 바꾸기).
+         * 넓이만 다시 고르려면 반/전체를 누른다.
+         */
+        function swap(aId, bId) {
+            const i = draft.panels.findIndex(function (p) { return p.id === aId; });
+            const j = draft.panels.findIndex(function (p) { return p.id === bId; });
+            if (i < 0 || j < 0 || i === j) return;
+            const a = draft.panels[i], b = draft.panels[j];
+            const width = a.width;
+            a.width = b.width;
+            b.width = width;
+            draft.panels[i] = b;
+            draft.panels[j] = a;
+            placePanels();
+        }
+
+        // ── 끌어서 자리 바꾸기 — 끄는 동안엔 놓을 패널만 강조하고, 놓을 때 한 번 바꾼다 ──
+        // (끄는 도중에 계속 옮기면 패널이 손 밑에서 움직여 엉뚱한 자리에 놓이거나 빈칸이 생겼다)
+        let dragId = null;
+
+        function dropTarget(e) {
+            const target = e.target.closest('.panel');
+            return target && target.dataset.panel !== dragId ? target : null;
+        }
+
+        function markDrop(target) {
+            grid.querySelectorAll('.panel.is-drop').forEach(function (p) { if (p !== target) p.classList.remove('is-drop'); });
+            if (target) target.classList.add('is-drop');
+        }
+
+        grid.addEventListener('dragstart', function (e) {
+            const el = e.target.closest('.panel');
+            if (!draft || !el || !el.draggable) { e.preventDefault(); return; }
+            dragId = el.dataset.panel;
+            el.classList.add('is-dragging');
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', dragId);
+        });
+        function over(e) {
+            if (!dragId) return;
+            e.preventDefault(); // 놓을 수 있는 곳이라고 알린다(없으면 drop이 오지 않는다)
+            const target = dropTarget(e);
+            e.dataTransfer.dropEffect = target ? 'move' : 'none';
+            markDrop(target);
+        }
+        grid.addEventListener('dragenter', over);
+        grid.addEventListener('dragover', over);
+        grid.addEventListener('dragleave', function (e) {
+            if (dragId && !grid.contains(e.relatedTarget)) markDrop(null);
+        });
+        grid.addEventListener('drop', function (e) {
+            if (!dragId) return;
+            e.preventDefault();
+            const target = dropTarget(e);
+            if (target) swap(dragId, target.dataset.panel);
+            markDrop(null);
+        });
+        grid.addEventListener('dragend', function () {
+            grid.querySelectorAll('.panel').forEach(function (p) { p.classList.remove('is-dragging', 'is-drop'); });
+            dragId = null;
+        });
+
+        // ── 편집 모드 ────────────────────────────────────────────
+        const banner = document.getElementById('homeEditBanner');
+        const editToggle = document.getElementById('homeEditToggle');
+        const summaryToggle = document.getElementById('homeSummaryToggle');
+
+        function setEditing(on) {
+            panel.classList.toggle('is-editing', on);
+            banner.hidden = !on;
+            editToggle.hidden = on;
+            summaryToggle.disabled = on;
+            placePanels();
+        }
+
+        editToggle.addEventListener('click', function () {
+            draft = { panels: copyPanels(layout.panels), summaryCollapsed: layout.summaryCollapsed, autoRefresh: layout.autoRefresh };
+            setEditing(true);
+            const first = grid.querySelector('.panel-handle');
+            if (first) first.focus();
+        });
+        document.getElementById('homeEditCancel').addEventListener('click', function () {
+            draft = null;
+            setEditing(false);
+            editToggle.focus();
+        });
+        document.getElementById('homeEditDefault').addEventListener('click', function () {
+            draft.panels = copyPanels(DEFAULT_PANELS);
+            placePanels();
+        });
+        document.getElementById('homeEditSave').addEventListener('click', function () {
+            // 접기·자동 새로고침은 편집 중에 바뀌었을 수 있다 — 지금 값을 같이 보낸다
+            const body = { panels: draft.panels, summaryCollapsed: layout.summaryCollapsed, autoRefresh: layout.autoRefresh };
+            request('PUT', body)
+                .then(function (saved) {
+                    layout = saved;
+                    draft = null;
+                    setEditing(false);
+                    toast('홈 배치를 내 계정에 저장했습니다');
+                })
+                .catch(function (err) { alert('홈 배치를 저장하지 못했습니다 — ' + err.message); });
+        });
+        // 좁아지고 넓어질 때 다시 놓는다 — 미디어 쿼리 change가 오지 않는 경우(창 크기 에뮬레이션 등)가 있어 resize로도 본다
+        let wasNarrow = narrow.matches;
+        function onResize() {
+            if (narrow.matches === wasNarrow) return;
+            wasNarrow = narrow.matches;
+            placePanels();
+        }
+        narrow.addEventListener('change', onResize);
+        window.addEventListener('resize', onResize);
+
+        // ── 저장 ────────────────────────────────────────────────
+        function request(method, body) {
+            return fetch(API, {
+                method: method,
+                silent: true,
+                headers: { 'Content-Type': 'application/json' },
+                body: body ? JSON.stringify(body) : undefined
+            }).then(function (res) {
+                if (!res.ok) return res.text().then(function (m) { throw new Error(m || 'HTTP ' + res.status); });
+                return res.json();
+            });
+        }
+
+        /** 접기·자동 새로고침처럼 바로 바뀌는 설정 — 저장이 실패해도 화면은 바뀐 대로 두고 알리기만 한다. */
+        function saveSettings() {
+            request('PUT', { panels: layout.panels, summaryCollapsed: layout.summaryCollapsed, autoRefresh: layout.autoRefresh })
+                .catch(function () { toast('설정을 계정에 저장하지 못했습니다(이 화면에서만 바뀜)'); });
+        }
+
+        let toastTimer = null;
+        function toast(text) {
+            const t = document.getElementById('homeToast');
+            t.textContent = text;
+            t.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(function () { t.classList.remove('show'); }, 2500);
+        }
+
+        // ── 요약 접기 ────────────────────────────────────────────
+        function setCollapsed(collapsed) {
+            if (draft || layout.summaryCollapsed === collapsed) return;
+            layout.summaryCollapsed = collapsed;
+            placePanels();
+            saveSettings();
+        }
+        summaryToggle.addEventListener('click', function () { setCollapsed(!layout.summaryCollapsed); });
+        // 숫자 띠는 자동 새로고침 때 새 요소로 바뀌므로 위임으로 받는다 — 누르면 펼친다
+        panel.addEventListener('click', function (e) {
+            if (e.target.closest('.summary-strip')) setCollapsed(false);
+        });
+
+        // ── 자동 새로고침(security-monitoring 홈과 같은 방식) ─────────────────
+        // 페이지를 다시 읽으면 열린 탭과 챗봇 대화가 사라지므로, 서버가 그린 홈을 받아 패널 내용(.panel-body)과 숫자 띠만 바꿔 끼운다.
+        // 패널 요소 자체는 그대로라 배치·편집 도구가 유지된다. 홈이 보일 때만 돌고(다시 보일 때 주기가 지났으면 바로 갱신).
+        const INTERVAL_MS = 60 * 1000;
+        const autoToggle = document.getElementById('homeAutoRefresh');
         const stamp = document.getElementById('homeRefreshedAt');
         let lastRefreshed = Date.now();
         let inFlight = false;
@@ -342,10 +744,16 @@
                 })
                 .then(function (html) {
                     if (html === null) return;
-                    // DOMParser로 만든 문서의 스크립트는 실행되지 않는다. 같은 서버가 그린 템플릿의 카드 영역만 가져온다.
-                    const next = new DOMParser().parseFromString(html, 'text/html').querySelector('#homePanel .overview');
-                    if (!next) throw new Error('카드 영역 없음');
-                    panel.querySelector('.overview').replaceWith(document.importNode(next, true));
+                    // DOMParser로 만든 문서의 스크립트는 실행되지 않는다. 같은 서버가 그린 템플릿에서 갈아 끼울 부분만 가져온다.
+                    const doc = new DOMParser().parseFromString(html, 'text/html');
+                    const strip = doc.querySelector('#homePanel .summary-strip');
+                    const bodies = doc.querySelectorAll('#homeGrid [data-panel-body]');
+                    if (!strip || !bodies.length) throw new Error('패널 내용 없음');
+                    panel.querySelector('.summary-strip').replaceWith(document.importNode(strip, true));
+                    bodies.forEach(function (next) {
+                        const cur = grid.querySelector('[data-panel-body="' + next.dataset.panelBody + '"]');
+                        if (cur) cur.replaceChildren.apply(cur, Array.from(next.childNodes).map(function (n) { return document.importNode(n, true); }));
+                    });
                     lastRefreshed = Date.now();
                     showStamp('마지막 갱신 ' + timeText(new Date()), false);
                 })
@@ -359,16 +767,14 @@
         }
 
         function refreshIfStale() {
-            if (toggle.checked && homeVisible() && Date.now() - lastRefreshed >= INTERVAL_MS) refresh();
+            if (autoToggle.checked && homeVisible() && Date.now() - lastRefreshed >= INTERVAL_MS) refresh();
         }
 
-        let saved = null;
-        try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) { /* 저장소를 못 쓰면 기본값 */ }
-        toggle.checked = saved !== 'off';
+        autoToggle.checked = layout.autoRefresh !== false;
         showStamp('마지막 갱신 ' + timeText(new Date()), false);
-
-        toggle.addEventListener('change', function () {
-            try { localStorage.setItem(STORAGE_KEY, toggle.checked ? 'on' : 'off'); } catch (e) { /* 기억만 못 할 뿐 */ }
+        autoToggle.addEventListener('change', function () {
+            layout.autoRefresh = autoToggle.checked;
+            saveSettings();
             refreshIfStale();
         });
         document.getElementById('homeRefreshNow').addEventListener('click', refresh);
@@ -377,6 +783,8 @@
         document.addEventListener('visibilitychange', refreshIfStale);
         // 탭을 닫거나 홈으로 돌아오면 tabs.js가 #homePanel의 hidden을 뺀다 — 그때 주기가 지났으면 바로 갱신.
         new MutationObserver(refreshIfStale).observe(panel, { attributes: true, attributeFilter: ['class'] });
+
+        placePanels();
     })();
 
     /**
@@ -461,11 +869,89 @@
             drawerImg.src = s.imageUrl;
             drawerImg.alt = s.title || s.docId;
             // 근거 청크 전체(분석 요약·키워드·아이템별 속성) — 사진과 나란히 보면 무엇을 근거로 답했는지 보인다
-            document.getElementById('srcDrawerText').textContent = s.chunk || '';
+            renderChunk(document.getElementById('srcDrawerText'), s.chunk || '');
             drawer.classList.add('open');
             drawerBackdrop.classList.add('open');
             drawer.setAttribute('aria-hidden', 'false');
             document.getElementById('srcDrawerClose').focus();
+        }
+
+        /**
+         * 근거 청크(ai indexer.summary_chunk 형식)를 읽기 좋게 나눈다: 첫 줄 요약, "키워드: a, b", "시즌: 가을",
+         * "아이템: 이름(카테고리·종류(힌트)) — 소재 …, 컬러 …, 실루엣 …". 형식이 다르면(본문 청크 등) 글 그대로 보인다.
+         * 아이템명은 보이지 않는다 — 종류와 뜻이 겹쳐 헷갈린다(2026-10-23 사용자 결정, 결과 팝업과 같다).
+         */
+        function renderChunk(box, chunk) {
+            box.replaceChildren();
+            const lines = chunk.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
+            const summary = [], keywords = [], seasons = [], items = [];
+            lines.forEach(function (line) {
+                if (line.indexOf('키워드: ') === 0) keywords.push.apply(keywords, line.slice(5).split(', '));
+                else if (line.indexOf('시즌: ') === 0) seasons.push.apply(seasons, line.slice(4).split(', '));
+                else if (line.indexOf('아이템: ') === 0) items.push(parseItem(line.slice(5)));
+                else summary.push(line);
+            });
+            if (!keywords.length && !seasons.length && !items.length) { // 요약 청크가 아니다
+                box.className = 'drawer-text';
+                box.textContent = chunk;
+                return;
+            }
+            box.className = 'drawer-sec-list';
+            function section(title, child) {
+                const sec = el('div', 'drawer-sec');
+                sec.append(el('h4', null, title), child);
+                box.appendChild(sec);
+            }
+            function chips(values) {
+                const wrap = el('div', 'drawer-chips');
+                values.filter(Boolean).forEach(function (v) { wrap.appendChild(el('span', null, v)); });
+                return wrap;
+            }
+            if (summary.length) section('분석 요약', el('p', 'drawer-summary', summary.join(' ')));
+            if (items.length) {
+                const list = el('div', 'drawer-items');
+                items.forEach(function (it) {
+                    const card = el('div', 'drawer-item');
+                    const kind = el('div', 'kind', it.kind || it.category || '의류');
+                    if (it.kind && it.category) kind.appendChild(el('small', null, it.category));
+                    if (it.hint) kind.title = it.hint;
+                    card.appendChild(kind);
+                    if (it.attrs.length) {
+                        const dl = el('dl');
+                        it.attrs.forEach(function (a) { dl.append(el('dt', null, a.label), el('dd', null, a.value)); });
+                        card.appendChild(dl);
+                    }
+                    list.appendChild(card);
+                });
+                section('의류 아이템 ' + items.length + '개', list);
+            }
+            if (keywords.length) section('키워드', chips(keywords));
+            if (seasons.length) section('시즌', chips(seasons));
+        }
+
+        /** "이름(카테고리·종류(힌트)) — 소재 레더, 컬러 블랙, 그레이" → {category, kind, hint, attrs}. 괄호는 끝에서부터 짝을 찾는다(이름에도 괄호가 있다). */
+        function parseItem(text) {
+            const dash = text.indexOf(' — ');
+            const head = dash < 0 ? text : text.slice(0, dash);
+            const tail = dash < 0 ? '' : text.slice(dash + 3);
+            let label = '';
+            if (head.charAt(head.length - 1) === ')') {
+                let depth = 0;
+                for (let i = head.length - 1; i >= 0; i--) {
+                    const c = head.charAt(i);
+                    if (c === ')') depth++;
+                    else if (c === '(' && --depth === 0) { label = head.slice(i + 1, -1); break; }
+                }
+            }
+            const dot = label.indexOf('·');
+            const category = dot < 0 ? label : label.slice(0, dot);
+            const kindFull = dot < 0 ? '' : label.slice(dot + 1);
+            const paren = kindFull.indexOf('(');
+            const attrs = tail ? tail.split(/, (?=(?:소재|컬러|실루엣) )/).map(function (part) {
+                const sp = part.indexOf(' ');
+                return { label: part.slice(0, sp), value: part.slice(sp + 1) };
+            }) : [];
+            return { category: category, kind: paren < 0 ? kindFull : kindFull.slice(0, paren), hint: kindFull, attrs: attrs };
         }
 
         function closeDrawer() {
@@ -539,13 +1025,26 @@
                         track.append(fill, el('span', 'num', r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건'));
                         row.append(cap, track);
                         bars.appendChild(row);
+                        // 기타 묶음은 그 안의 아이템명 상위를 막대 아래에 — "기타 아우터"만으로는 무엇인지 모른다
+                        if (r.names && r.names.length) bars.appendChild(el('div', 'bar-sub', '└ ' + r.names.join(' · ')));
                     });
                     box.append(el('div', 'facts-head', d.label), bars);
                 } else {
                     const line = el('div', 'facts-line');
-                    line.append(el('b', null, d.label), d.rows.map(function (r) { return r.label + ' ' + r.count; }).join(' · '));
+                    // 기타 값은 그 안의 아이템명, 소재·컬러·실루엣은 그 값으로 나온 아이템 종류를 괄호로
+                    line.append(el('b', null, d.label), d.rows.map(function (r) {
+                        const extra = (r.names && r.names.length ? r.names : (r.items || []));
+                        return r.label + ' ' + r.count + (extra.length ? '(' + extra.join(', ') + ')' : '');
+                    }).join(' · '));
                     box.appendChild(line);
                 }
+            });
+            // 질문 단어(코드로 못 옮긴 말) — 키워드·아이템명에 나온 원문 수. 나온 표현을 같이 보여 "무스탕 칼라" 같은 언급인지 알게 한다
+            (facts.terms || []).forEach(function (t) {
+                const line = el('div', 'facts-line');
+                line.append(el('b', null, '질문 단어'), t.term + ' ' + t.count + '건 · 매체 ' + t.mediaCount + '곳 · 직전 ' + t.prevCount + '건'
+                    + (t.expressions && t.expressions.length ? ' (나온 표현: ' + t.expressions.join(', ') + ')' : ''));
+                box.appendChild(line);
             });
             return box;
         }

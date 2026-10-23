@@ -2,12 +2,28 @@ package com.sjinc.trendanalysis.repository;
 
 import com.sjinc.trendanalysis.domain.SourceDocument;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
 public interface SourceDocumentRepository extends JpaRepository<SourceDocument, Long> {
+
+    /** 상태가 from일 때만 to로 바꾼다 — 바꾼 행 수(0이면 이미 다른 상태). 분석을 한 요청만 맡게 하는 데 쓴다. */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update SourceDocument d set d.status = :to where d.id = :id and d.status = :from")
+    int changeStatus(@Param("id") Long id, @Param("from") String from, @Param("to") String to);
+
+    /** 상태가 from인 문서를 모두 to로 바꾼다. */
+    @Transactional
+    @Modifying(clearAutomatically = true)
+    @Query("update SourceDocument d set d.status = :to where d.status = :from")
+    int changeAllStatus(@Param("from") String from, @Param("to") String to);
 
     List<SourceDocument> findByImageIdIn(Collection<Long> imageIds);
 

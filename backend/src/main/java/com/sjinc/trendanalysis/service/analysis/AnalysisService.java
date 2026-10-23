@@ -87,10 +87,14 @@ public class AnalysisService {
         event.documentIds().forEach(this::analyzeSafely);
     }
 
-    /** 서버가 분석 도중 내려갔으면 대기·처리 중으로 남은 문서가 있다 — 기동이 끝나면 다시 맡긴다. */
+    /**
+     * 서버가 분석 도중 내려갔으면 대기·처리 중으로 남은 문서가 있다 — 기동이 끝나면 다시 맡긴다. 처리 중으로 남은 것은 대기로 돌린다
+     * (분석은 대기 → 처리 중으로 바꾼 요청만 맡는다). 기동 때 막 등록된 문서(샘플 로더 등)가 같이 실려도 두 번 분석되지 않는다.
+     */
     @EventListener(ApplicationReadyEvent.class)
     public void requeueUnfinished() {
-        List<Long> ids = sourceDocumentRepository.findByStatusIn(List.of(SourceDocument.PENDING, SourceDocument.PROCESSING))
+        sourceDocumentRepository.changeAllStatus(SourceDocument.PROCESSING, SourceDocument.PENDING);
+        List<Long> ids = sourceDocumentRepository.findByStatusIn(List.of(SourceDocument.PENDING))
                 .stream().map(SourceDocument::getId).toList();
         if (!ids.isEmpty()) {
             log.info("끝나지 않은 분석 {}건을 다시 대기열에 넣습니다.", ids.size());
@@ -111,8 +115,15 @@ public class AnalysisService {
         }
     }
 
-    /** 문서 한 건 분석(동기). 테스트는 이 메서드를 직접 부른다. */
+    /**
+     * 문서 한 건 분석(동기). 테스트는 이 메서드를 직접 부른다. 대기(PENDING)를 처리 중으로 바꾼 요청만 분석한다 — 같은 문서가 두 번
+     * 대기열에 실려도(2026-10-23 샘플 37건이 등록 이벤트와 기동 재대기에 함께 실려 끝난 문서를 다시 분석했다) 한 번만 Claude를 부른다.
+     */
     public void analyze(Long documentId) {
+        if (sourceDocumentRepository.changeStatus(documentId, SourceDocument.PENDING, SourceDocument.PROCESSING) == 0) {
+            log.info("분석 건너뜀 document={} — 대기 상태가 아니다(이미 분석했거나 처리 중이거나 삭제됨)", documentId);
+            return;
+        }
         SourceDocument doc = sourceDocumentRepository.findById(documentId).orElse(null);
         if (doc == null) {
             return; // 대기 중에 삭제된 문서
@@ -244,10 +255,8 @@ public class AnalysisService {
             TrendItem item = TrendItem.builder()
                     .documentId(doc.getId())
                     .category(v.mainCategory()) // 대표(첫) 아이템 — 목록 표시용
-                    .sentiment(v.sentiment())
                     .summary(v.summary())
                     .resultJson(resultJson)
-                    .model(model)
                     .createdAt(LocalDateTime.now())
                     .build();
             for (int i = 0; i < v.keywords().size(); i++) {
@@ -307,7 +316,6 @@ public class AnalysisService {
         }).toList());
         map.put("keywords", v.keywords());
         map.put("seasons", v.seasons());
-        map.put("sentiment", v.sentiment());
         map.put("summary", v.summary());
         return map;
     }

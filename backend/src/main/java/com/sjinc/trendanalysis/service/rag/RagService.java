@@ -2,6 +2,8 @@ package com.sjinc.trendanalysis.service.rag;
 
 import com.sjinc.trendanalysis.domain.ComCd;
 import com.sjinc.trendanalysis.domain.SourceDocument;
+import com.sjinc.trendanalysis.domain.TrendItemValue;
+import com.sjinc.trendanalysis.domain.TrendWeeklyStat;
 import com.sjinc.trendanalysis.dto.rag.RagAnswerView;
 import com.sjinc.trendanalysis.dto.rag.RagQuestionRequest;
 import com.sjinc.trendanalysis.dto.trend.TrendView;
@@ -44,6 +46,11 @@ import java.util.stream.Collectors;
 public class RagService {
 
     public static final int MAX_QUESTION_LENGTH = 500;
+    static final int MAX_TERMS = 3;
+    /** 해석이 고를 수 있는 묻는 축(집계 값 종류) — 그 밖의 값은 버린다. */
+    static final java.util.Set<String> FOCUS_AXES = java.util.Set.of(TrendItemValue.ITEM_TYPE, TrendWeeklyStat.CATEGORY,
+            TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE);
+    static final int MAX_TERM_LENGTH = 20;
     /** 이어 묻기에 넘기는 앞 대화 건수. 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다. */
     static final int MAX_HISTORY = 3;
     /** 패션·트렌드 질문이 아니면 이 말만 하고 집계·검색·답변을 하지 않는다(2026-10-22 사용자 결정). */
@@ -141,12 +148,14 @@ public class RagService {
     private Interpreted interpret(String text, LocalDate today, List<RagQuestionRequest.Turn> history) {
         List<ComCd> categories = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.CATEGORY, "Y");
         List<ComCd> itemTypes = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.ITEM_TYPE, "Y");
+        List<ComCd> seasons = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.SEASON, "Y");
         List<AiClient.InterpretTurn> turns = turns(history, categories, itemTypes);
         try {
             AiClient.InterpretResponse r = aiClient.interpret(new AiClient.InterpretRequest(text, interpretModel, today.toString(),
                     // 일상 표현이 없으면 null이 아니라 ""로 보낸다(예전 AI 서비스는 null이면 422로 거부했다)
                     categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList(),
-                    itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns), apiKey);
+                    itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns,
+                    seasons.stream().map(s -> new AiClient.CodeHint(s.getCodeValue(), s.getCodeName(), "")).toList()), apiKey);
             String category = known(categories, r.category());
             String itemType = known(itemTypes, r.itemType());
             if (itemType != null) {
@@ -156,11 +165,16 @@ public class RagService {
                     LocalDate.parse(r.period().from()), LocalDate.parse(r.period().to()), r.period().label(), true);
             String query = r.question() == null || r.question().isBlank() || r.question().length() > MAX_QUESTION_LENGTH
                     ? text : r.question().trim();
-            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 기간={} 토큰 {}", turns.size(),
-                    !query.equals(text), !r.offTopic(), r.trend(), category, itemType, period == null ? "-" : period.label(),
-                    TokenUsage.of(r.usage()));
+            List<String> terms = terms(r.terms());
+            // 공통코드에 있는 시즌만, 코드 순서대로
+            List<String> pickedSeasons = r.seasons() == null ? List.of()
+                    : seasons.stream().map(ComCd::getCodeValue).filter(r.seasons()::contains).toList();
+            String focus = r.focus() != null && FOCUS_AXES.contains(r.focus()) ? r.focus() : null; // Set.of는 null을 물으면 예외
+            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 축={} 단어={} 시즌={} 기간={} 토큰 {}",
+                    turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, focus, terms, pickedSeasons,
+                    period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
             return new Interpreted(new QuestionInterpreter.Interpretation(r.trend(), category, name(categories, category),
-                    itemType, name(itemTypes, itemType), period), !r.offTopic(), "AI", text, query);
+                    itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus), !r.offTopic(), "AI", text, query);
         } catch (RuntimeException e) {
             log.warn("질문 해석(AI) 실패 — 규칙으로 대신합니다: {}", e.getMessage());
             List<ComCd> trendWords = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.TREND_WORD, "Y");
@@ -168,6 +182,15 @@ public class RagService {
             return new Interpreted(QuestionInterpreter.interpret(text, today, categories, itemTypes, trendWords), true, "RULE",
                     text, text);
         }
+    }
+
+    /** 해석이 준 질문 단어 — 빈 값·너무 긴 값·중복을 빼고 앞에서 MAX_TERMS개(AI 서비스도 거르지만 한 번 더). */
+    static List<String> terms(List<String> raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        return raw.stream().filter(Objects::nonNull).map(t -> t.strip().replaceAll("\\s+", " "))
+                .filter(t -> !t.isEmpty() && t.length() <= MAX_TERM_LENGTH).distinct().limit(MAX_TERMS).toList();
     }
 
     /** 화면이 보낸 앞 대화를 거른다 — 최근 MAX_HISTORY건, 질문 길이 상한, 공통코드에 없는 값·잘못된 날짜는 버린다. */
@@ -258,8 +281,12 @@ public class RagService {
         return new RagAnswerView.Facts(facts.scopeLabel(), facts.docCount(), facts.mediaCount(), facts.prevDocCount(),
                 facts.dimensions().stream().filter(d -> !d.rows().isEmpty())
                         .map(d -> new RagAnswerView.Dimension(d.label(), d.rows().stream()
-                                .map(r -> new RagAnswerView.FactRow(r.label(), r.count(), r.mediaCount(), r.prevCount())).toList()))
-                        .toList());
+                                .map(r -> new RagAnswerView.FactRow(r.label(), r.count(), r.mediaCount(), r.prevCount(),
+                                        r.names().stream().map(n -> n.name() + " " + n.count() + "건").toList(),
+                                        r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList())).toList()))
+                        .toList(),
+                facts.terms().stream().map(t -> new RagAnswerView.TermFact(t.term(), t.count(), t.mediaCount(), t.prevCount(),
+                        t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList())).toList());
     }
 
     private static String known(List<ComCd> codes, String value) {

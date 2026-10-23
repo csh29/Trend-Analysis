@@ -241,7 +241,7 @@ public class DocumentService {
                     codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()))).toList();
             return new AnalysisView.Result(garments, item.valuesOf(TrendItemValue.KEYWORD),
                     codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
-                    item.getSentiment(), item.getSummary(), item.getModel(), item.getResultJson());
+                    item.getSummary(), item.getResultJson());
         }).orElse(null);
         List<AnalysisView.Image> images = doc.isImage() ? List.of()
                 : uploadedImageRepository.findByDocumentIdOrderBySortOrderAscIdAsc(doc.getId()).stream()

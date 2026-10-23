@@ -31,14 +31,23 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
                                  String itemTypeName, String by, String resolvedQuestion, Period period) {
     }
 
-    /** 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). */
-    public record Facts(String scopeLabel, int docCount, int mediaCount, int prevDocCount, List<Dimension> dimensions) {
+    /** 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). terms는 질문 단어(코드로 못 옮긴 말)별 언급 원문 수. */
+    public record Facts(String scopeLabel, int docCount, int mediaCount, int prevDocCount, List<Dimension> dimensions,
+                        List<TermFact> terms) {
+    }
+
+    /** 질문 단어가 키워드·아이템명에 나온 원문 수. expressions는 실제로 나온 표현 상위(예: "무스탕 칼라 1건"). */
+    public record TermFact(String term, int count, int mediaCount, int prevCount, List<String> expressions) {
     }
 
     public record Dimension(String label, List<FactRow> rows) {
     }
 
-    public record FactRow(String label, int count, int mediaCount, int prevCount) {
+    /**
+     * names는 기타 값일 때 그 안의 아이템명 상위(예: "퀼팅 재킷 4건") — 다른 값은 비어 있다.
+     * items는 소재·컬러·실루엣 값일 때 그 값으로 나온 아이템 종류 상위(예: "레더 재킷 3건") — 컬러별 활용 아이템의 근거.
+     */
+    public record FactRow(String label, int count, int mediaCount, int prevCount, List<String> names, List<String> items) {
     }
 
     /** 답의 한 줄. sources는 그 줄을 뒷받침하는 출처 번호(Source.n) — 집계 수치만으로 쓴 줄은 비어 있다. */

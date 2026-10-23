@@ -3,6 +3,7 @@ package com.sjinc.trendanalysis.mvc;
 import com.sjinc.trendanalysis.domain.Program;
 import com.sjinc.trendanalysis.security.ProgramAccessGuard;
 import com.sjinc.trendanalysis.service.home.HomeService;
+import com.sjinc.trendanalysis.service.user.HomeLayoutService;
 import com.sjinc.trendanalysis.service.program.ProgramService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
@@ -27,6 +28,7 @@ public class ViewController {
     private final ProgramService programService;
     private final ProgramAccessGuard programAccess;
     private final HomeService homeService;
+    private final HomeLayoutService homeLayoutService;
 
     /**
      * 화면 이름으로 허용하는 형태. 경로 값을 템플릿 경로에 그대로 붙이므로 {@code ..}·{@code /}로 templates/program/
@@ -40,9 +42,11 @@ public class ViewController {
     }
 
     @GetMapping("/")
-    public String home(Model model) {
+    public String home(Principal principal, Model model) {
         model.addAttribute("activeMenu", "home");
         model.addAttribute("home", homeService.getHome());
+        // 사용자별 홈 배치(JSON) — 화면 JS가 처음 그릴 때 쓴다(따로 불러오면 기본 배치가 잠깐 보였다가 바뀐다)
+        model.addAttribute("homeLayout", homeLayoutService.getJson(principal.getName()));
         return "home";
     }
 

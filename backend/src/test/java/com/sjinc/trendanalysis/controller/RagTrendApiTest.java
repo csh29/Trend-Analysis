@@ -77,8 +77,8 @@ class RagTrendApiTest {
         SourceDocument doc = sourceDocumentRepository.save(SourceDocument.builder()
                 .docType(SourceDocument.TYPE_IMAGE).docId(docId).title(docId + ".png").media(media)
                 .publishedAt(published).status(status).registeredBy("admin").registeredAt(LocalDateTime.now()).build());
-        TrendItem item = TrendItem.builder().documentId(doc.getId()).category(category).sentiment("neutral")
-                .summary(docId + " 요약").resultJson("{}").model("m").createdAt(LocalDateTime.now()).build();
+        TrendItem item = TrendItem.builder().documentId(doc.getId()).category(category)
+                .summary(docId + " 요약").resultJson("{}").createdAt(LocalDateTime.now()).build();
         item.addValue(TrendItemValue.KEYWORD, docId, 0);
         item.addGarmentValue(TrendItemValue.ITEM, docId + " 아이템", 0, 0, category);
         item.addGarmentValue(TrendItemValue.ITEM_TYPE, type, 0, 0, category);

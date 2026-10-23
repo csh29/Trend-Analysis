@@ -102,10 +102,10 @@ public class TrendAggregationService {
             }
             LocalDate date = statDate(doc);
             long id = doc.getId();
-            // 소재·컬러·실루엣·아이템명은 그 의류 아이템의 카테고리로 센다 — 코디 사진의 "그레이 니트"가 하의로 잡히지 않게
+            // 소재·컬러·실루엣은 그 의류 아이템의 카테고리로 센다 — 코디 사진의 "그레이 니트"가 하의로 잡히지 않게.
+            // 아이템명은 세지 않는다(화면 유형에서 뺐다 — 종류와 뜻이 겹친다, 2026-10-23)
             for (TrendItem.Garment g : item.garments()) {
                 mentions.add(new TrendAggregator.Mention(id, date, g.category(), TrendWeeklyStat.CATEGORY, g.category()));
-                add(mentions, id, date, g.category(), TrendItemValue.ITEM, g.name());
                 if (g.type() != null) {
                     add(mentions, id, date, g.category(), TrendItemValue.ITEM_TYPE, g.type());
                 }
@@ -144,8 +144,7 @@ public class TrendAggregationService {
             return "";
         }
         String trimmed = value.strip();
-        boolean freeText = TrendItemValue.KEYWORD.equals(valueType) || TrendItemValue.ITEM.equals(valueType);
-        return freeText ? trimmed.replaceAll("\\s+", " ") : trimmed;
+        return TrendItemValue.KEYWORD.equals(valueType) ? trimmed.replaceAll("\\s+", " ") : trimmed;
     }
 
     private static TrendWeeklyStat toEntity(TrendAggregator.Row row, LocalDateTime now) {
