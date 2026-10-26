@@ -93,6 +93,7 @@ class RagApiTest {
     void 답변의_출처는_분석_완료된_원문만_돌려준다() throws Exception {
         when(aiClient.answer(any(), eq("test-key"))).thenReturn(new AiClient.AnswerResponse(true, "와이드 팬츠가 많다.",
                 List.of(new AiClient.AnswerPoint("트랙 팬츠: 블랙 와이드가 반복된다.", List.of(1, 2)),
+                        new AiClient.AnswerPoint("레더 카고 팬츠도 보인다.", List.of(2)), // 빠진 출처만 인용 — 줄째 뺀다
                         new AiClient.AnswerPoint("키워드 와이드 팬츠가 급상승이다.", List.of())),
                 List.of(new AiClient.AnswerSource(1, "TXT-R-1", 0.71, "와이드 팬츠가 유행"),
                         new AiClient.AnswerSource(2, "TXT-R-2", 0.65, "다른 청크")),
@@ -113,7 +114,7 @@ class RagApiTest {
                 .andExpect(jsonPath("$.sources[0].statDate").value("2026-10-14"))
                 .andExpect(jsonPath("$.sources[0].url").value("https://example.com/TXT-R-1"))
                 .andExpect(jsonPath("$.minScore").value(0.6))
-                // 결론 한 줄 + 글머리 줄. 재분석 중이라 빠진 출처(2번)는 줄의 인용 번호에서도 뺀다
+                // 결론 한 줄 + 글머리 줄. 재분석 중이라 빠진 출처(2번)는 줄의 인용 번호에서도 빼고, 그 출처만 인용한 줄은 뺀다(확인할 수 없는 문장)
                 .andExpect(jsonPath("$.answer").value("와이드 팬츠가 많다."))
                 .andExpect(jsonPath("$.points", hasSize(2)))
                 .andExpect(jsonPath("$.points[0].text").value("트랙 팬츠: 블랙 와이드가 반복된다."))
@@ -130,6 +131,9 @@ class RagApiTest {
         assertThat(sent.getValue().minScore()).isEqualTo(0.60);
         assertThat(sent.getValue().model()).isEqualTo("claude-sonnet-5");
         assertThat(sent.getValue().today()).isEqualTo(LocalDate.now().toString()); // 최신성·기간의 기준일 — "2026-10-22" 꼴 문자열
+        // 주간 집계 참고 수치는 보내지 않는다 — 질문 대상과 상관없는 수치를 섞어 썼다(2026-10-23 기준 점수)
+        assertThat(sent.getValue().stats()).isEmpty();
+        assertThat(sent.getValue().statsWeek()).isNull();
     }
 
     @Test

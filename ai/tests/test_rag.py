@@ -253,6 +253,16 @@ class RagTest(unittest.TestCase):
     def test_prompt_sections_loaded(self):
         self.assertIn("{week}", rag.PROMPT["stats_header"])
 
+    def test_system_prompt_sends_only_rules_for_the_mode(self):
+        # 유행 질문엔 유행 규칙만, 검색 질문엔 검색 규칙만 — 공통 규칙은 둘 다
+        trend, search = rag.system_prompt("TREND"), rag.system_prompt("SEARCH")
+        for s in (trend, search):
+            self.assertIn("지어내지 않는다", s)
+        self.assertIn("<trend_facts>를 받았다", trend)
+        self.assertNotIn("근거 원문만 받았다", trend)
+        self.assertIn("근거 원문만 받았다", search)
+        self.assertNotIn("[주요 아이템", search)
+
 
 class RagApiTest(unittest.TestCase):
     def setUp(self):
@@ -335,6 +345,21 @@ class InterpretTest(unittest.TestCase):
         r = self.interpret.normalize({"trend": True, "category": "", "item_type": "", "has_period": False,
                                       "seasons": ["WINTER", "SUMMER", "FALL", "WINTER"]}, data)
         self.assertEqual(["FALL", "WINTER"], r["seasons"])
+
+    def test_attribute_filters_are_optional_and_limited_to_codes(self):
+        # 대상을 좁히는 속성 값 — 코드를 받으면 칸이 생기고 허용 코드만 남는다. 예전 Spring(안 보냄)이면 칸이 없다
+        self.assertNotIn("silhouettes", self.interpret.build_schema(self.data)["properties"])
+        data = self.interpret.InterpretInput(
+            question="와이드 팬츠 유행해?", model="m", today=TODAY, categories=self.data.categories, item_types=self.data.item_types,
+            silhouettes=[self.interpret.CodeHint("WIDE", "와이드"), self.interpret.CodeHint("CROPPED", "크롭")],
+            colors=[self.interpret.CodeHint("BLACK", "블랙")])
+        schema = self.interpret.build_schema(data)
+        self.assertEqual(["WIDE", "CROPPED"], schema["properties"]["silhouettes"]["items"]["enum"])
+        self.assertNotIn("materials", schema["properties"])  # 후보가 없는 칸은 만들지 않는다
+        self.assertIn("- silhouettes: WIDE=와이드, CROPPED=크롭", self.interpret.build_content(data))
+        r = self.interpret.normalize({"trend": True, "category": "BOTTOM", "item_type": "", "has_period": False,
+                                      "silhouettes": ["SLIM", "WIDE", "WIDE"], "colors": []}, data)
+        self.assertEqual((["WIDE"], [], []), (r["silhouettes"], r["colors"], r["materials"]))
 
     def test_focus_is_limited_to_axes(self):
         # 묻는 축 — 정해진 값만, 아니면 None

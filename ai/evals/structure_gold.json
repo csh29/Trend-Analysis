@@ -1,0 +1,572 @@
+{
+  "_doc": [
+    "P-03 정형화 정답셋(이미지) — 사진마다 사람이 정한 의류 아이템과 속성. 정형화 결과를 아이템별로 맞대 정확도를 잰다(2026-10-26 사용자 결정: 정형화 정확도부터).",
+    "이미지 파일은 gold/images/(커밋 제외 — 매체 사진). 이 파일만 커밋한다.",
+    "status: draft(Claude 초안 — 사람 검토 전) · reviewed(사람이 확인함). 채점은 reviewed만 쓴다.",
+    "garments: 사진에 나온 의류만(신발·가방·모자·액세서리 제외), 눈에 띄는 순서. 값은 공통코드. 빈 배열은 '판단 안 함'(채점하지 않음)이 아니라 '없음'이다 — 판단하지 않을 칸은 null.",
+    "materials는 사진으로 구분되는 소재(공통코드 속성 IMAGE: 레더·스웨이드·데님·니트·퍼·플리스·트위드·코듀로이·새틴·무스탕)만 정답으로 둔다 — 이미지 정형화가 그 목록에서만 고르므로. 주 소재만(트리밍·칼라 제외).",
+    "note·uncertain: 초안을 달 때 애매했던 점 — 검토할 때 먼저 본다.",
+    "G01~G18: 2026-10-26 Claude 초안을 사용자가 \"대체로 맞다\"고 확인 — uncertain에 적힌 값은 정답이 흔들릴 수 있어 채점 결과를 볼 때 감안한다.",
+    "2026-10-26 기준 확정(사용자: 추천안대로): 가죽 아우터 = 레더 재킷, 골지 티·민소매 = 티셔츠·민소매(니트 아님), 일부만 보이는 옷은 뺌(앞판 보이는 이너는 넣음), 연청 데님 = 블루, 한 색의 명암 = 한 색, 무늬 = 바탕색 + 주요 무늬색 최대 2개. 정형화 규칙(common.md·image.md)도 같다."
+  ],
+  "items": [
+    {
+      "id": "G01",
+      "image": "images/G01.png",
+      "status": "reviewed",
+      "shot": "상품컷",
+      "garments": [
+        {
+          "category": "BOTTOM",
+          "type": "BOTTOM_TRACK",
+          "materials": [],
+          "colors": [
+            "GRAY"
+          ],
+          "silhouettes": [
+            "WIDE"
+          ],
+          "note": "워싱 차콜 밴딩·스트링 벌룬 팬츠"
+        }
+      ],
+      "uncertain": [
+        "종류: 밴딩·스트링 스웨트 팬츠라 트랙·조거로 뒀다 — 벌룬(배럴) 팬츠라 기타 하의일 수도",
+        "소재: 워싱 스웨트(면)로 보여 사진 소재 목록에 없음 → 빈칸. 데님이면 DENIM",
+        "컬러: 차콜 → 그레이"
+      ]
+    },
+    {
+      "id": "G02",
+      "image": "images/G02.png",
+      "status": "reviewed",
+      "shot": "착용컷(하의만)",
+      "garments": [
+        {
+          "category": "BOTTOM",
+          "type": "BOTTOM_DENIM",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "BLUE"
+          ],
+          "silhouettes": [
+            "WIDE"
+          ],
+          "note": "연청 워싱 와이드 데님"
+        }
+      ],
+      "uncertain": [
+        "컬러: 연청(옐로 워싱) — 스카이블루로 뒀다, 블루일 수도",
+        "상의(분홍)는 거의 안 보여 뺐다"
+      ]
+    },
+    {
+      "id": "G03",
+      "image": "images/G03.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "BOTTOM",
+          "type": "BOTTOM_ETC",
+          "materials": [
+            "CORDUROY"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": [
+            "FLARE"
+          ],
+          "note": "블랙 코듀로이 부츠컷(플레어) 팬츠"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_TSHIRT",
+          "materials": [],
+          "colors": [
+            "IVORY"
+          ],
+          "silhouettes": [
+            "SLIM",
+            "CROPPED"
+          ],
+          "note": "아이보리 골지 긴소매 크롭 탑"
+        }
+      ],
+      "uncertain": [
+        "하의 종류: 코듀로이 팬츠 종류 코드가 없어 기타 하의 — 5포켓 청바지 모양이라 데님 팬츠로 볼지?",
+        "상의: 일부만 보임 — 넣을지, 티셔츠/니트 중 무엇인지"
+      ]
+    },
+    {
+      "id": "G04",
+      "image": "images/G04.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "TOP",
+          "type": "TOP_TSHIRT",
+          "materials": [],
+          "colors": [
+            "BURGUNDY"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "버건디 헨리넥 긴소매 티셔츠(그레이 티 레이어드)"
+        }
+      ],
+      "uncertain": [
+        "안에 겹쳐 입은 그레이 티셔츠는 뺐다",
+        "하의는 일부만 보여 실루엣 판단 안 함 — 하의를 넣을지"
+      ]
+    },
+    {
+      "id": "G05",
+      "image": "images/G05.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "TOP",
+          "type": "TOP_KNIT",
+          "materials": [
+            "KNIT"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "블랙 골지 헨리넥 니트"
+        }
+      ],
+      "uncertain": [
+        "하의는 허리만 보임 — 넣을지"
+      ]
+    },
+    {
+      "id": "G06",
+      "image": "images/G06.png",
+      "status": "reviewed",
+      "shot": "착용컷(전신)",
+      "garments": [
+        {
+          "category": "TOP",
+          "type": "TOP_SHIRT",
+          "materials": [],
+          "colors": [
+            "BLUE",
+            "WHITE"
+          ],
+          "silhouettes": [
+            "OVERSIZED"
+          ],
+          "note": "블루 체크 셔츠"
+        },
+        {
+          "category": "BOTTOM",
+          "type": "BOTTOM_SLACKS",
+          "materials": [],
+          "colors": [
+            "BEIGE"
+          ],
+          "silhouettes": [
+            "WIDE"
+          ],
+          "note": "베이지 와이드 팬츠"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_TSHIRT",
+          "materials": [],
+          "colors": [
+            "WHITE"
+          ],
+          "silhouettes": null,
+          "note": "이너 화이트 티셔츠"
+        }
+      ],
+      "uncertain": [
+        "체크 컬러: 블루·화이트(네이비 섞임) — 멀티컬러로 볼지",
+        "베이지 팬츠: 슬랙스/면바지 중",
+        "이너 티셔츠를 넣을지(모자·신발은 뺐다)"
+      ]
+    },
+    {
+      "id": "G07",
+      "image": "images/G07.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_FLEECE",
+          "materials": [
+            "FLEECE"
+          ],
+          "colors": [
+            "GRAY",
+            "PURPLE"
+          ],
+          "silhouettes": [
+            "OVERSIZED"
+          ],
+          "note": "그레이 바탕 퍼플 꽃무늬 후드 플리스 집업"
+        },
+        {
+          "category": "BOTTOM",
+          "type": "BOTTOM_SKIRT",
+          "materials": [
+            "CORDUROY"
+          ],
+          "colors": [
+            "NAVY"
+          ],
+          "silhouettes": [
+            "LONG"
+          ],
+          "note": "네이비 롱스커트"
+        }
+      ],
+      "uncertain": [
+        "플리스 집업: 후드 집업(OUTER_HOOD_ZIPUP)으로 볼 수도 — 소재 기준이면 플리스",
+        "꽃무늬: 그레이·퍼플 대신 멀티컬러로 볼지",
+        "스커트 소재: 코듀로이/벨벳 확실치 않음"
+      ]
+    },
+    {
+      "id": "G08",
+      "image": "images/G08.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_BLOUSON",
+          "materials": [
+            "CORDUROY"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "블랙 스탠드칼라 집업 블루종"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_TSHIRT",
+          "materials": [],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": null,
+          "note": "이너 블랙 티셔츠"
+        }
+      ],
+      "uncertain": [
+        "소재: 잔골(코듀로이)처럼 보이나 확실치 않음 — 빈칸이 나을 수도",
+        "종류: 블루종/트랙 재킷 중"
+      ]
+    },
+    {
+      "id": "G09",
+      "image": "images/G09.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_PADDING",
+          "materials": [],
+          "colors": [
+            "KHAKI"
+          ],
+          "silhouettes": [
+            "CROPPED"
+          ],
+          "note": "카키(올리브 브라운) 숏패딩, 시어링 칼라"
+        }
+      ],
+      "uncertain": [
+        "컬러: 카키/브라운 중",
+        "시어링 칼라는 트리밍이라 소재에서 뺐다",
+        "흰 이너·하의는 뺐다"
+      ]
+    },
+    {
+      "id": "G10",
+      "image": "images/G10.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_LEATHER_JACKET",
+          "materials": [
+            "LEATHER"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": [
+            "OVERSIZED"
+          ],
+          "note": "블랙 레더 오버사이즈 블루종(소매 밴딩)"
+        }
+      ],
+      "uncertain": [
+        "종류: 레더 재킷(라이더)/블루종 중 — 밴딩 소매 봄버 모양이라 블루종으로 뒀다"
+      ]
+    },
+    {
+      "id": "G11",
+      "image": "images/G11.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_WORK_JACKET",
+          "materials": [
+            "KNIT"
+          ],
+          "colors": [
+            "GRAY"
+          ],
+          "silhouettes": [
+            "BOXY",
+            "CROPPED"
+          ],
+          "note": "차콜 카라 니트 셔츠 재킷(워크 재킷)"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_KNIT",
+          "materials": [
+            "KNIT"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": null,
+          "note": "블랙 브이넥 니트"
+        }
+      ],
+      "uncertain": [
+        "겉옷: 카라 니트 카디건/셔츠 재킷(워크 재킷)/기타 아우터 중 — 아우터로 볼지 상의로 볼지",
+        "소재: 보일드 울 느낌 — 니트로 뒀다",
+        "화이트 헨리넥 이너는 뺐다",
+        "2026-10-26 사용자: 겉옷은 워크 재킷(셔츠 재킷)으로 — 모델이 두 번 모두 그렇게 봤다"
+      ]
+    },
+    {
+      "id": "G12",
+      "image": "images/G12.png",
+      "status": "reviewed",
+      "shot": "상품컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_DENIM_JACKET",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "NAVY"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "생지 데님 트러커 재킷"
+        }
+      ],
+      "uncertain": []
+    },
+    {
+      "id": "G13",
+      "image": "images/G13.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_DENIM_JACKET",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "BLACK"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "블랙 데님 집업 재킷, 브라운 코듀로이 칼라"
+        }
+      ],
+      "uncertain": [
+        "종류: 데님 재킷/워크 재킷 중 — 소재 기준 데님 재킷",
+        "코듀로이 칼라는 트리밍이라 소재에서 뺐다",
+        "하의(카키)는 거의 안 보여 뺐다"
+      ]
+    },
+    {
+      "id": "G14",
+      "image": "images/G14.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_DENIM_JACKET",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "NAVY"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "생지 데님 트러커 재킷"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_SLEEVELESS",
+          "materials": [],
+          "colors": [
+            "WHITE"
+          ],
+          "silhouettes": null,
+          "note": "화이트 골지 민소매"
+        }
+      ],
+      "uncertain": [
+        "이너가 민소매/티셔츠 중 — 어깨가 안 보임",
+        "하의는 허리만 보임 — 넣을지"
+      ]
+    },
+    {
+      "id": "G15",
+      "image": "images/G15.png",
+      "status": "reviewed",
+      "shot": "상품컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_DENIM_JACKET",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "NAVY"
+          ],
+          "silhouettes": [
+            "BOXY"
+          ],
+          "note": "생지 데님 1st 타입 재킷"
+        }
+      ],
+      "uncertain": [
+        "실루엣: 박시/레귤러 중"
+      ]
+    },
+    {
+      "id": "G16",
+      "image": "images/G16.webp",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_DENIM_JACKET",
+          "materials": [
+            "DENIM"
+          ],
+          "colors": [
+            "BLUE"
+          ],
+          "silhouettes": [
+            "REGULAR"
+          ],
+          "note": "연청 데님 트러커 재킷"
+        },
+        {
+          "category": "TOP",
+          "type": "TOP_TSHIRT",
+          "materials": [],
+          "colors": [
+            "WHITE"
+          ],
+          "silhouettes": null,
+          "note": "화이트 모크넥 티셔츠"
+        }
+      ],
+      "uncertain": [
+        "컬러: 연청 — 스카이블루/블루 중",
+        "모자는 뺐다, 하의는 일부만"
+      ]
+    },
+    {
+      "id": "G17",
+      "image": "images/G17.png",
+      "status": "reviewed",
+      "shot": "상품컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_LEATHER_JACKET",
+          "materials": [
+            "LEATHER"
+          ],
+          "colors": [
+            "BROWN"
+          ],
+          "silhouettes": [
+            "OVERSIZED",
+            "CROPPED"
+          ],
+          "note": "다크 브라운 레더 블루종, 무스탕 칼라"
+        }
+      ],
+      "uncertain": [
+        "컬러: 다크 브라운/블랙 중",
+        "종류: 블루종/레더 재킷 중",
+        "무스탕 칼라는 트리밍이라 소재는 레더만"
+      ]
+    },
+    {
+      "id": "G18",
+      "image": "images/G18.png",
+      "status": "reviewed",
+      "shot": "착용컷",
+      "garments": [
+        {
+          "category": "OUTER",
+          "type": "OUTER_ETC",
+          "materials": [
+            "SHEARLING"
+          ],
+          "colors": [
+            "GRAY"
+          ],
+          "silhouettes": [
+            "OVERSIZED"
+          ],
+          "note": "그레이 스웨이드 무스탕 하프 코트(퍼 트리밍)"
+        }
+      ],
+      "uncertain": [
+        "종류: 무스탕 종류 코드가 없어 기타 아우터 — 코트로 볼 수도",
+        "소재: 무스탕(시어링)/스웨이드+퍼 중 — 몸판 기준 무스탕",
+        "하의(반바지)는 거의 안 보여 뺐다"
+      ]
+    }
+  ]
+}

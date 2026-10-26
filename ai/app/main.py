@@ -139,6 +139,9 @@ class InterpretRequest(BaseModel):
     item_types: list[CodeHintModel] = []
     history: list[TurnModel] = []  # 오래된 것 → 최근 순
     seasons: list[CodeHintModel] = []  # 시즌 코드 — 예전 Spring은 보내지 않는다
+    materials: list[CodeHintModel] = []  # 대상을 좁히는 속성 값 후보 — 예전 Spring은 보내지 않는다
+    colors: list[CodeHintModel] = []
+    silhouettes: list[CodeHintModel] = []
 
 
 @app.get("/health")
@@ -221,6 +224,12 @@ def index_chunks(doc_id: str | None = None, limit: int = Query(default=20, ge=1,
     return indexer.list_chunks(vector_store.get_collection(), doc_id, limit, offset, with_embedding)
 
 
+@app.get("/index/doc-ids")
+def index_doc_ids():
+    """색인에 들어 있는 문서 ID 목록 — Spring이 기동 때 DB에 없는 문서의 색인을 지우는 데 쓴다."""
+    return {"doc_ids": indexer.indexed_doc_ids(vector_store.get_collection())}
+
+
 @app.delete("/index/{doc_id}")
 def delete_index(doc_id: str):
     indexer.delete_document(vector_store.get_collection(), doc_id)
@@ -271,6 +280,9 @@ def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Hea
             categories=[interpreter.CodeHint(c.value, c.name, c.words or "") for c in req.categories],
             item_types=[interpreter.CodeHint(t.value, t.name) for t in req.item_types],
             seasons=[interpreter.CodeHint(s.value, s.name) for s in req.seasons],
+            materials=[interpreter.CodeHint(c.value, c.name) for c in req.materials],
+            colors=[interpreter.CodeHint(c.value, c.name) for c in req.colors],
+            silhouettes=[interpreter.CodeHint(c.value, c.name) for c in req.silhouettes],
             # 앞 대화는 최근 몇 건만, 질문은 상한까지만 — 화면이 보낸 값이라 길이를 믿지 않는다
             history=[interpreter.Turn(h.question[:MAX_QUESTION_LENGTH], h.trend, h.category or "", h.item_type or "",
                                       h.period_label or "", h.period_from or "", h.period_to or "")

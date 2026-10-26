@@ -80,3 +80,7 @@ cmake-build-*/
 
 # IntelliJ build output
 out/
+# 챗봇 평가 결과(수집 원문 요약이 들어 있다 — 커밋하지 않는다)
+ai/evals/results/
+# 정답셋 이미지(매체 사진 — 저작권 때문에 커밋하지 않는다. 정답 JSON만 커밋)
+ai/evals/gold/images/

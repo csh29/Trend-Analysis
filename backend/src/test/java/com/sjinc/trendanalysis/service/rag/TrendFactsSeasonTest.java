@@ -85,6 +85,10 @@ class TrendFactsSeasonTest {
         TrendFactsService.Facts colorFirst = trendFactsService.count(new QuestionInterpreter.Interpretation(true, null, null, null,
                 null, sixMonths, List.of(), List.of("FALL", "WINTER"), TrendItemValue.COLOR), TODAY);
         assertThat(colorFirst.dimensions().get(0).valueType()).isEqualTo(TrendItemValue.COLOR);
+        // Claude에게도 묻는 축만 보낸다 — 다른 축 줄은 답에 쓰이지 않았다(2026-10-26)
+        assertThat(colorFirst.lines()).anyMatch(l -> l.startsWith("[컬러]")).noneMatch(l -> l.startsWith("[아이템 종류]"));
+        // 묻는 축이 없으면 모든 축
+        assertThat(fw.lines()).anyMatch(l -> l.startsWith("[아이템 종류]"));
         // 예시 원문은 상위 컬러(블랙 SE-2·SE-1, 브라운 SE-3·SE-2)의 최근 원문 — 같은 날이면 나중에 넣은 것부터
         assertThat(colorFirst.evidenceDocIds()).containsExactlyInAnyOrder("SE-1", "SE-2", "SE-3");
         // 범위에서 빠진 축(종류를 콕 집었는데 종류 축)을 고르면 무시한다

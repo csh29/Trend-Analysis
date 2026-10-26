@@ -105,6 +105,13 @@ def delete_document(collection, doc_id: str) -> None:
     collection.delete(where={"doc_id": doc_id})
 
 
+def indexed_doc_ids(collection) -> list[str]:
+    """색인에 들어 있는 문서 ID(중복 없이, 정렬). Spring이 기동 때 DB와 맞춰 지워진 문서의 색인을 지운다(2026-10-23).
+    메타만 읽는다 — 청크가 수만 개가 되면 페이지로 나눠 읽는다."""
+    got = collection.get(include=["metadatas"])
+    return sorted({m.get("doc_id") for m in got["metadatas"] if m and m.get("doc_id")})
+
+
 EMBEDDING_PREVIEW = 8  # 벡터는 2048개라 응답에는 앞부분과 차원 수만 싣는다
 
 

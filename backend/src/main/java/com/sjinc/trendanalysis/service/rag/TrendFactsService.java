@@ -45,6 +45,8 @@ import java.util.stream.Collectors;
  *       표현을 같이 준다 — "무스탕 칼라"처럼 옷 자체가 아닌 언급도 걸리므로 옷 개수가 아니라 언급 수다. 그 원문을 예시 원문 앞에 둔다.</li>
  *   <li>시즌(질문이 F/W·올가을처럼 시즌을 가리킬 때): 원문의 시즌 값(정형화 seasons)이 그 시즌인 원문만 센다 — 게시일 기간(6개월)만으로는
  *       S/S 자료가 섞인다. 시즌 값이 없는 원문은 빠진다(2026-10-23 사용자 결정).</li>
+ *   <li>속성 조건(해석의 filters — "와이드 팬츠" → 하의 + 실루엣 WIDE): 그 값을 가진 의류 아이템만 범위로 센다. 종류마다 값 하나라도
+ *       맞으면 되고(OR), 종류끼리는 모두 맞아야 한다(AND). 대상 이름 뒤에 " · 와이드"처럼 붙는다(2026-10-26 — 글자 비교로는 "와이드 데님 팬츠"가 빠졌다).</li>
  *   <li>묻는 축(해석의 focus — "요즘 유행하는 핏은?"이면 실루엣)이 있으면 그 축이 첫 축이 된다 — 화면의 막대와 예시 원문이 그 축의
  *       상위 값으로 나온다. 없으면 아이템 종류(종류를 콕 집었으면 소재)가 첫 축이다(2026-10-23).</li>
  *   <li>소재·컬러·실루엣 값마다 그 값으로 나온 아이템 종류 상위(같은 의류 아이템 기준)를 같이 센다 — "컬러별 활용하기 좋은 아이템" 같은
@@ -94,13 +96,18 @@ public class TrendFactsService {
      * @param prevDocCount 직전 기간 범위 원문 수
      */
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
-                        int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds) {
+                        int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds,
+                        boolean focused) {
 
-        /** AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. */
+        /**
+         * AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. 묻는 축이 정해졌으면(focused) 그 축(첫 축)만 보낸다 —
+         * "F/W 핵심 컬러" 답은 컬러 축과 그 주요 아이템만 썼고 나머지 축 줄 약 900토큰은 쓰이지 않았다(2026-10-26 사용자 결정).
+         * 묻는 축이 없는 질문(기획 브리프 등)은 여러 축이 필요해 모두 보낸다.
+         */
         public List<String> lines() {
             List<String> lines = new ArrayList<>();
             lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건 · 매체 " + mediaCount + "곳 (직전 기간 원문 " + prevDocCount + "건)");
-            for (Dimension d : dimensions) {
+            for (Dimension d : focused ? dimensions.stream().limit(1).toList() : dimensions) {
                 if (d.rows().isEmpty()) continue;
                 lines.add("[" + d.label() + "] " + d.rows().stream()
                         .map(r -> r.label() + " " + r.count() + "건 · 매체 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건"
@@ -120,7 +127,8 @@ public class TrendFactsService {
     }
 
     public Facts count(QuestionInterpreter.Interpretation question, LocalDate today) {
-        Scope scope = new Scope(question.category(), question.itemType(), Set.copyOf(question.seasons()), question.focus());
+        Scope scope = new Scope(question.category(), question.itemType(), Set.copyOf(question.seasons()), question.focus(),
+                question.filters());
         // 시즌을 정했는데 기간이 비었으면(해석이 가끔 빠뜨린다) 시즌 기간 — 최근 4주로 세면 F/W 자료 대부분이 빠진다
         QuestionInterpreter.Period period = question.period() != null ? question.period()
                 : !question.seasons().isEmpty() ? QuestionInterpreter.seasonWindow(today) : QuestionInterpreter.recentWeeks(today);
@@ -138,9 +146,10 @@ public class TrendFactsService {
         return facts;
     }
 
-    private record Scope(String category, String itemType, Set<String> seasons, String focus) {
+    private record Scope(String category, String itemType, Set<String> seasons, String focus, Map<String, List<String>> filters) {
         boolean matches(TrendItem.Garment g) {
-            return (category == null || category.equals(g.category())) && (itemType == null || itemType.equals(g.type()));
+            return (category == null || category.equals(g.category())) && (itemType == null || itemType.equals(g.type()))
+                    && filters.entrySet().stream().allMatch(f -> valuesOf(g, f.getKey()).stream().anyMatch(f.getValue()::contains));
         }
 
         /** 질문이 시즌을 정했으면 원문의 시즌 값 중 하나가 그 시즌이어야 한다(시즌 값이 없는 원문은 빠진다). */
@@ -266,8 +275,9 @@ public class TrendFactsService {
         // 질문 단어가 나온 원문을 앞에 — 답이 그 말을 다룰 근거가 된다
         List<String> merged = new ArrayList<>(termEvidence);
         evidence.stream().filter(id -> !merged.contains(id)).forEach(merged::add);
-        return new Facts(period, stale, scopeLabel(question) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
-                dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList());
+        return new Facts(period, stale, scopeLabel(question) + filterLabel(scope) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
+                dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList(),
+                scope.focus() != null && !dimensions.isEmpty() && scope.focus().equals(dimensions.get(0).valueType()));
     }
 
     /**
@@ -297,6 +307,16 @@ public class TrendFactsService {
     private static String shortName(String name) {
         int i = name.indexOf('(');
         return i > 0 ? name.substring(0, i).strip() : name;
+    }
+
+    /** 범위 이름 뒤에 붙는 속성 조건(예: " · 와이드", " · 크롭"). 조건이 없으면 빈 문자열. */
+    private String filterLabel(Scope scope) {
+        StringBuilder label = new StringBuilder();
+        scope.filters().forEach((type, values) -> {
+            Map<String, String> names = names(TrendCodes.VALUE_TYPE_GROUPS.get(type));
+            label.append(" · ").append(values.stream().map(v -> shortName(names.getOrDefault(v, v))).collect(Collectors.joining("·")));
+        });
+        return label.toString();
     }
 
     /** 범위 이름 뒤에 붙는 시즌(예: " · 가을·겨울 시즌"). 시즌을 정하지 않았으면 빈 문자열. */

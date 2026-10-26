@@ -102,7 +102,7 @@ public final class TrendCodes {
                     new String[]{"OUTER_PADDING", "패딩(숏패딩·푸퍼·패딩 점퍼)"}, new String[]{"OUTER_COAT", "코트(울 코트·롱 코트)"},
                     new String[]{"OUTER_TRENCH", "트렌치코트"}, new String[]{"OUTER_BLAZER", "블레이저(테일러드 재킷)"},
                     new String[]{"OUTER_BLOUSON", "블루종(봄버·항공 점퍼·스타디움 재킷)"}, new String[]{"OUTER_DENIM_JACKET", "데님 재킷(트러커)"},
-                    new String[]{"OUTER_LEATHER_JACKET", "레더 재킷(라이더)"}, new String[]{"OUTER_HOOD_ZIPUP", "후드 집업"},
+                    new String[]{"OUTER_LEATHER_JACKET", "레더 재킷(라이더·레더 블루종·가죽 봄버)"}, new String[]{"OUTER_HOOD_ZIPUP", "후드 집업"},
                     new String[]{"OUTER_FLEECE", "플리스(후리스)"}, new String[]{"OUTER_PARKA", "파카(아노락·바람막이·후드 파카)"},
                     new String[]{"OUTER_TRACK_JACKET", "트랙 재킷(저지)"}, new String[]{"OUTER_WORK_JACKET", "워크 재킷(초어·셔츠 재킷)"},
                     new String[]{"OUTER_VEST", "베스트(조끼·패딩 조끼)"}, new String[]{"OUTER_ETC", "기타 아우터"},

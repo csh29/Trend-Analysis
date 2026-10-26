@@ -1011,34 +1011,27 @@
             box.appendChild(el('div', 'facts-head', '판단 근거 — ' + facts.scopeLabel
                 + (period ? ' · ' + period.label + ' ' + period.from + ' ~ ' + period.to : '')
                 + ' · 원문 ' + facts.docCount + '건 · 매체 ' + facts.mediaCount + '곳 (직전 ' + facts.prevDocCount + '건)'));
-            (facts.dimensions || []).forEach(function (d, i) {
-                if (i === 0) {
-                    const bars = el('div', 'bars');
-                    const max = d.rows.length ? d.rows[0].count : 0;
-                    d.rows.forEach(function (r) {
-                        const row = el('div', 'bar-row');
-                        const cap = el('span', 'cap', r.label);
-                        cap.title = r.label;
-                        const track = el('span', 'track');
-                        const fill = el('i', 'fill');
-                        fill.style.width = (max ? r.count * 100 / max : 0) + '%';
-                        track.append(fill, el('span', 'num', r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건'));
-                        row.append(cap, track);
-                        bars.appendChild(row);
-                        // 기타 묶음은 그 안의 아이템명 상위를 막대 아래에 — "기타 아우터"만으로는 무엇인지 모른다
-                        if (r.names && r.names.length) bars.appendChild(el('div', 'bar-sub', '└ ' + r.names.join(' · ')));
-                    });
-                    box.append(el('div', 'facts-head', d.label), bars);
-                } else {
-                    const line = el('div', 'facts-line');
-                    // 기타 값은 그 안의 아이템명, 소재·컬러·실루엣은 그 값으로 나온 아이템 종류를 괄호로
-                    line.append(el('b', null, d.label), d.rows.map(function (r) {
-                        const extra = (r.names && r.names.length ? r.names : (r.items || []));
-                        return r.label + ' ' + r.count + (extra.length ? '(' + extra.join(', ') + ')' : '');
-                    }).join(' · '));
-                    box.appendChild(line);
-                }
-            });
+            // 묻는 축(첫 축)만 막대로 — 나머지 축(종류·카테고리·소재·실루엣) 줄은 답 본문과 겹쳐 보이지 않는다(2026-10-26 사용자 결정).
+            // Claude에게는 모든 축을 그대로 보낸다(답이 교차·다른 축을 쓰므로)
+            const d = (facts.dimensions || [])[0];
+            if (d) {
+                const bars = el('div', 'bars');
+                const max = d.rows.length ? d.rows[0].count : 0;
+                d.rows.forEach(function (r) {
+                    const row = el('div', 'bar-row');
+                    const cap = el('span', 'cap', r.label);
+                    cap.title = r.label;
+                    const track = el('span', 'track');
+                    const fill = el('i', 'fill');
+                    fill.style.width = (max ? r.count * 100 / max : 0) + '%';
+                    track.append(fill, el('span', 'num', r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건'));
+                    row.append(cap, track);
+                    bars.appendChild(row);
+                    // 기타 묶음은 그 안의 아이템명 상위를 막대 아래에 — "기타 아우터"만으로는 무엇인지 모른다
+                    if (r.names && r.names.length) bars.appendChild(el('div', 'bar-sub', '└ ' + r.names.join(' · ')));
+                });
+                box.append(el('div', 'facts-head', d.label), bars);
+            }
             // 질문 단어(코드로 못 옮긴 말) — 키워드·아이템명에 나온 원문 수. 나온 표현을 같이 보여 "무스탕 칼라" 같은 언급인지 알게 한다
             (facts.terms || []).forEach(function (t) {
                 const line = el('div', 'facts-line');

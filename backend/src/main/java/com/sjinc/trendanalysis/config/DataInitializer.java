@@ -173,7 +173,7 @@ public class DataInitializer implements CommandLineRunner {
             TrendCodes.SILHOUETTE, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 축(FIT·LENGTH·SHAPE),쓸 수 있는 카테고리(쉼표, 없으면 전체) — 축마다 하나만, 목록 밖 카테고리면 버린다",
             TrendCodes.CATEGORY, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 질문에서 이 카테고리를 알아보는 일상 표현(쉼표)",
             TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
-            TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다. 속성 RAG = 질문 답변에 참고 집계로 보낸다",
+            TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다",
             TrendCodes.TREND_WORD, "질문에 이 말(코드명)이 있으면 유행 질문으로 본다 — AI 질문 해석이 실패했을 때 쓰는 규칙");
 
     /**
@@ -183,8 +183,9 @@ public class DataInitializer implements CommandLineRunner {
     private static final java.util.Map<String, java.util.Map<String, String>> OLD_DEFAULT_NAMES = java.util.Map.of(
             // 2026-10-23 사용자 결정: 스타디움(바시티) 재킷은 블루종으로 센다(기타 아우터로 빠졌다)
             // 2026-10-23 사용자 결정: 셋업은 수트·트레이닝 셋업만이다 — 플리스·니트 매칭 세트까지 셋업으로 빨려 들어가 이름에 범위를 넣었다
+            // 2026-10-26 정답셋 기준: 가죽 아우터는 모양과 상관없이 레더 재킷
             TrendCodes.ITEM_TYPE, java.util.Map.of("OUTER_BLOUSON", "블루종(봄버·항공 점퍼)",
-                    "SETUP_SUIT", "수트·셋업", "SETUP_TRACKSUIT", "트레이닝 셋업"));
+                    "SETUP_SUIT", "수트·셋업", "SETUP_TRACKSUIT", "트레이닝 셋업", "OUTER_LEATHER_JACKET", "레더 재킷(라이더)"));
 
     private void renameOldDefaults(String group) {
         java.util.Map<String, String> oldNames = OLD_DEFAULT_NAMES.get(group);

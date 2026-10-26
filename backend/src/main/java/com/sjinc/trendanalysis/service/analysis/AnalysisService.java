@@ -320,6 +320,35 @@ public class AnalysisService {
         return map;
     }
 
+    /**
+     * 저장된 분석 결과(trend_items.result_json)로 색인만 다시 만든다 — Claude를 부르지 않는다(임베딩만 다시 한다).
+     * 색인이 빠진 분석 완료 문서를 메우는 데 쓴다(IndexSyncService, 2026-10-26 — 색인이 통째로 지워진 사고 뒤).
+     *
+     * @return 색인했으면 true, 분석 결과나 출처가 없어 못 했으면 false
+     */
+    public boolean reindex(SourceDocument doc) {
+        TrendItem item = trendItemRepository.findByDocumentId(doc.getId()).orElse(null);
+        if (item == null || doc.getMedia() == null || doc.getPublishedAt() == null) {
+            return false;
+        }
+        Map<String, Object> saved;
+        try {
+            saved = objectMapper.readValue(item.getResultJson(), new com.fasterxml.jackson.core.type.TypeReference<>() { });
+        } catch (JsonProcessingException e) {
+            log.warn("다시 색인 못 함 doc={} — 저장된 결과 JSON을 읽지 못했습니다: {}", doc.getDocId(), e.getMessage());
+            return false;
+        }
+        Map<String, Object> structured = new LinkedHashMap<>(); // 분석 때 보낸 것과 같은 키만(doc_id·source는 빼고)
+        for (String key : List.of("items", "keywords", "seasons", "summary")) {
+            structured.put(key, saved.get(key));
+        }
+        // 이름은 사용 안 함 코드까지 — 예전 결과에 쓰인 코드도 이름으로 색인되게
+        TrendCodeBook codes = TrendCodeBook.of(comCdRepository::findByCodeGroupOrderBySortOrderAsc);
+        aiClient.index(new AiClient.IndexRequest(doc.getDocId(), doc.getDocType(), doc.getBody(), structured,
+                codes.allNames(), sourceMeta(doc)));
+        return true;
+    }
+
     private static Map<String, String> sourceMeta(SourceDocument doc) {
         return Map.of(
                 "media", doc.getMedia(),

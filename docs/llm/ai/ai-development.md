@@ -33,7 +33,7 @@ py -m venv .venv
 
 AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAPI 기본 화면)를 열고 아래 API를 "Try it out"으로 부른다.
 
-- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다).
+- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다).
 
 - 실행 중인 서비스를 통해 읽는다. 내장형 Chroma 폴더(`chroma_data/`)를 다른 프로세스로 직접 열지 않는다(한 프로세스만 열어야 안전하다).
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.

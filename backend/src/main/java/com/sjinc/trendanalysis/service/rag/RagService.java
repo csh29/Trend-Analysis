@@ -9,21 +9,20 @@ import com.sjinc.trendanalysis.dto.rag.RagQuestionRequest;
 import com.sjinc.trendanalysis.dto.trend.TrendView;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
-import com.sjinc.trendanalysis.repository.TrendWeeklyStatRepository;
 import com.sjinc.trendanalysis.service.analysis.AiCallException;
 import com.sjinc.trendanalysis.service.analysis.AiClient;
 import com.sjinc.trendanalysis.service.analysis.TokenUsage;
 import com.sjinc.trendanalysis.service.analysis.TrendCodes;
 import com.sjinc.trendanalysis.service.image.ImageService;
 import com.sjinc.trendanalysis.service.trend.TrendAggregationService;
-import com.sjinc.trendanalysis.service.trend.TrendQueryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
-import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -56,11 +55,8 @@ public class RagService {
     /** 패션·트렌드 질문이 아니면 이 말만 하고 집계·검색·답변을 하지 않는다(2026-10-22 사용자 결정). */
     static final String OFF_TOPIC_ANSWER = "패션·트렌드 관련 질문에만 답할 수 있어요. 예) 요즘 유행하는 아우터는? · 데님 재킷 코디는 어떻게 해?";
     /** 답변에 덧붙이는 집계 — 유형별 언급량 상위 몇 개. 많이 넣으면 근거보다 수치가 앞선다. */
-    static final int STATS_PER_TYPE = 5;
 
     private final AiClient aiClient;
-    private final TrendQueryService trendQueryService;
-    private final TrendWeeklyStatRepository statRepository;
     private final SourceDocumentRepository sourceDocumentRepository;
     private final ImageService imageService;
     private final TrendFactsService trendFactsService;
@@ -76,8 +72,7 @@ public class RagService {
      *                 관련 질문 1위 근거가 0.64~0.78, 데이터에 없는 패션 주제가 0.48~0.59, 패션과 무관한 질문이 0.29~0.37이었다.
      *                 데이터가 쌓이면 다시 잰다(ai /search로 점수 분포 확인).
      */
-    public RagService(AiClient aiClient, TrendQueryService trendQueryService, TrendWeeklyStatRepository statRepository,
-                      SourceDocumentRepository sourceDocumentRepository, ImageService imageService,
+    public RagService(AiClient aiClient, SourceDocumentRepository sourceDocumentRepository, ImageService imageService,
                       TrendFactsService trendFactsService, ComCdRepository comCdRepository,
                       @Value("${claude.api.key:}") String apiKey,
                       @Value("${claude.model:claude-sonnet-5}") String model,
@@ -85,8 +80,6 @@ public class RagService {
                       @Value("${rag.min-score:0.60}") double minScore,
                       @Value("${rag.top-k:8}") int topK) {
         this.aiClient = aiClient;
-        this.trendQueryService = trendQueryService;
-        this.statRepository = statRepository;
         this.sourceDocumentRepository = sourceDocumentRepository;
         this.imageService = imageService;
         this.trendFactsService = trendFactsService;
@@ -149,13 +142,19 @@ public class RagService {
         List<ComCd> categories = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.CATEGORY, "Y");
         List<ComCd> itemTypes = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.ITEM_TYPE, "Y");
         List<ComCd> seasons = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.SEASON, "Y");
+        // 대상을 좁히는 속성 값 후보(값 종류 → 사용 중 코드)
+        Map<String, List<ComCd>> attributes = new LinkedHashMap<>();
+        for (String type : List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE)) {
+            attributes.put(type, comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.VALUE_TYPE_GROUPS.get(type), "Y"));
+        }
         List<AiClient.InterpretTurn> turns = turns(history, categories, itemTypes);
         try {
             AiClient.InterpretResponse r = aiClient.interpret(new AiClient.InterpretRequest(text, interpretModel, today.toString(),
                     // 일상 표현이 없으면 null이 아니라 ""로 보낸다(예전 AI 서비스는 null이면 422로 거부했다)
                     categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList(),
                     itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns,
-                    seasons.stream().map(s -> new AiClient.CodeHint(s.getCodeValue(), s.getCodeName(), "")).toList()), apiKey);
+                    hints(seasons), hints(attributes.get(TrendItemValue.MATERIAL)), hints(attributes.get(TrendItemValue.COLOR)),
+                    hints(attributes.get(TrendItemValue.SILHOUETTE))), apiKey);
             String category = known(categories, r.category());
             String itemType = known(itemTypes, r.itemType());
             if (itemType != null) {
@@ -170,11 +169,16 @@ public class RagService {
             List<String> pickedSeasons = r.seasons() == null ? List.of()
                     : seasons.stream().map(ComCd::getCodeValue).filter(r.seasons()::contains).toList();
             String focus = r.focus() != null && FOCUS_AXES.contains(r.focus()) ? r.focus() : null; // Set.of는 null을 물으면 예외
-            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 축={} 단어={} 시즌={} 기간={} 토큰 {}",
-                    turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, focus, terms, pickedSeasons,
+            // 공통코드에 있는 값만, 코드 순서대로. 고른 값이 없는 종류는 빼 둔다
+            Map<String, List<String>> filters = new LinkedHashMap<>();
+            putKnown(filters, TrendItemValue.MATERIAL, attributes.get(TrendItemValue.MATERIAL), r.materials());
+            putKnown(filters, TrendItemValue.COLOR, attributes.get(TrendItemValue.COLOR), r.colors());
+            putKnown(filters, TrendItemValue.SILHOUETTE, attributes.get(TrendItemValue.SILHOUETTE), r.silhouettes());
+            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 속성={} 축={} 단어={} 시즌={} 기간={} 토큰 {}",
+                    turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, filters, focus, terms, pickedSeasons,
                     period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
             return new Interpreted(new QuestionInterpreter.Interpretation(r.trend(), category, name(categories, category),
-                    itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus), !r.offTopic(), "AI", text, query);
+                    itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus, filters), !r.offTopic(), "AI", text, query);
         } catch (RuntimeException e) {
             log.warn("질문 해석(AI) 실패 — 규칙으로 대신합니다: {}", e.getMessage());
             List<ComCd> trendWords = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.TREND_WORD, "Y");
@@ -182,6 +186,16 @@ public class RagService {
             return new Interpreted(QuestionInterpreter.interpret(text, today, categories, itemTypes, trendWords), true, "RULE",
                     text, text);
         }
+    }
+
+    private static List<AiClient.CodeHint> hints(List<ComCd> codes) {
+        return codes.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), "")).toList();
+    }
+
+    private static void putKnown(Map<String, List<String>> filters, String type, List<ComCd> codes, List<String> picked) {
+        if (picked == null) return;
+        List<String> known = codes.stream().map(ComCd::getCodeValue).filter(picked::contains).toList();
+        if (!known.isEmpty()) filters.put(type, known);
     }
 
     /** 해석이 준 질문 단어 — 빈 값·너무 긴 값·중복을 빼고 앞에서 MAX_TERMS개(AI 서비스도 거르지만 한 번 더). */
@@ -243,13 +257,15 @@ public class RagService {
         return view(text, response, period, null, interpreted, factsView);
     }
 
-    /** 그 밖의 질문 — 문장 유사도 검색(카테고리·기간으로 거름). 주간 집계 상위 값을 참고로 덧붙인다. */
+    /**
+     * 그 밖의 질문 — 문장 유사도 검색(카테고리·기간으로 거름). 근거 원문만 준다.
+     * 주간 집계 상위 값(전체 카테고리·이번 주)을 참고로 덧붙였었는데, 질문 대상과 상관없는 그 수치를 대상의 수치처럼 섞어 썼다
+     * (2026-10-23 기준 점수: 검색 답 4건 모두 지어낸 값 — "전주 대비 50%", "9건 급상승"). 그래서 뺐다. 수치가 필요한 질문은 유행 집계로 간다.
+     */
     private RagAnswerView askSearch(String text, Interpreted interpreted, LocalDate today) {
-        LocalDate week = statRepository.findLastWeekStart();
-        List<AiClient.StatRow> stats = week == null ? List.of() : stats(week);
         QuestionInterpreter.Period p = interpreted.question().period();
         AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
-                week == null ? null : week.toString(), stats, today.toString(), AiClient.AnswerRequest.SEARCH,
+                null, List.of(), today.toString(), AiClient.AnswerRequest.SEARCH,
                 interpreted.question().category(),
                 p == null ? null : new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), true, false),
                 List.of(), List.of()), apiKey);
@@ -259,7 +275,7 @@ public class RagService {
         log.info("RAG 질문 {}자 카테고리={} 근거={} 사유={} 최고 유사도={} 출처 {}건 토큰 {}", text.length(),
                 interpreted.question().category(), response.grounded(), response.reason(), response.bestScore(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
-        return view(text, response, period, week, interpreted, null);
+        return view(text, response, period, null, interpreted, null);
     }
 
     private RagAnswerView view(String text, AiClient.AnswerResponse response, RagAnswerView.Period period, LocalDate week,
@@ -299,15 +315,26 @@ public class RagService {
     }
 
     /** 줄마다 인용 번호를 남은 출처(삭제·재분석 중 문서 제외)로만 맞춘다 — 화면의 번호가 없는 출처를 가리키지 않게. */
+    /**
+     * 답의 줄과 그 줄의 출처 번호(화면에 보이는 출처만). 인용한 출처가 모두 빠진 줄(삭제·재분석 중인 문서만 인용)은 뺀다 —
+     * 확인할 수 없는 문장이 출처 없이 남았다(2026-10-23 평가: 색인에만 남은 지워진 문서로 쓴 줄). 처음부터 인용이 없는 줄(한계·주의 문장)은 둔다.
+     */
     private static List<RagAnswerView.Point> points(List<AiClient.AnswerPoint> points, List<RagAnswerView.Source> sources) {
         if (points == null) {
             return List.of();
         }
         Set<Integer> shown = sources.stream().map(RagAnswerView.Source::n).collect(Collectors.toSet());
-        return points.stream()
-                .map(p -> new RagAnswerView.Point(p.text(), p.sources() == null ? List.of()
-                        : p.sources().stream().filter(shown::contains).toList()))
-                .toList();
+        List<RagAnswerView.Point> kept = new ArrayList<>();
+        for (AiClient.AnswerPoint p : points) {
+            List<Integer> cited = p.sources() == null ? List.of() : p.sources();
+            List<Integer> visible = cited.stream().filter(shown::contains).toList();
+            if (!cited.isEmpty() && visible.isEmpty()) {
+                log.info("출처가 모두 빠진 줄을 뺍니다(인용 {}): {}", cited, p.text());
+                continue;
+            }
+            kept.add(new RagAnswerView.Point(p.text(), visible));
+        }
+        return kept;
     }
 
     private static String noEvidenceMessage(AiClient.AnswerResponse response, RagAnswerView.Period period) {
@@ -321,20 +348,6 @@ public class RagService {
 
     private static LocalDate date(String value) {
         return value == null || value.isBlank() ? null : LocalDate.parse(value);
-    }
-
-    /** 집계가 있는 마지막 주의 유형별 상위 값(전체 카테고리). 유형은 공통코드 TREND_VALUE_TYPE 중 속성 RAG인 것, 이름은 코드명. */
-    private List<AiClient.StatRow> stats(LocalDate week) {
-        List<AiClient.StatRow> rows = new ArrayList<>();
-        for (ComCd type : comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.VALUE_TYPE, "Y")) {
-            if (!type.attrValues().contains(TrendCodes.ATTR_RAG) || !TrendQueryService.VALUE_TYPES.contains(type.getCodeValue())) {
-                continue;
-            }
-            trendQueryService.getTrend(type.getCodeValue(), null, week, 1).rows().stream().limit(STATS_PER_TYPE)
-                    .forEach(r -> rows.add(new AiClient.StatRow(type.getCodeName(), r.label(), r.count(), r.prevCount(),
-                            r.prevRate(), r.surge(), r.isNew())));
-        }
-        return rows;
     }
 
     private List<RagAnswerView.Source> sources(List<AiClient.AnswerSource> cited) {

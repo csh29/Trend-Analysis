@@ -43,28 +43,37 @@ public final class QuestionInterpreter {
      * @param terms    카테고리·종류 코드로 옮기지 못한 패션 단어(AI 해석만 — 규칙 해석은 비어 있다). 유행 집계가 키워드·아이템명에서 센다
      * @param seasons  질문이 가리키는 시즌 코드(F/W → FALL·WINTER, AI 해석만). 유행 집계가 원문의 시즌 값으로 거른다
      * @param focus    유행 질문이 묻는 축(SILHOUETTE·COLOR…, AI 해석만 — 없으면 null). 판단 근거의 첫 축·예시 원문이 이 축이 된다
+     * @param filters  대상을 좁히는 속성 값(값 종류 MATERIAL·COLOR·SILHOUETTE → 코드들, AI 해석만). 유행 집계가 아이템의 그 값으로 거른다
+     *                 — "와이드 팬츠"를 글자로 찾으면 "와이드 데님 팬츠"가 빠졌다(2026-10-26)
      */
     public record Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
-                                 Period period, List<String> terms, List<String> seasons, String focus) {
+                                 Period period, List<String> terms, List<String> seasons, String focus,
+                                 Map<String, List<String>> filters) {
 
         public Interpretation {
             terms = terms == null ? List.of() : List.copyOf(terms);
             seasons = seasons == null ? List.of() : List.copyOf(seasons);
+            filters = filters == null ? Map.of() : Map.copyOf(filters);
+        }
+
+        public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
+                              Period period, List<String> terms, List<String> seasons, String focus) {
+            this(trend, category, categoryName, itemType, itemTypeName, period, terms, seasons, focus, Map.of());
         }
 
         public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
                               Period period, List<String> terms, List<String> seasons) {
-            this(trend, category, categoryName, itemType, itemTypeName, period, terms, seasons, null);
+            this(trend, category, categoryName, itemType, itemTypeName, period, terms, seasons, null, Map.of());
         }
 
         public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
                               Period period, List<String> terms) {
-            this(trend, category, categoryName, itemType, itemTypeName, period, terms, List.of(), null);
+            this(trend, category, categoryName, itemType, itemTypeName, period, terms, List.of(), null, Map.of());
         }
 
         public Interpretation(boolean trend, String category, String categoryName, String itemType, String itemTypeName,
                               Period period) {
-            this(trend, category, categoryName, itemType, itemTypeName, period, List.of(), List.of(), null);
+            this(trend, category, categoryName, itemType, itemTypeName, period, List.of(), List.of(), null, Map.of());
         }
     }
 

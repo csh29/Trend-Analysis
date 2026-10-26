@@ -121,6 +121,16 @@ class ApiTest(unittest.TestCase):
         collection.add.assert_not_called()
         collection.delete.assert_not_called()
 
+    def test_index_doc_ids_are_distinct_and_sorted(self):
+        collection = mock.Mock()
+        collection.get.return_value = {"ids": ["b#0", "a#0", "b#1", "x"], "metadatas": [
+            {"doc_id": "IMG-2"}, {"doc_id": "IMG-1"}, {"doc_id": "IMG-2"}, None]}
+        with mock.patch("app.indexing.vector_store.get_collection", return_value=collection):
+            res = self.client.get("/index/doc-ids").json()
+        self.assertEqual({"doc_ids": ["IMG-1", "IMG-2"]}, res)
+        self.assertEqual(["metadatas"], collection.get.call_args.kwargs["include"])
+        collection.delete.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

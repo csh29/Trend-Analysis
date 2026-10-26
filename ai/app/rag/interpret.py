@@ -7,6 +7,8 @@
 이어 묻기면 생략된 범위·기간을 앞 해석에서 채우고, 혼자서도 뜻이 통하는 질문으로 다시 써서(question) 돌려준다 —
 Spring이 검색·답변에 그 질문을 쓴다. "그럼 하의는?"을 그대로 임베딩하면 엉뚱한 근거가 뽑힌다.
 
+대상을 좁히는 속성 값(와이드 팬츠 → 하의 + 실루엣 WIDE, 크롭 아우터 → 아우터 + CROPPED)은 materials·colors·silhouettes로 돌려준다 —
+질문 단어로 넘기면 글자 비교라 "와이드 데님 팬츠"가 빠졌다(2026-10-26). Spring 집계가 아이템의 그 값으로 거른다.
 유행 질문이 주로 묻는 축(focus — 핏이면 실루엣)도 돌려준다. Spring이 판단 근거의 첫 막대·예시 원문을 그 축으로 고른다(2026-10-23).
 시즌 표현(F/W·올가을…)은 시즌 코드(seasons)로도 돌려준다 — 게시일 기간만으로는 6개월 안의 S/S 자료가 섞인다(2026-10-23).
 코드(카테고리·종류)로 옮기지 못한 패션 단어(무스탕·발마칸·고프코어…)는 terms로 따로 돌려준다(2026-10-23 사용자 결정).
@@ -32,6 +34,7 @@ MAX_TOKENS = 2000
 MAX_HISTORY = 3  # 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다
 MAX_QUESTION_LENGTH = 500
 MAX_TERMS = 3
+ATTRIBUTES = ["materials", "colors", "silhouettes"]  # 대상을 좁히는 속성 값 칸
 # 유행 질문이 묻는 축 — Spring 집계 값 종류(TrendItemValue·TrendWeeklyStat.CATEGORY)와 같은 코드
 FOCUS = ["ITEM_TYPE", "CATEGORY", "MATERIAL", "COLOR", "SILHOUETTE"]
 MAX_TERM_LENGTH = 20
@@ -65,6 +68,10 @@ class InterpretInput:
     item_types: list[CodeHint]
     history: list[Turn] = field(default_factory=list)  # 오래된 것 → 최근 순
     seasons: list[CodeHint] = field(default_factory=list)  # 시즌 코드(SPRING…) — 없으면(예전 Spring) seasons 칸을 받지 않는다
+    # 대상을 좁히는 속성 값 후보(소재·컬러·실루엣 코드) — 없으면(예전 Spring) 그 칸을 받지 않는다
+    materials: list[CodeHint] = field(default_factory=list)
+    colors: list[CodeHint] = field(default_factory=list)
+    silhouettes: list[CodeHint] = field(default_factory=list)
 
 
 def build_schema(data: InterpretInput) -> dict:
@@ -92,6 +99,11 @@ def build_schema(data: InterpretInput) -> dict:
     if data.seasons:  # 질문이 가리키는 시즌 — 유행 집계가 원문의 시즌 값으로 거른다
         schema["properties"]["seasons"] = {"type": "array", "items": {"type": "string", "enum": [s.value for s in data.seasons]}}
         schema["required"].append("seasons")
+    for key in ATTRIBUTES:  # 대상을 좁히는 속성 값 — 유행 집계가 아이템의 그 값으로 거른다
+        options = getattr(data, key)
+        if options:
+            schema["properties"][key] = {"type": "array", "items": {"type": "string", "enum": [o.value for o in options]}}
+            schema["required"].append(key)
     return schema
 
 
@@ -99,6 +111,8 @@ def build_content(data: InterpretInput) -> str:
     categories = ", ".join(f"{c.value}={c.name}" + (f"({c.words})" if c.words else "") for c in data.categories)
     item_types = ", ".join(f"{t.value}={t.name}" for t in data.item_types)
     seasons = f"\n- seasons: " + ", ".join(f"{s.value}={s.name}" for s in data.seasons) if data.seasons else ""
+    seasons += "".join(f"\n- {key}: " + ", ".join(f"{o.value}={o.name}" for o in getattr(data, key))
+                       for key in ATTRIBUTES if getattr(data, key))
     return (f"오늘: {data.today.isoformat()} ({'월화수목금토일'[data.today.weekday()]}요일)\n"
             f"허용 값(코드값=이름):\n- category: {categories}\n- item_type: {item_types}{seasons}\n\n"
             f"{_history_text(data.history)}<question>\n{data.question}\n</question>\n\n{PROMPT['task']}")
@@ -143,7 +157,14 @@ def normalize(result: dict, data: InterpretInput) -> dict:
     return {"question": question, "fashion": result.get("fashion", True) is not False, "trend": bool(result.get("trend")),
             "category": category, "item_type": item_type, "period": period, "terms": _terms(result.get("terms")),
             "seasons": _seasons(result.get("seasons"), data),
-            "focus": result.get("focus") if result.get("focus") in FOCUS else None}
+            "focus": result.get("focus") if result.get("focus") in FOCUS else None,
+            **{key: _codes(result.get(key), getattr(data, key)) for key in ATTRIBUTES}}
+
+
+def _codes(raw, options: list[CodeHint]) -> list[str]:
+    """허용 코드만, 중복 없이 코드 목록 순서로."""
+    picked = set(raw) if isinstance(raw, list) else set()
+    return [o.value for o in options if o.value in picked]
 
 
 def _seasons(raw, data: InterpretInput) -> list[str]:
@@ -165,7 +186,7 @@ def _terms(raw) -> list[str]:
 
 
 def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | None = None) -> dict:
-    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
+    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, materials, colors, silhouettes, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
     if not data.categories or not data.item_types:
         raise AiServiceError("해석에 쓸 공통코드가 없습니다.", retryable=False, status_code=400)
     started = time.monotonic()
@@ -178,8 +199,8 @@ def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | 
                                              "effort": "low"})
     usage = usage_of(response, time.monotonic() - started)
     result = normalize(parse_json(response, usage), data)
-    log.info("질문 해석 model=%s 소요=%.1fs 앞 대화=%d건 다시 씀=%s 패션=%s 유행=%s 카테고리=%s 종류=%s 축=%s 단어=%s 시즌=%s 기간=%s 토큰 in=%d out=%d",
+    log.info("질문 해석 model=%s 소요=%.1fs 앞 대화=%d건 다시 씀=%s 패션=%s 유행=%s 카테고리=%s 종류=%s 속성=%s 축=%s 단어=%s 시즌=%s 기간=%s 토큰 in=%d out=%d",
              data.model, usage["elapsed_ms"] / 1000, len(data.history), result["question"] != data.question,
-             result["fashion"], result["trend"], result["category"], result["item_type"], result["focus"], result["terms"], result["seasons"],
+             result["fashion"], result["trend"], result["category"], result["item_type"], [v for k in ATTRIBUTES for v in result[k]], result["focus"], result["terms"], result["seasons"],
              result["period"]["label"] if result["period"] else "-", usage["input_tokens"], usage["output_tokens"])
     return {**result, "usage": usage}

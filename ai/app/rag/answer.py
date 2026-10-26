@@ -23,7 +23,7 @@ from app.core.claude import AiServiceError, create_message, parse_json, usage_of
 
 log = logging.getLogger("trend-ai")
 
-PROMPT = prompt_loader.load("rag/answer", ["system", "period", "period_recent", "period_stale", "trend_header",
+PROMPT = prompt_loader.load("rag/answer", ["system", "system_trend", "system_search", "period", "period_recent", "period_stale", "trend_header",
                                            "stats_header", "sources_header", "task", "task_trend"])
 MAX_TOKENS = 4000
 HALF_LIFE_DAYS = 28   # 최신성 가중치가 절반이 되는 날수 — "요즘"을 4주 단위로 본다
@@ -237,12 +237,17 @@ def build_trend_content(data: AnswerInput, groups: list[dict]) -> str:
     return "\n\n".join(parts)
 
 
+def system_prompt(mode: str) -> str:
+    """공통 규칙 + 그 갈래의 규칙만 — 유행 질문에 검색 규칙을, 검색 질문에 유행 규칙을 보내지 않는다(입력 토큰 절약, 2026-10-26)."""
+    return PROMPT["system"] + "\n\n" + PROMPT["system_trend" if mode == "TREND" else "system_search"]
+
+
 def _call_claude(data: AnswerInput, content: str, api_key: str, client, groups: list[dict]) -> tuple[dict, dict]:
     started = time.monotonic()
     response = create_message(client, api_key,
                               model=data.model,
                               max_tokens=MAX_TOKENS,
-                              system=PROMPT["system"],
+                              system=system_prompt(data.mode),
                               messages=[{"role": "user", "content": content}],
                               output_config={"format": {"type": "json_schema", "schema": build_schema()},
                                              "effort": "medium"})

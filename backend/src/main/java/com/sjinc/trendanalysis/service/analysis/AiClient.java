@@ -96,7 +96,8 @@ public class AiClient {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretRequest(String question, String model, String today, List<CodeHint> categories,
-                                   List<CodeHint> itemTypes, List<InterpretTurn> history, List<CodeHint> seasons) {
+                                   List<CodeHint> itemTypes, List<InterpretTurn> history, List<CodeHint> seasons,
+                                   List<CodeHint> materials, List<CodeHint> colors, List<CodeHint> silhouettes) {
     }
 
     /** 챗봇의 앞 질문과 그 해석(이어 묻기용). 기간은 콕 집은 질문만, 날짜는 문자열. */
@@ -111,15 +112,17 @@ public class AiClient {
      * question은 이어 묻기를 앞 대화로 채워 혼자서도 뜻이 통하게 다시 쓴 질문(이어 묻기가 아니면 원래 질문, 예전 AI 서비스는 null).
      * terms는 카테고리·종류 코드로 옮기지 못한 패션 단어(무스탕·발마칸…), seasons는 질문이 가리키는 시즌 코드(F/W → FALL·WINTER)
      * — 예전 AI 서비스는 null. focus는 유행 질문이 묻는 축(SILHOUETTE·COLOR… 핏이면 실루엣), 없으면 null.
+     * materials·colors·silhouettes는 대상을 좁히는 속성 값(와이드 팬츠 → silhouettes=[WIDE]) — 예전 AI 서비스는 null.
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                     Map<String, Object> usage, Boolean fashion, String question, List<String> terms,
-                                    List<String> seasons, String focus) {
+                                    List<String> seasons, String focus, List<String> materials, List<String> colors,
+                                    List<String> silhouettes) {
 
         public InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                  Map<String, Object> usage, Boolean fashion, String question) {
-            this(trend, category, itemType, period, usage, fashion, question, null, null, null);
+            this(trend, category, itemType, period, usage, fashion, question, null, null, null, null, null, null);
         }
 
         public boolean offTopic() {
@@ -193,6 +196,16 @@ public class AiClient {
 
     public void deleteIndex(String docId) {
         call(() -> restClient.delete().uri("/index/{docId}", docId).retrieve().toBodilessEntity());
+    }
+
+    /** 색인에 들어 있는 문서 ID 목록 — 기동 때 DB와 맞추는 데 쓴다(IndexSyncService). */
+    public List<String> indexedDocIds() {
+        JsonNode body = call(() -> restClient.get().uri("/index/doc-ids").retrieve().body(JsonNode.class));
+        List<String> ids = new java.util.ArrayList<>();
+        if (body != null) {
+            body.path("doc_ids").forEach(id -> ids.add(id.asText()));
+        }
+        return ids;
     }
 
     private <T> T call(java.util.function.Supplier<T> request) {
