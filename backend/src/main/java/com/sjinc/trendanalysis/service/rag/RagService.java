@@ -46,9 +46,16 @@ public class RagService {
 
     public static final int MAX_QUESTION_LENGTH = 500;
     static final int MAX_TERMS = 3;
+    /** 증감 질문의 방향 — UP 급상승, DOWN 감소, BOTH 방향 없는 변화. */
+    static final java.util.Set<String> CHANGES = java.util.Set.of("UP", "DOWN", "BOTH");
+    /**
+     * 복합 질문 유형 — 지금 경로(집계 한 번·검색 한 번)로 못 담는 질문. 혼합형 1단계라 로그로 비율만 보고 지금 경로로 답한다
+     * (2026-10-28 사용자 결정: 다음 단계에서 도구 경로로 보낸다 — 모델 Sonnet, 도구 호출 상한 6번).
+     */
+    static final java.util.Set<String> COMPLEX_TYPES = java.util.Set.of("COMPARE", "SERIES", "MEDIA", "BRIEF");
     /** 해석이 고를 수 있는 묻는 축(집계 값 종류) — 그 밖의 값은 버린다. */
     static final java.util.Set<String> FOCUS_AXES = java.util.Set.of(TrendItemValue.ITEM_TYPE, TrendWeeklyStat.CATEGORY,
-            TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE);
+            TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE, TrendItemValue.PATTERN, TrendItemValue.DETAIL);
     static final int MAX_TERM_LENGTH = 20;
     /** 이어 묻기에 넘기는 앞 대화 건수. 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다. */
     static final int MAX_HISTORY = 3;
@@ -144,7 +151,8 @@ public class RagService {
         List<ComCd> seasons = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.SEASON, "Y");
         // 대상을 좁히는 속성 값 후보(값 종류 → 사용 중 코드)
         Map<String, List<ComCd>> attributes = new LinkedHashMap<>();
-        for (String type : List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE, TrendItemValue.GENDER)) {
+        for (String type : List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE, TrendItemValue.GENDER,
+                TrendItemValue.PATTERN, TrendItemValue.DETAIL)) {
             attributes.put(type, comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.VALUE_TYPE_GROUPS.get(type), "Y"));
         }
         List<AiClient.InterpretTurn> turns = turns(history, categories, itemTypes);
@@ -154,7 +162,8 @@ public class RagService {
                     categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList(),
                     itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns,
                     hints(seasons), hints(attributes.get(TrendItemValue.MATERIAL)), hints(attributes.get(TrendItemValue.COLOR)),
-                    hints(attributes.get(TrendItemValue.SILHOUETTE)), hints(attributes.get(TrendItemValue.GENDER))), apiKey);
+                    hints(attributes.get(TrendItemValue.SILHOUETTE)), hints(attributes.get(TrendItemValue.GENDER)),
+                    hints(attributes.get(TrendItemValue.PATTERN)), hints(attributes.get(TrendItemValue.DETAIL))), apiKey);
             String category = known(categories, r.category());
             String itemType = known(itemTypes, r.itemType());
             if (itemType != null) {
@@ -169,17 +178,24 @@ public class RagService {
             List<String> pickedSeasons = r.seasons() == null ? List.of()
                     : seasons.stream().map(ComCd::getCodeValue).filter(r.seasons()::contains).toList();
             String focus = r.focus() != null && FOCUS_AXES.contains(r.focus()) ? r.focus() : null; // Set.of는 null을 물으면 예외
+            String change = r.trend() && r.change() != null && CHANGES.contains(r.change()) ? r.change() : null;
+            String complex = r.complex() != null && COMPLEX_TYPES.contains(r.complex()) ? r.complex() : null;
+            if (complex != null) {
+                log.info("복합 질문({}) — 도구 경로 대상이지만 아직 지금 경로로 답한다: {}자", complex, text.length());
+            }
             // 공통코드에 있는 값만, 코드 순서대로. 고른 값이 없는 종류는 빼 둔다
             Map<String, List<String>> filters = new LinkedHashMap<>();
             putKnown(filters, TrendItemValue.MATERIAL, attributes.get(TrendItemValue.MATERIAL), r.materials());
             putKnown(filters, TrendItemValue.COLOR, attributes.get(TrendItemValue.COLOR), r.colors());
             putKnown(filters, TrendItemValue.SILHOUETTE, attributes.get(TrendItemValue.SILHOUETTE), r.silhouettes());
+            putKnown(filters, TrendItemValue.PATTERN, attributes.get(TrendItemValue.PATTERN), r.patterns()); // "체크 셔츠" → 체크
+            putKnown(filters, TrendItemValue.DETAIL, attributes.get(TrendItemValue.DETAIL), r.details()); // "하프넥 니트" → 하프넥
             putKnown(filters, TrendItemValue.GENDER, attributes.get(TrendItemValue.GENDER), r.genders()); // "여성 아우터" → 여성복
-            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 속성={} 축={} 단어={} 시즌={} 기간={} 토큰 {}",
-                    turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, filters, focus, terms, pickedSeasons,
+            log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 속성={} 축={} 증감={} 복합={} 단어={} 시즌={} 기간={} 토큰 {}",
+                    turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, filters, focus, change, complex, terms, pickedSeasons,
                     period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
             return new Interpreted(new QuestionInterpreter.Interpretation(r.trend(), category, name(categories, category),
-                    itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus, filters), !r.offTopic(), "AI", text, query);
+                    itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus, filters, change), !r.offTopic(), "AI", text, query);
         } catch (RuntimeException e) {
             log.warn("질문 해석(AI) 실패 — 규칙으로 대신합니다: {}", e.getMessage());
             List<ComCd> trendWords = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.TREND_WORD, "Y");
@@ -294,12 +310,13 @@ public class RagService {
     }
 
     private static RagAnswerView.Facts factsView(TrendFactsService.Facts facts) {
-        return new RagAnswerView.Facts(facts.scopeLabel(), facts.docCount(), facts.mediaCount(), facts.prevDocCount(),
+        return new RagAnswerView.Facts(facts.scopeLabel(), facts.docCount(), facts.mediaCount(), facts.prevDocCount(), facts.change(),
                 facts.dimensions().stream().filter(d -> !d.rows().isEmpty())
                         .map(d -> new RagAnswerView.Dimension(d.label(), d.rows().stream()
                                 .map(r -> new RagAnswerView.FactRow(r.label(), r.count(), r.mediaCount(), r.prevCount(),
+                                        TrendFactsService.rate(r.count(), r.prevCount()),
                                         r.names().stream().map(n -> n.name() + " " + n.count() + "건").toList(),
-                                        r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList())).toList()))
+                                        r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList(), r.score())).toList()))
                         .toList(),
                 facts.terms().stream().map(t -> new RagAnswerView.TermFact(t.term(), t.count(), t.mediaCount(), t.prevCount(),
                         t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList(), termDetails(t))).toList());
@@ -309,7 +326,8 @@ public class RagService {
     private static List<String> termDetails(TrendFactsService.TermRow t) {
         List<String> lines = new ArrayList<>();
         t.points().forEach(p -> lines.add(p.label() + ": " + p.values().stream()
-                .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ")").collect(Collectors.joining(" · "))));
+                .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ", " + TrendFactsService.rate(v.count(), v.prevCount()) + ")")
+                .collect(Collectors.joining(" · "))));
         if (!t.together().isEmpty()) {
             lines.add("함께 나온 옷: " + t.together().stream().map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(" · ")));
         }

@@ -89,7 +89,7 @@ class RetiredColumnTest {
     @Test
     void 예전_DB에_정답셋에서_나온_코드를_넣는다() {
         java.util.Map<String, List<String>> added = java.util.Map.of(TrendCodes.MATERIAL, List.of("RAYON", "ACRYLIC", "VELVET"),
-                TrendCodes.SILHOUETTE, List.of("BOOTCUT"));
+                TrendCodes.SILHOUETTE, List.of("BOOTCUT"), TrendCodes.ITEM_TYPE, List.of("BOTTOM_GURKHA"));
         added.forEach((group, values) -> comCdRepository.findByCodeGroupOrderBySortOrderAsc(group).stream()
                 .filter(c -> values.contains(c.getCodeValue())).forEach(comCdRepository::delete));
 

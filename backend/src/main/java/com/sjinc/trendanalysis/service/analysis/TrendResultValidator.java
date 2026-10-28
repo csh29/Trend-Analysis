@@ -24,10 +24,12 @@ public final class TrendResultValidator {
     static final int MAX_KEYWORD_LENGTH = 100;
     static final int MAX_SUMMARY_LENGTH = 1000;
     static final String ETC = "ETC";
+    /** 의류 아이템 하나의 디테일 상한 — 눈에 띄는 것만. */
+    static final int MAX_DETAILS = 3;
 
-    /** 의류 아이템 하나. type은 아이템 종류 코드(OUTER_PADDING). 다중 값은 중복을 빼고 순서를 지킨다. genders는 0~1개. */
+    /** 의류 아이템 하나. type은 아이템 종류 코드(OUTER_PADDING). 다중 값은 중복을 빼고 순서를 지킨다. genders·patterns는 0~1개, details는 0~3개. */
     public record Garment(String category, String item, String type, List<String> materials, List<String> colors,
-                          List<String> silhouettes, List<String> genders) {
+                          List<String> silhouettes, List<String> genders, List<String> patterns, List<String> details) {
     }
 
     /** 검증을 통과한 결과. items의 첫 번째가 대표 아이템이다. */
@@ -60,7 +62,7 @@ public final class TrendResultValidator {
         } else if (rawItems.isEmpty()) {
             // 의류가 없는 자료(신발·가방만 등) — 자료 전체를 기타 아이템 하나로 나타낸다
             if (codes.contains(TrendCodes.CATEGORY, ETC) && codes.contains(TrendCodes.ITEM_TYPE, ETC)) {
-                items.add(new Garment(ETC, "기타", ETC, List.of(), List.of(), List.of(), List.of()));
+                items.add(new Garment(ETC, "기타", ETC, List.of(), List.of(), List.of(), List.of(), List.of(), List.of()));
             } else {
                 errors.add("items가 비어 있습니다.");
             }
@@ -135,7 +137,13 @@ public final class TrendResultValidator {
                         category, codes.silhouetteCategories()), codes.silhouetteAxes()),
                 // 성별 칸이 없는 예전 AI 서비스 결과는 빈 값. 둘 이상 내면 처음 것만(한 옷의 라인은 하나)
                 map.get("genders") == null ? List.of()
-                        : codeValues(map.get("genders"), prefix + "genders", TrendCodes.GENDER, codes, errors).stream().limit(1).toList());
+                        : codeValues(map.get("genders"), prefix + "genders", TrendCodes.GENDER, codes, errors).stream().limit(1).toList(),
+                // 패턴 칸이 없는 예전 AI 서비스 결과는 빈 값. 한 옷에 가장 눈에 띄는 무늬 하나
+                map.get("patterns") == null ? List.of()
+                        : codeValues(map.get("patterns"), prefix + "patterns", TrendCodes.PATTERN, codes, errors).stream().limit(1).toList(),
+                // 디테일 칸이 없는 예전 AI 서비스 결과는 빈 값. 눈에 띄는 것 3개까지
+                map.get("details") == null ? List.of()
+                        : codeValues(map.get("details"), prefix + "details", TrendCodes.DETAIL, codes, errors).stream().limit(MAX_DETAILS).toList());
     }
 
     /** 그 카테고리에 쓸 수 없는 실루엣(공통코드 속성의 카테고리 목록 밖)은 버린다 — 하의 OVERSIZED, 원피스 CROPPED, 기타의 모든 실루엣 등. */

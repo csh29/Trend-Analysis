@@ -50,7 +50,7 @@ public class AiClient {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AllowedCodes(List<CodeOption> categories, List<CodeOption> itemTypes, List<CodeOption> materials,
                                List<CodeOption> colors, List<CodeOption> silhouettes, List<CodeOption> seasons,
-                               List<CodeOption> genders) {
+                               List<CodeOption> genders, List<CodeOption> patterns, List<CodeOption> details) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -92,7 +92,7 @@ public class AiClient {
     public record InterpretRequest(String question, String model, String today, List<CodeHint> categories,
                                    List<CodeHint> itemTypes, List<InterpretTurn> history, List<CodeHint> seasons,
                                    List<CodeHint> materials, List<CodeHint> colors, List<CodeHint> silhouettes,
-                                   List<CodeHint> genders) {
+                                   List<CodeHint> genders, List<CodeHint> patterns, List<CodeHint> details) {
     }
 
     /** 챗봇의 앞 질문과 그 해석(이어 묻기용). 기간은 콕 집은 질문만, 날짜는 문자열. */
@@ -108,16 +108,18 @@ public class AiClient {
      * terms는 카테고리·종류 코드로 옮기지 못한 패션 단어(무스탕·발마칸…), seasons는 질문이 가리키는 시즌 코드(F/W → FALL·WINTER)
      * — 예전 AI 서비스는 null. focus는 유행 질문이 묻는 축(SILHOUETTE·COLOR… 핏이면 실루엣), 없으면 null.
      * materials·colors·silhouettes는 대상을 좁히는 속성 값(와이드 팬츠 → silhouettes=[WIDE]) — 예전 AI 서비스는 null.
+     * change는 증감을 묻는 유행 질문의 방향(UP·DOWN·BOTH), 없으면 null. complex는 복합 질문 유형(COMPARE·SERIES·MEDIA·BRIEF), 없으면 null.
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                     Map<String, Object> usage, Boolean fashion, String question, List<String> terms,
                                     List<String> seasons, String focus, List<String> materials, List<String> colors,
-                                    List<String> silhouettes, List<String> genders) {
+                                    List<String> silhouettes, List<String> genders, String change, List<String> patterns,
+                                    List<String> details, String complex) {
 
         public InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                  Map<String, Object> usage, Boolean fashion, String question) {
-            this(trend, category, itemType, period, usage, fashion, question, null, null, null, null, null, null, null);
+            this(trend, category, itemType, period, usage, fashion, question, null, null, null, null, null, null, null, null, null, null, null);
         }
 
         public boolean offTopic() {

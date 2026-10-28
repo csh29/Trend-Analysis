@@ -40,6 +40,10 @@ public class TrendItemValue {
     public static final String SILHOUETTE = "SILHOUETTE";
     /** 옷의 대상 라인(공통코드 TREND_GENDER — 여성복·남성복·공용). 의류 아이템 단위, 판단할 수 없으면 없다(2026-10-26 사용자 요청). */
     public static final String GENDER = "GENDER";
+    /** 옷의 패턴·무늬(공통코드 TREND_PATTERN — 무지·체크·스트라이프…). 의류 아이템 단위 0~1개, 주간 집계도 센다(2026-10-28 사용자 요청). */
+    public static final String PATTERN = "PATTERN";
+    /** 옷의 디자인 디테일(공통코드 TREND_DETAIL — 하프넥·사선 여밈·꽈배기…). 의류 아이템 단위 0~3개, 주간 집계도 센다(2026-10-28 사용자 요청). */
+    public static final String DETAIL = "DETAIL";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

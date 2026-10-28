@@ -30,8 +30,11 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
                                  String itemTypeName, String by, String resolvedQuestion, Period period) {
     }
 
-    /** 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). terms는 질문 단어(코드로 못 옮긴 말)별 언급 원문 수. */
-    public record Facts(String scopeLabel, int docCount, int mediaCount, int prevDocCount, List<Dimension> dimensions,
+    /**
+     * 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). terms는 질문 단어(코드로 못 옮긴 말)별 언급 원문 수.
+     * change는 증감 질문의 방향(UP·DOWN·BOTH) — 있으면 행이 증감 순이고 화면이 증감률을 보인다. 없으면 null.
+     */
+    public record Facts(String scopeLabel, int docCount, int mediaCount, int prevDocCount, String change, List<Dimension> dimensions,
                         List<TermFact> terms) {
     }
 
@@ -48,8 +51,10 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
     /**
      * names는 기타 값일 때 그 안의 아이템명 상위(예: "퀼팅 재킷 4건") — 다른 값은 비어 있다.
      * items는 소재·컬러·실루엣 값일 때 그 값으로 나온 아이템 종류 상위(예: "레더 재킷 3건") — 컬러별 활용 아이템의 근거.
+     * rate는 직전 대비 증감률("+200%"·"-50%"·"0%", 직전 0건이면 "신규", 둘 다 0이면 "-"). score는 유행점수(막대 길이·순서의 기준).
      */
-    public record FactRow(String label, int count, int mediaCount, int prevCount, List<String> names, List<String> items) {
+    public record FactRow(String label, int count, int mediaCount, int prevCount, String rate, List<String> names, List<String> items,
+                          double score) {
     }
 
     /** 답의 한 줄. sources는 그 줄을 뒷받침하는 출처 번호(Source.n) — 집계 수치만으로 쓴 줄은 비어 있다. */

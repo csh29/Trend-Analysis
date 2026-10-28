@@ -112,6 +112,8 @@ public class TrendAggregationService {
                 g.materials().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.MATERIAL, v));
                 g.colors().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.COLOR, v));
                 g.silhouettes().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.SILHOUETTE, v));
+                g.patterns().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.PATTERN, v));
+                g.details().forEach(v -> add(mentions, id, date, g.category(), TrendItemValue.DETAIL, v));
             }
             // 키워드·시즌은 문서 단위라 문서에 나온 아이템 카테고리마다 센다(전체 범위에서는 문서당 1건)
             for (String docLevelType : List.of(TrendItemValue.KEYWORD, TrendItemValue.SEASON)) {

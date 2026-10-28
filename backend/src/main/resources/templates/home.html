@@ -1015,9 +1015,16 @@
          * 막대 오른쪽 수치 — "9건 ▲6"처럼 건수와 직전 대비 증감만(직전 0건이면 NEW), 매체가 한 곳이면 "1개 매체" 경고.
          * "9건 · 매체 4곳 · 직전 3건"을 다 쓰면 두 줄로 꺾여 읽기 어려웠다 — 전체 수치는 막대에 마우스를 올리면 보인다(2026-10-26 사용자 결정).
          */
-        function factsNum(r) {
-            const num = el('span', 'num', r.count + '건');
+        function factsNum(r, change) {
             const diff = r.count - r.prevCount;
+            if (change) { // 증감 질문은 증감률(서버가 계산한 값)을 앞에, 건수는 뒤에 작게
+                const num = el('span', 'num');
+                num.appendChild(r.prevCount === 0 ? el('b', 'delta new', 'NEW')
+                    : el('b', 'delta ' + (diff > 0 ? 'up' : 'down'), (diff > 0 ? '▲' : '▼') + r.rate.replace(/^[+-]/, '')));
+                num.appendChild(el('span', 'one-media', r.prevCount + '→' + r.count + '건'));
+                return num;
+            }
+            const num = el('span', 'num', r.count + '건');
             if (r.prevCount === 0) num.appendChild(el('b', 'delta new', 'NEW'));
             else if (diff > 0) num.appendChild(el('b', 'delta up', '▲' + diff));
             else if (diff < 0) num.appendChild(el('b', 'delta down', '▼' + (-diff)));
@@ -1036,17 +1043,19 @@
             const d = (facts.dimensions || [])[0];
             if (d) {
                 const bars = el('div', 'bars');
-                const max = d.rows.length ? d.rows[0].count : 0;
+                // 막대 길이는 유행점수(순서의 기준), 증감 질문은 건수 — 증감 순이라 첫 행이 가장 크지 않다
+                const size = function (r) { return facts.change ? r.count : r.score; };
+                const max = d.rows.reduce(function (m, r) { return Math.max(m, size(r)); }, 0);
                 d.rows.forEach(function (r) {
                     const row = el('div', 'bar-row');
                     const cap = el('span', 'cap', r.label);
                     cap.title = r.label;
                     const track = el('span', 'track');
                     const fill = el('i', 'fill');
-                    fill.style.width = (max ? r.count * 100 / max : 0) + '%';
-                    track.append(fill, factsNum(r));
+                    fill.style.width = (max ? size(r) * 100 / max : 0) + '%';
+                    track.append(fill, factsNum(r, facts.change));
                     row.append(cap, track);
-                    row.title = r.label + ' — ' + r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건';
+                    row.title = r.label + ' — 유행점수 ' + r.score + ' · ' + r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건 (' + r.rate + ')';
                     bars.appendChild(row);
                     // 기타 묶음은 그 안의 아이템명 상위를 막대 아래에 — "기타 아우터"만으로는 무엇인지 모른다
                     if (r.names && r.names.length) bars.appendChild(el('div', 'bar-sub', '└ ' + r.names.join(' · ')));

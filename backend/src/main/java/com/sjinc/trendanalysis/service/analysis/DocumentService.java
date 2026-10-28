@@ -239,7 +239,9 @@ public class DocumentService {
                     codesOf(codes, TrendCodes.MATERIAL, g.materials()),
                     codesOf(codes, TrendCodes.COLOR, g.colors()),
                     codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()),
-                    codesOf(codes, TrendCodes.GENDER, g.genders()))).toList();
+                    codesOf(codes, TrendCodes.GENDER, g.genders()),
+                    codesOf(codes, TrendCodes.PATTERN, g.patterns()),
+                    codesOf(codes, TrendCodes.DETAIL, g.details()))).toList();
             return new AnalysisView.Result(garments, item.valuesOf(TrendItemValue.KEYWORD),
                     codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
                     item.getSummary(), item.getResultJson());

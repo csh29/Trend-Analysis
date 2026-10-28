@@ -5,7 +5,8 @@
     "needs: 답에 필요한 데이터 조회 — count(축별 집계) cross(값 × 아이템 종류 교차) filter_attr(속성 값으로 거르기: 크롭 아우터 등) season(시즌 값 거르기) compare(두 기간 비교) series(주별 추이) media(매체 분포) term(질문 단어 언급) search(사례 유사도 검색) docs(원문·사진) followup(앞 답의 결과를 받아 묻기) format(브리프·표 형식).",
     "expect: 답에서 확인할 요건(사람 또는 채점 모델이 하나씩 예/아니오로 본다). 모든 질문 공통 요건은 common_expect.",
     "current: 지금 구조(질문 해석 → 유행 집계 또는 검색)로 처리되는지 — ok·partial·no. current_note에 이유. 전환 뒤 이 칸을 다시 채워 비교한다.",
-    "질문 문장은 실제 사용자 말투 그대로 둔다. 샘플 데이터(6주·56건)로 답이 빈약한 질문도 요건은 같다 — 자료가 모자라면 모자라다고 밝히는지를 본다."
+    "질문 문장은 실제 사용자 말투 그대로 둔다. 샘플 데이터(6주·56건)로 답이 빈약한 질문도 요건은 같다 — 자료가 모자라면 모자라다고 밝히는지를 본다.",
+    "2026-10-28 갱신: 유행 판단은 유행점수(출처마다 첫 원문 1점 + 같은 출처 반복 0.5점) 순, 증감 질문(change UP·DOWN·BOTH)은 증감률(%)을 앞세워 증감 순, '요즘 ~ 특징'은 건수 없이 컬러·패턴·실루엣·소재·디테일·코디로, 패턴(TREND_PATTERN) 축·속성 조건, 대상 라인 속성 조건, 구르카 팬츠 종류를 반영해 요건을 고치고 질문을 더했다(C06~C09·D08·D09·P09·M08·F02). 고친 요건은 이전 채점 결과와 문구가 달라 직접 비교하지 않는다."
   ],
   "common_expect": [
     "답의 수치·값은 근거(집계·원문)에 있는 것만 쓴다 — 지어낸 컬러·아이템·브랜드·수치가 없다",
@@ -15,215 +16,598 @@
   ],
   "questions": [
     {
-      "id": "C01", "team": "COMMON",
+      "id": "C01",
+      "team": "COMMON",
       "question": "요즘 유행하는 아우터는?",
-      "needs": ["count"],
-      "expect": ["최근 4주 아우터 아이템 종류 순위를 원문 수와 함께 쓴다", "매체 수 또는 매체가 한 곳뿐이라는 점을 밝힌다", "1위를 summary에 개수와 함께 쓴다"],
-      "current": "ok", "current_note": "유행 집계(축=ITEM_TYPE, 범위=OUTER)"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "최근 4주 아우터 아이템 종류를 유행점수 순(집계에 놓인 순서)으로 원문 수와 함께 쓴다",
+        "매체 수 또는 한 곳에서 반복된 값이라는 점을 밝힌다",
+        "1위를 summary에 원문 수와 함께 쓴다"
+      ],
+      "current": "ok",
+      "current_note": "유행 집계(축=ITEM_TYPE, 범위=OUTER)"
     },
     {
-      "id": "C02", "team": "COMMON",
+      "id": "C02",
+      "team": "COMMON",
       "question": "지난주에 가장 많이 나온 아이템이 뭐야?",
-      "needs": ["count"],
-      "expect": ["기간을 지난주(월~일)로 잡는다", "아이템 종류 순위를 원문 수와 함께 쓴다"],
-      "current": "ok", "current_note": "기간 지난주 + 유행 집계"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "기간을 지난주(월~일)로 잡는다",
+        "아이템 종류 순위를 원문 수와 함께 쓴다"
+      ],
+      "current": "ok",
+      "current_note": "기간 지난주 + 유행 집계"
     },
     {
-      "id": "C03", "team": "COMMON",
+      "id": "C03",
+      "team": "COMMON",
       "question": "요즘 어떤 핏이 유행해?",
-      "needs": ["count"],
-      "expect": ["실루엣(오버사이즈·와이드·크롭…) 순위를 원문 수와 함께 쓴다", "아이템 종류가 아니라 실루엣으로 답한다"],
-      "current": "ok", "current_note": "묻는 축=SILHOUETTE(2026-10-23)"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "실루엣(오버사이즈·와이드·크롭…) 순위를 원문 수와 함께 쓴다",
+        "아이템 종류가 아니라 실루엣으로 답한다"
+      ],
+      "current": "ok",
+      "current_note": "묻는 축=SILHOUETTE(2026-10-23)"
     },
     {
-      "id": "C04", "team": "COMMON",
+      "id": "C04",
+      "team": "COMMON",
       "question": "지난달보다 늘어난 컬러 있어?",
-      "needs": ["count", "compare"],
-      "expect": ["지난달과 그 전달을 비교한다", "늘어난 컬러만 증감과 함께 쓴다", "늘어난 것이 없으면 없다고 쓴다"],
-      "current": "partial", "current_note": "직전 같은 길이 기간과만 비교하고, 늘어난 값만 고르는 조회는 없다(Claude가 집계 줄에서 골라야 함)"
+      "needs": [
+        "count",
+        "compare"
+      ],
+      "expect": [
+        "직전 기간 대비 늘어난 컬러만 증가 폭 순으로 쓴다",
+        "줄마다 증감률(%)을 앞세우고 건수는 괄호 안 근거로만 쓴다(예: \"블랙: +200% (직전 1건 → 최근 3건)\")",
+        "비교한 두 기간(최근 4주와 직전 4주)을 밝힌다 — '지난달'을 달력 한 달로 잡지 않는다",
+        "늘어난 컬러가 없으면 없다고 답한다"
+      ],
+      "current": "ok",
+      "current_note": "유행 집계(축=COLOR, change=UP — 증감 순·증감률은 서버 계산)"
     },
     {
-      "id": "C05", "team": "COMMON",
+      "id": "C05",
+      "team": "COMMON",
       "question": "요즘 무스탕 유행해?",
-      "needs": ["term", "count"],
-      "expect": ["무스탕이 언급된 원문 수를 쓴다", "무스탕 칼라처럼 옷 자체가 무스탕이 아닌 언급은 구분해 밝힌다", "언급 수를 유행이라고 단정하지 않는다"],
-      "current": "ok", "current_note": "질문 단어(terms)"
+      "needs": [
+        "term",
+        "count"
+      ],
+      "expect": [
+        "무스탕이 언급된 원문 수를 쓴다",
+        "무스탕 칼라처럼 옷 자체가 무스탕이 아닌 언급은 구분해 밝힌다",
+        "언급 수를 유행이라고 단정하지 않는다"
+      ],
+      "current": "ok",
+      "current_note": "질문 단어(terms)"
     },
     {
-      "id": "P01", "team": "PLANNING",
+      "id": "P01",
+      "team": "PLANNING",
       "question": "2026년 F/W 패션 컬러를 핵심 컬러 5개로 정리하고 컬러별 활용하기 좋은 아이템을 추천해 줘.",
-      "needs": ["season", "count", "cross"],
-      "expect": ["가을·겨울 시즌 자료 기준이라고 밝힌다", "컬러를 최대 5개, 원문 수 순으로 쓴다", "컬러마다 그 컬러로 많이 나온 아이템 종류를 쓴다(교차 집계에 있는 짝만)", "5개가 안 되면 있는 만큼만 쓰고 모자라다고 밝힌다"],
-      "current": "ok", "current_note": "시즌·묻는 축=COLOR·교차(2026-10-23)"
+      "needs": [
+        "season",
+        "count",
+        "cross"
+      ],
+      "expect": [
+        "가을·겨울 시즌 자료 기준이라고 밝힌다",
+        "컬러를 최대 5개, 원문 수 순으로 쓴다",
+        "컬러마다 그 컬러로 많이 나온 아이템 종류를 쓴다(교차 집계에 있는 짝만)",
+        "5개가 안 되면 있는 만큼만 쓰고 모자라다고 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "시즌·묻는 축=COLOR·교차(2026-10-23)"
     },
     {
-      "id": "P02", "team": "PLANNING",
+      "id": "P02",
+      "team": "PLANNING",
       "question": "26FW 핵심 소재 3개랑 소재별로 어떤 아이템에 많이 쓰였는지 알려줘",
-      "needs": ["season", "count", "cross"],
-      "expect": ["가을·겨울 시즌 자료 기준", "소재 최대 3개를 원문 수와 함께", "소재마다 많이 쓰인 아이템 종류"],
-      "current": "ok", "current_note": "묻는 축=MATERIAL + 교차"
+      "needs": [
+        "season",
+        "count",
+        "cross"
+      ],
+      "expect": [
+        "가을·겨울 시즌 자료 기준",
+        "소재 최대 3개를 원문 수와 함께",
+        "소재마다 많이 쓰인 아이템 종류"
+      ],
+      "current": "ok",
+      "current_note": "묻는 축=MATERIAL + 교차"
     },
     {
-      "id": "P03", "team": "PLANNING",
+      "id": "P03",
+      "team": "PLANNING",
       "question": "올해 F/W랑 작년 F/W 컬러를 비교해줘",
-      "needs": ["season", "count", "compare"],
-      "expect": ["올해 가을·겨울과 작년 가을·겨울을 각각 센다", "두 시즌의 상위 컬러와 달라진 점(새로 뜬 것·줄어든 것)을 쓴다", "작년 자료가 없으면 없다고 밝힌다"],
-      "current": "no", "current_note": "기간은 하나만 받는다 — 작년 같은 시즌과 비교하는 조회가 없다"
+      "needs": [
+        "season",
+        "count",
+        "compare"
+      ],
+      "expect": [
+        "올해 가을·겨울과 작년 가을·겨울을 각각 센다",
+        "두 시즌의 상위 컬러와 달라진 점(새로 뜬 것·줄어든 것)을 쓴다",
+        "작년 자료가 없으면 없다고 밝힌다"
+      ],
+      "current": "no",
+      "current_note": "기간은 하나만 받는다 — 작년 같은 시즌과 비교하는 조회가 없다"
     },
     {
-      "id": "P04", "team": "PLANNING",
+      "id": "P04",
+      "team": "PLANNING",
       "question": "니트는 어떤 종류랑 컬러 위주로 구성하면 좋을까?",
-      "needs": ["count", "cross"],
-      "expect": ["니트(상의 니트·카디건) 범위의 컬러·실루엣 집계를 근거로 쓴다", "구성 제안은 집계 상위 값에서만 나온다", "판매가 아니라 자료 언급 기준임을 밝힌다"],
-      "current": "partial", "current_note": "종류 하나(니트)만 범위로 잡힌다 — 니트+카디건처럼 여러 종류 범위는 못 잡는다"
+      "needs": [
+        "count",
+        "cross"
+      ],
+      "expect": [
+        "니트(상의 니트·카디건) 범위의 컬러·실루엣 집계를 근거로 쓴다",
+        "구성 제안은 집계 상위 값에서만 나온다",
+        "판매가 아니라 자료 언급 기준임을 밝힌다"
+      ],
+      "current": "partial",
+      "current_note": "종류 하나(니트)만 범위로 잡힌다 — 니트+카디건처럼 여러 종류 범위는 못 잡는다"
     },
     {
-      "id": "P05", "team": "PLANNING",
+      "id": "P05",
+      "team": "PLANNING",
       "question": "이번 시즌 아우터 라인업을 종류별 비중으로 정리해줘",
-      "needs": ["season", "count", "format"],
-      "expect": ["아우터 종류별 원문 수와 비중(%)을 표로 쓴다", "비중의 분모(대상 원문 수)를 밝힌다"],
-      "current": "partial", "current_note": "상위 5개만 넘기고 비중 계산·표 형식이 없다"
+      "needs": [
+        "season",
+        "count",
+        "format"
+      ],
+      "expect": [
+        "아우터 종류별 원문 수와 비중(%)을 표로 쓴다",
+        "비중의 분모(대상 원문 수)를 밝힌다"
+      ],
+      "current": "partial",
+      "current_note": "상위 5개만 넘기고 비중 계산·표 형식이 없다"
     },
     {
-      "id": "P06", "team": "PLANNING",
+      "id": "P06",
+      "team": "PLANNING",
       "question": "간절기 상품으로 많이 다뤄지는 게 뭐야?",
-      "needs": ["season", "count"],
-      "expect": ["봄·가을 시즌 자료 기준", "아이템 종류 순위를 원문 수와 함께"],
-      "current": "ok", "current_note": "시즌=SPRING·FALL"
+      "needs": [
+        "season",
+        "count"
+      ],
+      "expect": [
+        "봄·가을 시즌 자료 기준",
+        "아이템 종류 순위를 원문 수와 함께"
+      ],
+      "current": "ok",
+      "current_note": "시즌=SPRING·FALL"
     },
     {
-      "id": "P07", "team": "PLANNING",
+      "id": "P07",
+      "team": "PLANNING",
       "question": "레더랑 스웨이드 중에 어느 쪽 아우터 물량을 늘리는 게 좋을까?",
-      "needs": ["count", "compare", "series"],
-      "expect": ["두 소재의 아우터 원문 수·매체 수·직전 대비를 나란히 쓴다", "물량 결정은 자료 언급 기준 참고라고 밝히고 단정하지 않는다"],
-      "current": "partial", "current_note": "소재 축으로 둘 다 세지만 두 값을 맞대는 비교·추이는 없다"
+      "needs": [
+        "count",
+        "compare",
+        "series"
+      ],
+      "expect": [
+        "두 소재의 아우터 원문 수·매체 수·직전 대비를 나란히 쓴다",
+        "물량 결정은 자료 언급 기준 참고라고 밝히고 단정하지 않는다"
+      ],
+      "current": "partial",
+      "current_note": "소재 축으로 둘 다 세지만 두 값을 맞대는 비교·추이는 없다"
     },
     {
-      "id": "P08", "team": "PLANNING",
+      "id": "P08",
+      "team": "PLANNING",
       "question": "26FW 기획 브리프 만들어줘. 컬러, 소재, 아이템, 실루엣별로",
-      "needs": ["season", "count", "cross", "format"],
-      "expect": ["축마다 상위 값과 원문 수를 표 또는 구역으로 나눠 쓴다", "가을·겨울 시즌 자료 기준", "각 구역에 근거 원문이 붙는다"],
-      "current": "partial", "current_note": "집계는 되지만 답 형식이 요약+2~5줄이라 브리프 구조로 못 쓴다"
+      "needs": [
+        "season",
+        "count",
+        "cross",
+        "format"
+      ],
+      "expect": [
+        "축마다 상위 값과 원문 수를 표 또는 구역으로 나눠 쓴다",
+        "가을·겨울 시즌 자료 기준",
+        "각 구역에 근거 원문이 붙는다"
+      ],
+      "current": "partial",
+      "current_note": "집계는 되지만 답 형식이 요약+2~5줄이라 브리프 구조로 못 쓴다"
     },
     {
-      "id": "M01", "team": "MD",
+      "id": "M01",
+      "team": "MD",
       "question": "숏패딩 언급이 최근 6주 동안 어떻게 변했어?",
-      "needs": ["series"],
-      "expect": ["주별 원문 수를 6주 모두 쓴다", "늘었는지·줄었는지 흐름을 쓴다"],
-      "current": "no", "current_note": "주별 추이를 넘기는 조회가 없다(기간 하나와 직전 기간만)"
+      "needs": [
+        "series"
+      ],
+      "expect": [
+        "주별 원문 수를 6주 모두 쓴다",
+        "늘었는지·줄었는지 흐름을 쓴다"
+      ],
+      "current": "no",
+      "current_note": "주별 추이를 넘기는 조회가 없다(기간 하나와 직전 기간만)"
     },
     {
-      "id": "M02", "team": "MD",
+      "id": "M02",
+      "team": "MD",
       "question": "최근 4주 동안 갑자기 많이 나온 아이템은?",
-      "needs": ["count", "compare"],
-      "expect": ["직전 4주 대비 많이 늘어난 아이템 종류를 증감과 함께 쓴다", "신규(직전 0건)는 신규라고 쓴다"],
-      "current": "partial", "current_note": "직전 대비 수치는 있으나 늘어난 순으로 고르지 않고 많은 순 상위 5개만 넘긴다"
+      "needs": [
+        "count",
+        "compare"
+      ],
+      "expect": [
+        "직전 4주 대비 늘어난 아이템 종류를 증가 폭 순으로 쓴다",
+        "줄마다 증감률(%)을 앞세운다(직전 0건이면 '신규')",
+        "직전·최근이 모두 2건 이하인 값은 건수가 적어 비율이 크게 나온다고 덧붙인다"
+      ],
+      "current": "ok",
+      "current_note": "유행 집계(축=ITEM_TYPE, change=UP)"
     },
     {
-      "id": "M03", "team": "MD",
+      "id": "M03",
+      "team": "MD",
       "question": "여러 매체에서 공통으로 다루는 아이템이 뭐야?",
-      "needs": ["count", "media"],
-      "expect": ["매체 수가 많은 순으로 아이템 종류를 쓴다", "원문 수와 매체 수를 구분해 쓴다"],
-      "current": "partial", "current_note": "원문 수 순 상위 5개 — 매체 수 순 정렬은 없다"
+      "needs": [
+        "count",
+        "media"
+      ],
+      "expect": [
+        "매체 수가 많은 순으로 아이템 종류를 쓴다",
+        "원문 수와 매체 수를 구분해 쓴다"
+      ],
+      "current": "partial",
+      "current_note": "원문 수 순 상위 5개 — 매체 수 순 정렬은 없다"
     },
     {
-      "id": "M04", "team": "MD",
+      "id": "M04",
+      "team": "MD",
       "question": "한 매체에서만 많이 나온 아이템은 뭐야?",
-      "needs": ["count", "media"],
-      "expect": ["원문 수는 많지만 매체가 한 곳인 아이템을 매체 이름과 함께 쓴다", "대중화로 보기 어렵다는 점을 밝힌다"],
-      "current": "no", "current_note": "매체별 분포를 넘기지 않는다"
+      "needs": [
+        "count",
+        "media"
+      ],
+      "expect": [
+        "원문 수는 많지만 매체가 한 곳인 아이템을 매체 이름과 함께 쓴다",
+        "대중화로 보기 어렵다는 점을 밝힌다"
+      ],
+      "current": "partial",
+      "current_note": "유행점수 순에서 원문 수가 많은데 뒤에 놓인 값을 '한 곳에서 반복'으로 밝히게 했다 — 매체별 분포를 직접 세지는 않는다"
     },
     {
-      "id": "M05", "team": "MD",
+      "id": "M05",
+      "team": "MD",
       "question": "데님 팬츠는 계속 가져가도 될까?",
-      "needs": ["count", "series"],
-      "expect": ["최근 원문 수·매체 수와 추이를 근거로 쓴다", "앞으로를 단정하지 않고 지금까지의 흐름만 말한다"],
-      "current": "partial", "current_note": "최근 4주와 직전 4주만 — 추이는 없다"
+      "needs": [
+        "count",
+        "series"
+      ],
+      "expect": [
+        "최근 원문 수·매체 수와 추이를 근거로 쓴다",
+        "앞으로를 단정하지 않고 지금까지의 흐름만 말한다"
+      ],
+      "current": "partial",
+      "current_note": "최근 4주와 직전 4주만 — 추이는 없다"
     },
     {
-      "id": "M06", "team": "MD",
+      "id": "M06",
+      "team": "MD",
       "question": "요즘 잘 팔리는 니트는?",
-      "needs": ["count"],
-      "expect": ["판매 자료가 아니라 자료 언급 기준임을 밝힌다", "니트 관련 집계로 답한다"],
-      "current": "partial", "current_note": "집계는 되지만 '판매가 아님'을 밝히는 규칙이 없다"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "판매 자료가 아니라 자료 언급 기준임을 밝힌다",
+        "니트 관련 집계로 답한다"
+      ],
+      "current": "partial",
+      "current_note": "집계는 되지만 '판매가 아님'을 밝히는 규칙이 없다"
     },
     {
-      "id": "M07", "team": "MD",
+      "id": "M07",
+      "team": "MD",
       "question": "스노우피크는 요즘 어떤 아이템을 내놨어?",
-      "needs": ["term", "docs"],
-      "expect": ["스노우피크가 언급된 원문과 그 아이템을 쓴다", "브랜드 집계가 아니라 언급 원문 기준임을 밝힌다"],
-      "current": "partial", "current_note": "브랜드 코드가 없어 질문 단어(키워드 언급)로만 잡는다"
+      "needs": [
+        "term",
+        "docs"
+      ],
+      "expect": [
+        "스노우피크가 언급된 원문과 그 아이템을 쓴다",
+        "브랜드 집계가 아니라 언급 원문 기준임을 밝힌다"
+      ],
+      "current": "partial",
+      "current_note": "브랜드 코드가 없어 질문 단어(키워드 언급)로만 잡는다"
     },
     {
-      "id": "D01", "team": "DESIGN",
+      "id": "D01",
+      "team": "DESIGN",
       "question": "요즘 레더 재킷은 어떤 실루엣이 많아?",
-      "needs": ["count"],
-      "expect": ["레더 재킷 범위의 실루엣 순위를 원문 수와 함께", "대표 사례 원문이 붙는다"],
-      "current": "ok", "current_note": "범위=OUTER_LEATHER_JACKET, 묻는 축=SILHOUETTE"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "레더 재킷 범위의 실루엣 순위를 원문 수와 함께",
+        "대표 사례 원문이 붙는다"
+      ],
+      "current": "ok",
+      "current_note": "범위=OUTER_LEATHER_JACKET, 묻는 축=SILHOUETTE"
     },
     {
-      "id": "D02", "team": "DESIGN",
+      "id": "D02",
+      "team": "DESIGN",
       "question": "와이드 팬츠 코디 사례 보여줘",
-      "needs": ["search", "docs"],
-      "expect": ["와이드 팬츠가 나온 원문(사진)을 출처로 보인다", "사례마다 같이 입은 아이템·컬러를 쓴다"],
-      "current": "ok", "current_note": "검색 경로"
+      "needs": [
+        "search",
+        "docs"
+      ],
+      "expect": [
+        "와이드 팬츠가 나온 원문(사진)을 출처로 보인다",
+        "사례마다 같이 입은 아이템·컬러를 쓴다"
+      ],
+      "current": "ok",
+      "current_note": "검색 경로"
     },
     {
-      "id": "D03", "team": "DESIGN",
+      "id": "D03",
+      "team": "DESIGN",
       "question": "크롭 기장 아우터는 어떤 소재로 많이 나와?",
-      "needs": ["filter_attr", "count"],
-      "expect": ["실루엣이 크롭인 아우터만 대상으로 소재를 센다", "대상 원문 수를 밝힌다"],
-      "current": "ok", "current_note": "속성 조건(silhouettes=CROPPED, 2026-10-26)"
+      "needs": [
+        "filter_attr",
+        "count"
+      ],
+      "expect": [
+        "실루엣이 크롭인 아우터만 대상으로 소재를 센다",
+        "대상 원문 수를 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "속성 조건(silhouettes=CROPPED, 2026-10-26)"
     },
     {
-      "id": "D04", "team": "DESIGN",
+      "id": "D04",
+      "team": "DESIGN",
       "question": "아우터에서 블랙 다음으로 많이 쓰는 컬러는?",
-      "needs": ["count"],
-      "expect": ["아우터 컬러 순위에서 블랙 다음 값을 원문 수와 함께", "블랙이 1위가 아니면 그렇다고 밝힌다"],
-      "current": "ok", "current_note": "범위=OUTER, 묻는 축=COLOR"
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "아우터 컬러 순위에서 블랙 다음 값을 원문 수와 함께",
+        "블랙이 1위가 아니면 그렇다고 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "범위=OUTER, 묻는 축=COLOR"
     },
     {
-      "id": "D05", "team": "DESIGN",
+      "id": "D05",
+      "team": "DESIGN",
       "question": "퀼팅 디테일 들어간 아우터 많아?",
-      "needs": ["term", "docs"],
-      "expect": ["퀼팅이 언급된 원문 수와 표현을 쓴다", "디테일 집계가 아니라 언급 기준임을 밝힌다"],
-      "current": "partial", "current_note": "디테일 코드가 없어 질문 단어로만"
+      "needs": [
+        "term",
+        "docs"
+      ],
+      "expect": [
+        "퀼팅이 언급된 원문 수와 표현을 쓴다",
+        "디테일 집계가 아니라 언급 기준임을 밝힌다"
+      ],
+      "current": "partial",
+      "current_note": "디테일 코드가 없어 질문 단어로만"
     },
     {
-      "id": "D06", "team": "DESIGN",
+      "id": "D06",
+      "team": "DESIGN",
       "question": "오버사이즈 핏 상의는 어떤 컬러가 많아?",
-      "needs": ["filter_attr", "count"],
-      "expect": ["실루엣이 오버사이즈인 상의만 대상으로 컬러를 센다"],
-      "current": "ok", "current_note": "속성 조건(silhouettes=OVERSIZED, 2026-10-26)"
+      "needs": [
+        "filter_attr",
+        "count"
+      ],
+      "expect": [
+        "실루엣이 오버사이즈인 상의만 대상으로 컬러를 센다"
+      ],
+      "current": "ok",
+      "current_note": "속성 조건(silhouettes=OVERSIZED, 2026-10-26)"
     },
     {
-      "id": "D07", "team": "DESIGN",
+      "id": "D07",
+      "team": "DESIGN",
       "question": "플리스 소재 아이템 사진 레퍼런스 보여줘",
-      "needs": ["filter_attr", "docs"],
-      "expect": ["소재가 플리스인 원문의 사진을 출처로 보인다", "아이템 종류를 같이 쓴다"],
-      "current": "partial", "current_note": "문장 유사도 검색이라 플리스 원문을 확실히 고르지 못한다(소재 값으로 거르지 않음)"
+      "needs": [
+        "filter_attr",
+        "docs"
+      ],
+      "expect": [
+        "소재가 플리스인 원문의 사진을 출처로 보인다",
+        "아이템 종류를 같이 쓴다"
+      ],
+      "current": "partial",
+      "current_note": "문장 유사도 검색이라 플리스 원문을 확실히 고르지 못한다(소재 값으로 거르지 않음)"
     },
     {
-      "id": "F01", "team": "COMMON",
+      "id": "F01",
+      "team": "COMMON",
       "question": "그럼 그 아이템들은 주로 무슨 색이야?",
       "followup_of": "C01",
-      "needs": ["followup", "count", "cross"],
-      "expect": ["앞 답의 상위 아우터 종류들을 범위로 컬러를 센다", "종류마다 많이 나온 컬러를 쓴다"],
-      "current": "partial", "current_note": "이어 묻기는 범위(아우터)만 이어받고 앞 답의 상위 종류는 모른다"
+      "needs": [
+        "followup",
+        "count",
+        "cross"
+      ],
+      "expect": [
+        "앞 답의 상위 아우터 종류들을 범위로 컬러를 센다",
+        "종류마다 많이 나온 컬러를 쓴다"
+      ],
+      "current": "partial",
+      "current_note": "이어 묻기는 범위(아우터)만 이어받고 앞 답의 상위 종류는 모른다"
     },
     {
-      "id": "G01", "team": "GUARD",
+      "id": "G01",
+      "team": "GUARD",
       "question": "요즘 유행하는 밈은?",
       "needs": [],
-      "expect": ["패션 질문이 아니라는 안내만 하고 집계·검색하지 않는다"],
-      "current": "ok", "current_note": "OFF_TOPIC"
+      "expect": [
+        "패션 질문이 아니라는 안내만 하고 집계·검색하지 않는다"
+      ],
+      "current": "ok",
+      "current_note": "OFF_TOPIC"
     },
     {
-      "id": "G02", "team": "GUARD",
+      "id": "G02",
+      "team": "GUARD",
       "question": "요즘 유행하는 운동화는?",
       "needs": [],
-      "expect": ["의류 집계로 답하지 않는다(옷 순위를 운동화처럼 말하지 않는다)", "신발 자료가 없다고 밝히거나 근거 없음"],
-      "current": "ok", "current_note": "비의류는 trend=false"
+      "expect": [
+        "의류 집계로 답하지 않는다(옷 순위를 운동화처럼 말하지 않는다)",
+        "신발 자료가 없다고 밝히거나 근거 없음"
+      ],
+      "current": "ok",
+      "current_note": "비의류는 trend=false"
+    },
+    {
+      "id": "C06",
+      "team": "COMMON",
+      "question": "요즘 원피스 특징은?",
+      "needs": [
+        "count",
+        "docs"
+      ],
+      "expect": [
+        "원피스 범위의 유행 질문으로 답한다(근거 없음으로 끝나지 않는다)",
+        "건수·매체 수·증감을 쓰지 않는다",
+        "컬러·패턴·실루엣·소재·디테일·코디 중 근거가 있는 것을 축별로 설명한다",
+        "원문이 적으면 숫자 없이 사례가 적다고 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "'요즘 ~ 특징'은 유행 질문(focus 없음) — 답은 건수 없이 특징으로"
+    },
+    {
+      "id": "C07",
+      "team": "COMMON",
+      "question": "지난달 대비 급상승한 아이템은?",
+      "needs": [
+        "count",
+        "compare"
+      ],
+      "expect": [
+        "늘어난 아이템 종류만 증가 폭 순으로 쓴다",
+        "줄마다 증감률(%)을 앞세운다",
+        "'지난달 대비'를 기간(9월 한 달)이 아니라 비교 기준으로 보고, 최근 4주와 직전 4주를 비교했다고 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "change=UP, has_period=false"
+    },
+    {
+      "id": "C08",
+      "team": "COMMON",
+      "question": "요즘 줄어든 컬러는?",
+      "needs": [
+        "count",
+        "compare"
+      ],
+      "expect": [
+        "직전보다 줄어든 컬러만 감소 폭 순으로 쓴다",
+        "줄마다 감소율(%)을 앞세우고, 이번 기간에 없으면 -100%로 쓴다",
+        "줄어든 값이 없으면 없다고 답한다"
+      ],
+      "current": "ok",
+      "current_note": "change=DOWN — 이번 기간 0건 값도 포함, 예시 원문은 범위의 최근 원문"
+    },
+    {
+      "id": "C09",
+      "team": "COMMON",
+      "question": "요즘 유행하는 패턴은?",
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "패턴(무늬) 축의 상위 값을 유행점수 순으로 원문 수와 함께 쓴다",
+        "무지(단색)가 상위면 무늬 없는 옷이 많다고 쓴다"
+      ],
+      "current": "ok",
+      "current_note": "focus=PATTERN — 패턴 도입 전 분석 결과는 재분석해야 센다"
+    },
+    {
+      "id": "D08",
+      "team": "DESIGN",
+      "question": "체크 셔츠 유행해?",
+      "needs": [
+        "filter_attr",
+        "count"
+      ],
+      "expect": [
+        "셔츠 중 체크 패턴인 옷으로 범위를 좁혀 원문 수와 직전 대비로 답한다",
+        "체크 셔츠 사례의 컬러·핏 특징을 덧붙인다"
+      ],
+      "current": "ok",
+      "current_note": "item_type=TOP_SHIRT + patterns=[CHECK]"
+    },
+    {
+      "id": "D09",
+      "team": "DESIGN",
+      "question": "요즘 패딩은 어떤 스타일이야?",
+      "needs": [
+        "count",
+        "docs"
+      ],
+      "expect": [
+        "패딩 범위의 유행 질문으로 답한다",
+        "건수 없이 컬러·패턴·실루엣·소재·디테일·코디로 설명한다"
+      ],
+      "current": "ok",
+      "current_note": "'요즘 ~ 스타일' = 특징 질문"
+    },
+    {
+      "id": "P09",
+      "team": "PLANNING",
+      "question": "여성 아우터는 어떤 컬러가 많아?",
+      "needs": [
+        "filter_attr",
+        "count"
+      ],
+      "expect": [
+        "아우터 중 여성복 라인으로 범위를 좁혀 컬러 순위를 쓴다",
+        "대상 라인 값이 없는(재분석 전) 원문은 빠진다는 점이 답의 원문 수에 맞게 반영된다"
+      ],
+      "current": "ok",
+      "current_note": "category=OUTER + genders=[WOMEN], focus=COLOR"
+    },
+    {
+      "id": "M08",
+      "team": "MD",
+      "question": "구르카 팬츠 요즘 많이 보여?",
+      "needs": [
+        "count"
+      ],
+      "expect": [
+        "구르카 팬츠 종류(BOTTOM_GURKHA)로 세어 원문 수와 직전 대비로 답한다",
+        "사례가 적으면 적다고 밝힌다"
+      ],
+      "current": "ok",
+      "current_note": "item_type=BOTTOM_GURKHA(2026-10-28 추가 종류) — 그 전 분석 결과는 기타 하의라 재분석 필요"
+    },
+    {
+      "id": "F02",
+      "team": "COMMON",
+      "question": "그 패턴은 주로 어떤 아이템에 많이 쓰였어?",
+      "followup_of": "C09",
+      "needs": [
+        "followup",
+        "count",
+        "cross"
+      ],
+      "expect": [
+        "앞 답의 패턴을 이어받아 패턴별 주요 아이템 종류를 쓴다",
+        "앞 질문의 기간을 그대로 쓴다"
+      ],
+      "current": "ok",
+      "current_note": "이어 묻기 — 패턴 값 × 아이템 종류 교차(주요 아이템)"
     }
   ]
 }

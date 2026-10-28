@@ -164,6 +164,24 @@ class StructurerTest(unittest.TestCase):
         self.assertIn("genders", item["required"])
         self.assertIn("- genders: WOMEN=여성복", system_prompt(data)[1]["text"])
 
+    def test_schema_asks_pattern_when_codes_given(self):
+        data = sample_input()
+        item = build_schema(data)["properties"]["items"]["items"]
+        self.assertNotIn("patterns", item["properties"])  # 패턴 코드를 안 보내면(예전 Spring) 그 칸을 받지 않는다
+        data.patterns = [CodeOption("SOLID", "무지(단색)"), CodeOption("CHECK", "체크")]
+        item = build_schema(data)["properties"]["items"]["items"]
+        self.assertEqual(["SOLID", "CHECK"], item["properties"]["patterns"]["items"]["enum"])  # 아이템마다
+        self.assertIn("patterns", item["required"])
+        self.assertIn("- patterns: SOLID=무지(단색)", system_prompt(data)[1]["text"])
+
+    def test_schema_asks_details_when_codes_given(self):
+        data = sample_input()
+        self.assertNotIn("details", build_schema(data)["properties"]["items"]["items"]["properties"])  # 예전 Spring
+        data.details = [CodeOption("NECK_HALF", "하프넥"), CodeOption("TEX_CABLE", "꽈배기")]
+        item = build_schema(data)["properties"]["items"]["items"]
+        self.assertEqual(["NECK_HALF", "TEX_CABLE"], item["properties"]["details"]["items"]["enum"])
+        self.assertIn("details", item["required"])
+
     def test_image_content_puts_image_first(self):
         content = build_content(sample_input("IMAGE"))
         self.assertEqual("image", content[0]["type"])

@@ -21,7 +21,7 @@ public record AnalysisView(Long documentId, String docId, String docType, String
 
     /** 의류 아이템 하나. type은 아이템 종류(종류 도입 전 결과는 null — 재분석하면 생긴다). genders는 대상 라인(0~1개). */
     public record Item(Code category, String name, Code type, List<Code> materials, List<Code> colors, List<Code> silhouettes,
-                       List<Code> genders) {
+                       List<Code> genders, List<Code> patterns, List<Code> details) {
     }
 
     public record Result(List<Item> items, List<String> keywords, List<Code> seasons, String summary,

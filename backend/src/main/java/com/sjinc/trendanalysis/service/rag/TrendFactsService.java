@@ -8,6 +8,7 @@ import com.sjinc.trendanalysis.domain.TrendWeeklyStat;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
 import com.sjinc.trendanalysis.repository.TrendItemRepository;
+import com.sjinc.trendanalysis.service.analysis.DocumentService;
 import com.sjinc.trendanalysis.service.analysis.TrendCodes;
 import com.sjinc.trendanalysis.service.trend.TrendAggregationService;
 import lombok.RequiredArgsConstructor;
@@ -72,8 +73,40 @@ public class TrendFactsService {
     static final int CROSS_ITEMS = 3;
     static final int TERM_VALUES = 3;
     static final int EXAMPLES_PER_TERM = 3;
+    /**
+     * 직전 대비 증감률 — "+200%"·"-50%"·"0%"(반올림), 직전 0건이면 "신규", 둘 다 0이면 "-". 계산은 여기서 한다 — Claude가 직접 나누면
+     * 틀릴 수 있어 집계 줄과 화면에 완성된 값을 준다(2026-10-28 사용자 요청: 증감 질문은 기준 대비 몇 % 늘었는지·줄었는지로 답한다).
+     */
+    public static String rate(int count, int prevCount) {
+        if (prevCount == 0) return count == 0 ? "-" : "신규";
+        long pct = Math.round((count - prevCount) * 100.0 / prevCount);
+        return (pct > 0 ? "+" : "") + pct + "%";
+    }
+
+    /** 같은 출처의 두 번째부터 원문 하나의 유행점수 — 한 곳의 반복 게시는 여러 곳에서 보이는 것(대중화)보다 약한 신호다. */
+    static final double REPEAT_WEIGHT = 0.5;
+
+    /**
+     * 유행점수 = 출처 수 + 0.5 × (원문 수 − 출처 수). 출처마다 첫 원문은 1점, 같은 출처의 반복 원문은 0.5점(2026-10-28 사용자 결정:
+     * 유행 질문은 이 점수로 판단한다 — 한 매체가 10번 올린 것(5.5)보다 5곳이 2번씩 다룬 것(7.5)이 높다).
+     */
+    public static double trendScore(int docCount, int sourceCount) {
+        return sourceCount + REPEAT_WEIGHT * (docCount - sourceCount);
+    }
+
+    /**
+     * 유행점수에 쓰는 출처 — 매체명. 직접 업로드(이미지)·매체 미입력(텍스트) 원문은 출처를 몰라 원문마다 다른 출처로 본다
+     * (이미지만 있는 원문은 인스타 게시물로 간주 — 계정을 모르니 반복으로 깎지 않는다).
+     */
+    static String sourceKey(SourceDocument doc) {
+        String media = doc.getMedia();
+        return media == null || media.isBlank() || DocumentService.UPLOAD_MEDIA.equals(media) || DocumentService.TEXT_MEDIA.equals(media)
+                ? "doc:" + doc.getId() : media;
+    }
+
     /** 질문 단어 대상 옷에서 세는 축 — 어떤 레더 재킷이 뜨는지(색·소재·핏). */
-    static final List<String> TERM_POINTS = List.of(TrendItemValue.COLOR, TrendItemValue.MATERIAL, TrendItemValue.SILHOUETTE);
+    static final List<String> TERM_POINTS = List.of(TrendItemValue.COLOR, TrendItemValue.PATTERN, TrendItemValue.MATERIAL, TrendItemValue.SILHOUETTE,
+            TrendItemValue.DETAIL);
 
     private final SourceDocumentRepository sourceDocumentRepository;
     private final TrendItemRepository trendItemRepository;
@@ -81,10 +114,10 @@ public class TrendFactsService {
 
     /**
      * 값 하나의 집계. prevCount는 직전 같은 길이 기간의 원문 수. names는 기타 값일 때만 — 그 안의 아이템명 상위(원문 수 순).
-     * items는 소재·컬러·실루엣 값일 때만 — 그 값으로 나온 아이템 종류 이름 상위(원문 수 순).
+     * items는 소재·컬러·실루엣 값일 때만 — 그 값으로 나온 아이템 종류 이름 상위(원문 수 순). score는 유행점수(trendScore).
      */
     public record Row(String value, String label, int count, int mediaCount, int prevCount, List<NameCount> names,
-                      List<NameCount> items) {
+                      List<NameCount> items, double score) {
     }
 
     /** 기타 안의 아이템명 하나와 그 이름이 나온 원문 수. */
@@ -115,10 +148,11 @@ public class TrendFactsService {
      * @param scopeLabel 집계 범위(예: "아우터", "아우터 · 패딩", 범위가 없으면 "전체")
      * @param docCount   기간 안 범위 원문 수
      * @param prevDocCount 직전 기간 범위 원문 수
+     * @param change     증감 질문의 방향(UP·DOWN·BOTH) — 있으면 축마다 값이 증감 순이다. 없으면 null(원문 수 순)
      */
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
                         int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds,
-                        boolean focused) {
+                        boolean focused, String change) {
 
         /**
          * AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. 묻는 축이 정해졌으면(focused) 그 축(첫 축)만 보낸다 —
@@ -127,11 +161,22 @@ public class TrendFactsService {
          */
         public List<String> lines() {
             List<String> lines = new ArrayList<>();
-            lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건 · 매체 " + mediaCount + "곳 (직전 기간 원문 " + prevDocCount + "건)");
+            lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건 · 매체 " + mediaCount + "곳 (직전 기간 원문 " + prevDocCount + "건, "
+                    + rate(docCount, prevDocCount) + ")");
+            if (change == null) {
+                lines.add("[정렬] 유행점수 순 — 유행점수 = 출처마다 첫 원문 1점 + 같은 출처의 반복 원문 0.5점(직접 업로드는 원문마다 다른 출처)");
+            } else {
+                lines.add("[정렬] " + switch (change) {
+                    case "UP" -> "직전 대비 늘어난 값만, 늘어난 원문 수가 큰 순";
+                    case "DOWN" -> "직전 대비 줄어든 값만, 줄어든 원문 수가 큰 순(이번 기간 0건 포함)";
+                    default -> "직전 대비 달라진 값만, 변화한 원문 수가 큰 순";
+                } + " — 축에 값이 없으면 그런 값이 없다는 뜻");
+            }
             for (Dimension d : focused ? dimensions.stream().limit(1).toList() : dimensions) {
                 if (d.rows().isEmpty()) continue;
                 lines.add("[" + d.label() + "] " + d.rows().stream()
-                        .map(r -> r.label() + " " + r.count() + "건 · 매체 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건"
+                        .map(r -> r.label() + " 유행점수 " + score(r.score()) + " · " + r.count() + "건 · 매체 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건("
+                                + rate(r.count(), r.prevCount()) + ")"
                                 + (r.names().isEmpty() ? "" : " (아이템명: " + r.names().stream()
                                 .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")")
                                 + (r.items().isEmpty() ? "" : " [주요 아이템: " + r.items().stream()
@@ -140,11 +185,12 @@ public class TrendFactsService {
             }
             for (TermRow t : terms) {
                 lines.add("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] " + t.term() + " " + t.count() + "건 · 매체 " + t.mediaCount()
-                        + "곳 · 직전 " + t.prevCount() + "건" + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
+                        + "곳 · 직전 " + t.prevCount() + "건(" + rate(t.count(), t.prevCount()) + ")" + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
                         .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")"));
                 for (TermPoint pt : t.points()) {
                     lines.add("  - " + t.term() + " 옷의 " + pt.label() + ": " + pt.values().stream()
-                            .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ")").collect(Collectors.joining(", ")));
+                            .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ", " + rate(v.count(), v.prevCount()) + ")")
+                            .collect(Collectors.joining(", ")));
                 }
                 if (!t.together().isEmpty()) {
                     lines.add("  - " + t.term() + "와 같은 원문에 함께 나온 옷: " + t.together().stream()
@@ -195,6 +241,7 @@ public class TrendFactsService {
     private static final class Tally {
         final Set<Long> docs = new HashSet<>();
         final Set<String> media = new HashSet<>();
+        final Set<String> sources = new HashSet<>(); // 유행점수용 출처(sourceKey)
         final Set<Long> prevDocs = new HashSet<>();
         final List<SourceDocument> examples = new ArrayList<>();
         final Map<String, Set<Long>> names = new LinkedHashMap<>(); // 기타 값일 때만 — 아이템명별 원문(기간 안)
@@ -240,6 +287,7 @@ public class TrendFactsService {
                             t.examples.add(doc);
                         }
                         t.media.add(doc.getMedia());
+                        t.sources.add(sourceKey(doc));
                         if (scope.itemType() == null && isAttribute(type)) { // 같은 의류 아이템의 종류 — 컬러별 아이템
                             garments.stream().filter(g -> g.type() != null && valuesOf(g, type).contains(value))
                                     .forEach(g -> t.items.computeIfAbsent(g.type(), k -> new HashSet<>()).add(doc.getId()));
@@ -261,24 +309,20 @@ public class TrendFactsService {
         List<String> evidence = new ArrayList<>();
         for (String type : types) {
             Map<String, String> labels = names(TrendWeeklyStat.CATEGORY.equals(type) ? TrendCodes.CATEGORY : TrendCodes.VALUE_TYPE_GROUPS.get(type));
-            List<Map.Entry<String, Tally>> ranked = tallies.get(type).entrySet().stream()
-                    .filter(e -> !e.getValue().docs.isEmpty())
-                    .sorted(Comparator.comparingInt((Map.Entry<String, Tally> e) -> e.getValue().docs.size()).reversed()
-                            .thenComparing(e -> e.getValue().media.size(), Comparator.reverseOrder())
-                            .thenComparing(Map.Entry::getKey))
-                    .limit(TOP).toList();
+            List<Map.Entry<String, Tally>> ranked = rank(tallies.get(type), question.change());
             dimensions.add(new Dimension(type, typeLabels.getOrDefault(type, type), ranked.stream()
                     .map(e -> new Row(e.getKey(), labels.getOrDefault(e.getKey(), e.getKey()), e.getValue().docs.size(),
                             e.getValue().media.size(), e.getValue().prevDocs.size(), topNames(e.getValue().names),
                             topNames(e.getValue().items, CROSS_ITEMS).stream()
-                                    .map(n -> new NameCount(shortName(itemTypeNames.getOrDefault(n.name(), n.name())), n.count())).toList()))
+                                    .map(n -> new NameCount(shortName(itemTypeNames.getOrDefault(n.name(), n.name())), n.count())).toList(),
+                            score(e.getValue())))
                     .toList()));
             if (evidence.isEmpty() && !ranked.isEmpty()) { // 첫 번째 축의 상위 값마다 최근 원문
                 ranked.stream().limit(EXAMPLE_VALUES).forEach(e -> e.getValue().examples.stream().limit(EXAMPLES_PER_VALUE)
                         .map(SourceDocument::getDocId).filter(id -> !evidence.contains(id)).forEach(evidence::add));
             }
         }
-        if (scope.itemType() != null) { // 종류를 콕 집었으면 그 종류의 최근 원문
+        if (scope.itemType() != null || evidence.isEmpty()) { // 종류를 콕 집었거나 상위 값에 이번 기간 원문이 없으면(감소 질문) 범위의 최근 원문
             evidence.clear();
             docs.stream().filter(d -> scopeDocs.contains(d.getId())).limit(MAX_EXAMPLES).map(SourceDocument::getDocId).forEach(evidence::add);
         }
@@ -341,7 +385,31 @@ public class TrendFactsService {
         evidence.stream().filter(id -> !merged.contains(id)).forEach(merged::add);
         return new Facts(period, stale, scopeLabel(question) + filterLabel(scope) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
                 dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList(),
-                scope.focus() != null && !dimensions.isEmpty() && scope.focus().equals(dimensions.get(0).valueType()));
+                scope.focus() != null && !dimensions.isEmpty() && scope.focus().equals(dimensions.get(0).valueType()),
+                question.change());
+    }
+
+    /**
+     * 축 하나의 상위 값. 보통은 유행점수 순(같으면 원문 수 순). 증감 질문이면 직전 대비 증감(원문 수 차이) 순 — UP은 늘어난 값만, DOWN은 줄어든 값만
+     * (이번 기간에 사라진 값 포함), BOTH는 달라진 값을 변화 크기 순으로. 차이가 같으면 이번 기간 원문 수가 많은 순.
+     */
+    private static List<Map.Entry<String, Tally>> rank(Map<String, Tally> tallies, String change) {
+        Comparator<Map.Entry<String, Tally>> byCount = Comparator.comparingDouble((Map.Entry<String, Tally> e) -> score(e.getValue())).reversed()
+                .thenComparing(e -> e.getValue().docs.size(), Comparator.reverseOrder())
+                .thenComparing(e -> e.getValue().media.size(), Comparator.reverseOrder())
+                .thenComparing(Map.Entry::getKey);
+        if (change == null) {
+            return tallies.entrySet().stream().filter(e -> !e.getValue().docs.isEmpty()).sorted(byCount).limit(TOP).toList();
+        }
+        java.util.function.ToIntFunction<Map.Entry<String, Tally>> delta = e -> e.getValue().docs.size() - e.getValue().prevDocs.size();
+        return tallies.entrySet().stream()
+                .filter(e -> switch (change) {
+                    case "UP" -> delta.applyAsInt(e) > 0;
+                    case "DOWN" -> delta.applyAsInt(e) < 0;
+                    default -> delta.applyAsInt(e) != 0;
+                })
+                .sorted(Comparator.comparingInt((Map.Entry<String, Tally> e) -> Math.abs(delta.applyAsInt(e))).reversed().thenComparing(byCount))
+                .limit(TOP).toList();
     }
 
     /**
@@ -352,7 +420,8 @@ public class TrendFactsService {
         List<String> types = new ArrayList<>();
         if (scope.category() == null) types.add(TrendWeeklyStat.CATEGORY);
         if (scope.itemType() == null) types.add(TrendItemValue.ITEM_TYPE);
-        types.addAll(List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE));
+        types.addAll(List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.PATTERN, TrendItemValue.SILHOUETTE,
+                TrendItemValue.DETAIL));
         if (scope.category() == null && scope.itemType() == null) { // 전체를 물으면 종류가 먼저(카테고리보다 구체적)
             types.remove(TrendWeeklyStat.CATEGORY);
             types.add(1, TrendWeeklyStat.CATEGORY);
@@ -363,8 +432,18 @@ public class TrendFactsService {
         return types;
     }
 
+    private static double score(Tally t) {
+        return trendScore(t.docs.size(), t.sources.size());
+    }
+
+    /** 유행점수 표기 — 정수면 "5", 아니면 "5.5". */
+    static String score(double score) {
+        return score == Math.rint(score) ? String.valueOf((long) score) : String.valueOf(score);
+    }
+
     private static boolean isAttribute(String type) {
-        return TrendItemValue.MATERIAL.equals(type) || TrendItemValue.COLOR.equals(type) || TrendItemValue.SILHOUETTE.equals(type);
+        return TrendItemValue.MATERIAL.equals(type) || TrendItemValue.COLOR.equals(type) || TrendItemValue.SILHOUETTE.equals(type)
+                || TrendItemValue.PATTERN.equals(type) || TrendItemValue.DETAIL.equals(type);
     }
 
     /** 종류 이름의 괄호 힌트를 뗀다 — "블루종(봄버·항공 점퍼)" → "블루종". */
@@ -447,6 +526,8 @@ public class TrendFactsService {
             case TrendItemValue.COLOR -> g.colors();
             case TrendItemValue.SILHOUETTE -> g.silhouettes();
             case TrendItemValue.GENDER -> g.genders();
+            case TrendItemValue.PATTERN -> g.patterns();
+            case TrendItemValue.DETAIL -> g.details();
             default -> List.of();
         };
     }

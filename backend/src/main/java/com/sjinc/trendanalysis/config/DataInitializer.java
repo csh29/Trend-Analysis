@@ -86,7 +86,11 @@ public class DataInitializer implements CommandLineRunner {
             // 2026-10-28 정답셋(사람이 단 라벨)에 나왔는데 코드에 없던 값: 소재 레이온·아크릴, 실루엣 부츠컷
             // 2026-10-28 사용자 요청: 벨벳 기사의 소재가 비어 벨벳을 따로 센다
             TrendCodes.MATERIAL, List.of("SHEARLING", "RAYON", "ACRYLIC", "VELVET"),
-            TrendCodes.SILHOUETTE, List.of("BOOTCUT"));
+            TrendCodes.SILHOUETTE, List.of("BOOTCUT"),
+            // 2026-10-28 사용자 요청: 구르카 팬츠를 따로 센다(기타 하의로 빠졌다)
+            TrendCodes.ITEM_TYPE, List.of("BOTTOM_GURKHA"),
+            // 2026-10-28 사용자 요청: 패턴을 주간 집계 유형으로 센다(트렌드 분석 화면 유형 목록)
+            TrendCodes.VALUE_TYPE, List.of(TrendItemValue.PATTERN, TrendItemValue.DETAIL));
 
     private void addNewCodes(String group) {
         List<ComCd> codes = comCdRepository.findByCodeGroupOrderBySortOrderAsc(group);
@@ -149,9 +153,11 @@ public class DataInitializer implements CommandLineRunner {
     /** 트렌드 항목 표준 코드(카테고리·소재·컬러·실루엣) 초안. 그룹 단위로 없을 때만 넣는다 — 화면에서 고친 값을 덮어쓰지 않는다. */
     private void seedTrendCodesIfAbsent() {
         List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE,
-                TrendCodes.SEASON, TrendCodes.ITEM_TYPE, TrendCodes.VALUE_TYPE, TrendCodes.TREND_WORD, TrendCodes.GENDER);
+                TrendCodes.SEASON, TrendCodes.ITEM_TYPE, TrendCodes.VALUE_TYPE, TrendCodes.TREND_WORD, TrendCodes.GENDER,
+                TrendCodes.PATTERN, TrendCodes.DETAIL);
         List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣", "트렌드 시즌", "트렌드 아이템 종류",
-                "트렌드 값 종류", "유행 질문 단어", "트렌드 대상(성별)");
+                "트렌드 값 종류", "유행 질문 단어", "트렌드 대상(성별)",
+                "트렌드 패턴", "트렌드 디테일");
         for (int g = 0; g < groups.size(); g++) {
             String group = groups.get(g);
             if (comCdGroupRepository.existsById(group)) {
@@ -181,6 +187,8 @@ public class DataInitializer implements CommandLineRunner {
             TrendCodes.CATEGORY, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 질문에서 이 카테고리를 알아보는 일상 표현(쉼표)",
             TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
             TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다",
+            TrendCodes.PATTERN, "AI 정형화(P-03)가 아이템마다 0~1개 고른다 — 가장 눈에 띄는 무늬, 무늬가 없으면 무지",
+            TrendCodes.DETAIL, "AI 정형화(P-03)가 아이템마다 0~3개 고른다 — 눈에 띄는 디자인 디테일. 속성 = 축(넥라인·여밈·소매밑단·장식·짜임가공), 목록에 없으면 기타 디테일",
             TrendCodes.GENDER, "AI 정형화(P-03)가 아이템마다 0~1개 고른다 — 입은 사람이 아니라 옷의 라인. 판단할 수 없으면 비운다",
             TrendCodes.TREND_WORD, "질문에 이 말(코드명)이 있으면 유행 질문으로 본다 — AI 질문 해석이 실패했을 때 쓰는 규칙");
 

@@ -56,6 +56,8 @@ public class AnalysisService {
     private final AtomicLong totalOutputTokens = new AtomicLong();
     private final AtomicLong totalCacheTokens = new AtomicLong();
     private final AtomicLong claudeCalls = new AtomicLong();
+    /** 캐시가 식었으면 한 건만 먼저 보내 캐시를 만들고, 나머지는 기다렸다가 읽게 한다(분석 스레드 2개가 동시에 만들지 않게). */
+    private final CacheWarmGate cacheWarmGate = new CacheWarmGate();
 
     public AnalysisService(SourceDocumentRepository sourceDocumentRepository, TrendItemRepository trendItemRepository,
                            ComCdRepository comCdRepository, ImageService imageService, AiClient aiClient,
@@ -163,7 +165,7 @@ public class AnalysisService {
             doc.markProcessing(attempt);
             doc = sourceDocumentRepository.save(doc);
             try {
-                AiClient.StructureResponse response = aiClient.structure(request, apiKey);
+                AiClient.StructureResponse response = structureWithWarmCache(request);
                 docUsage = docUsage.plus(recordUsage(doc, attempt, TokenUsage.of(response == null ? null : response.usage())));
                 TrendResultValidator.Outcome outcome = TrendResultValidator.validate(
                         response == null ? null : response.result(), codes);
@@ -223,12 +225,35 @@ public class AnalysisService {
                 + " 캐시=" + totalCacheTokens.get();
     }
 
+    /** 정형화 호출 — 같은 프롬프트 종류의 캐시가 식었으면 먼저 데우는 한 건이 끝날 때까지 기다린다(CacheWarmGate). */
+    private AiClient.StructureResponse structureWithWarmCache(AiClient.StructureRequest request) {
+        String key = CacheWarmGate.keyOf(request);
+        boolean warmer = false;
+        try {
+            warmer = cacheWarmGate.enter(key);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt(); // 기다림이 끊기면 캐시 없이 보낸다
+        }
+        if (warmer) {
+            log.info("캐시 준비 {} — 이 건을 먼저 보내고 같은 종류는 끝날 때까지 기다린다 doc={}", key, request.docId());
+        }
+        boolean succeeded = false;
+        try {
+            AiClient.StructureResponse response = aiClient.structure(request, apiKey);
+            succeeded = response != null;
+            return response;
+        } finally {
+            cacheWarmGate.leave(key, warmer, succeeded);
+        }
+    }
+
     private AiClient.StructureRequest buildRequest(SourceDocument doc, TrendCodeBook codes) {
         AiClient.AllowedCodes allowed = new AiClient.AllowedCodes(
                 options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.ITEM_TYPE)),
                 options(codes.codes(TrendCodes.MATERIAL)),
                 options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)),
-                options(codes.codes(TrendCodes.SEASON)), options(codes.codes(TrendCodes.GENDER)));
+                options(codes.codes(TrendCodes.SEASON)), options(codes.codes(TrendCodes.GENDER)),
+                options(codes.codes(TrendCodes.PATTERN)), options(codes.codes(TrendCodes.DETAIL)));
         // 원문 1건 = 본문 + 이미지 — 텍스트 원문에 첨부한 이미지도 한 요청에 같이 보낸다
         List<AiClient.ImageInput> images = imageService.readDocumentImages(doc).stream()
                 .map(image -> new AiClient.ImageInput(Base64.getEncoder().encodeToString(image.bytes()), image.contentType()))
@@ -273,6 +298,8 @@ public class AnalysisService {
                 addGarmentValues(item, TrendItemValue.COLOR, g.colors(), no, g.category());
                 addGarmentValues(item, TrendItemValue.SILHOUETTE, g.silhouettes(), no, g.category());
                 addGarmentValues(item, TrendItemValue.GENDER, g.genders(), no, g.category());
+                addGarmentValues(item, TrendItemValue.PATTERN, g.patterns(), no, g.category());
+                addGarmentValues(item, TrendItemValue.DETAIL, g.details(), no, g.category());
             }
             trendItemRepository.save(item);
         });
@@ -314,6 +341,8 @@ public class AnalysisService {
             garment.put("colors", g.colors());
             garment.put("silhouettes", g.silhouettes());
             garment.put("genders", g.genders());
+            garment.put("patterns", g.patterns());
+            garment.put("details", g.details());
             return garment;
         }).toList());
         map.put("keywords", v.keywords());

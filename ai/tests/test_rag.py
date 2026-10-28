@@ -366,6 +366,26 @@ class InterpretTest(unittest.TestCase):
         self.assertIsNone(n({**base, "focus": "KEYWORD"}, self.data)["focus"])
         self.assertEqual([""] + self.interpret.FOCUS, self.interpret.build_schema(self.data)["properties"]["focus"]["enum"])
 
+    def test_complex_is_limited_to_types(self):
+        # 복합 질문 유형 — 정해진 값만, 패션 질문이 아니면 None(1단계는 로그만, 동작은 그대로)
+        n = self.interpret.normalize
+        base = {"trend": True, "category": "", "item_type": "", "has_period": False}
+        self.assertEqual("COMPARE", n({**base, "complex": "COMPARE"}, self.data)["complex"])
+        self.assertEqual("SERIES", n({**base, "trend": False, "complex": "SERIES"}, self.data)["complex"])
+        self.assertIsNone(n({**base, "complex": "AGENT"}, self.data)["complex"])
+        self.assertIsNone(n({**base, "fashion": False, "complex": "COMPARE"}, self.data)["complex"])
+        self.assertIn("complex", self.interpret.build_schema(self.data)["required"])
+
+    def test_change_is_only_for_trend_questions(self):
+        # 증감을 묻는지 — 정해진 값만, 유행 질문이 아니면 None
+        n = self.interpret.normalize
+        base = {"trend": True, "category": "", "item_type": "", "has_period": False}
+        self.assertEqual("UP", n({**base, "change": "UP"}, self.data)["change"])
+        self.assertIsNone(n({**base, "change": ""}, self.data)["change"])
+        self.assertIsNone(n({**base, "change": "SIDEWAYS"}, self.data)["change"])
+        self.assertIsNone(n({**base, "trend": False, "change": "UP"}, self.data)["change"])
+        self.assertIn("change", self.interpret.build_schema(self.data)["required"])
+
     def test_terms_are_cleaned_deduped_and_capped(self):
         # 코드로 못 옮긴 단어 — 공백 정리, 공백·대소문자만 다른 중복·빈 값·너무 긴 값은 빼고 3개까지. 빠지면 빈 배열
         n = self.interpret.normalize

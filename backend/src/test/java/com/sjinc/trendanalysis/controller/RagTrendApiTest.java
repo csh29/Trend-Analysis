@@ -124,8 +124,8 @@ class RagTrendApiTest {
         AiClient.AnswerRequest request = sent.getValue();
         assertThat(request.mode()).isEqualTo(AiClient.AnswerRequest.TREND);
         assertThat(request.category()).isEqualTo("OUTER");
-        assertThat(request.trendFacts()).anyMatch(l -> l.startsWith("대상: 아우터 · 원문 4건 · 매체 2곳 (직전 기간 원문 1건)"))
-                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷(트러커) 3건 · 매체 2곳 · 직전 1건 / 패딩"));
+        assertThat(request.trendFacts()).anyMatch(l -> l.startsWith("대상: 아우터 · 원문 4건 · 매체 2곳 (직전 기간 원문 1건, +300%)"))
+                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷(트러커) 유행점수 2.5 · 3건 · 매체 2곳 · 직전 1건(+200%) / 패딩"));
         // 예시 원문: 상위 종류마다 최근 2건 — 데님 재킷(RT-1·RT-2), 패딩(RT-4). 하의·실패·직전 기간 원문은 빠진다
         assertThat(request.evidenceDocIds()).containsExactly("RT-1", "RT-2", "RT-4");
     }

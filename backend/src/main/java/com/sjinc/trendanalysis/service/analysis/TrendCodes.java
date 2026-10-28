@@ -21,6 +21,13 @@ public final class TrendCodes {
      * 의류 아이템마다 0~1개, 판단할 수 없으면 비운다. 판단 기준은 ai/prompts/structure/common.md.
      */
     public static final String GENDER = "TREND_GENDER";
+    /** 옷의 패턴·무늬 — 의류 아이템마다 0~1개(가장 눈에 띄는 무늬). 무지도 값이다 — "무늬 없는 옷이 많다"도 유행 신호라서(2026-10-28 사용자 요청). */
+    public static final String PATTERN = "TREND_PATTERN";
+    /**
+     * 옷의 디자인 디테일(넥라인·여밈·소매·장식·짜임) — 의류 아이템마다 0~3개. "요즘 니트 어떤 포인트가 대세야?"를 세어 답하려고(2026-10-28 사용자 요청).
+     * 속성(attr1)은 축 이름 — 화면에서 묶어 보는 용도. 종류(아이템명)를 늘리지 않고 디테일을 따로 센다.
+     */
+    public static final String DETAIL = "TREND_DETAIL";
     /**
      * 아이템 종류(패딩·블루종·데님 팬츠…) — "유행 = 많이 입는 것"을 세려면 아이템명(LLM 자유 문장)으로는 "데님 트러커 재킷"과
      * "트러커 재킷"이 갈라져서, 집계용으로 정한 목록에서 고르게 한다(2026-10-22 사용자 결정). 코드값은 "카테고리_종류"(OUTER_PADDING)라
@@ -55,7 +62,9 @@ public final class TrendCodes {
             TrendItemValue.COLOR, COLOR,
             TrendItemValue.SILHOUETTE, SILHOUETTE,
             TrendItemValue.SEASON, SEASON,
-            TrendItemValue.GENDER, GENDER);
+            TrendItemValue.GENDER, GENDER,
+            TrendItemValue.PATTERN, PATTERN,
+            TrendItemValue.DETAIL, DETAIL);
 
     /**
      * 기본 데이터 초안 {코드값, 이름, 속성(없으면 생략)}. DataInitializer가 그룹이 없을 때 넣고, 이미 있는 그룹은 속성이 빈 코드에만
@@ -69,7 +78,34 @@ public final class TrendCodes {
      *   <li>카테고리 속성: 질문에서 카테고리를 알아보는 일상 표현(쉼표).</li>
      * </ul>
      */
-    public static final Map<String, List<String[]>> SEED = Map.of(
+    /** 디테일 초안 — SEED에 합친다(Map.of는 10쌍까지라 따로 둔다). */
+    private static final List<String[]> DETAIL_SEED = List.of(
+            // 축(속성) = 넥라인·여밈·소매밑단·장식·짜임가공. 원문 142건의 요약·키워드에 나온 표현과 일반 디테일로 정한 초안(2026-10-28 사용자 확인).
+            // 목록에 없는 디테일은 DETAIL_ETC — 요약 문장에는 그대로 남는다. 기타가 자주 보이면 코드로 올린다
+            new String[]{"NECK_TURTLE", "터틀넥(목폴라)", "넥라인"}, new String[]{"NECK_HALF", "하프넥(하이넥·모크넥·스탠드넥)", "넥라인"},
+            new String[]{"NECK_ROUND", "라운드넥(크루넥)", "넥라인"}, new String[]{"NECK_V", "브이넥", "넥라인"},
+            new String[]{"NECK_COLLAR", "카라(셔츠·숄·피터팬 칼라)", "넥라인"}, new String[]{"NECK_HOOD", "후드", "넥라인"},
+            new String[]{"NECK_OFF", "오프숄더·보트넥", "넥라인"},
+            new String[]{"CLOSE_ZIP", "지퍼(집업)", "여밈"}, new String[]{"CLOSE_BUTTON", "단추 여밈(버튼)", "여밈"},
+            new String[]{"CLOSE_ASYM", "사선·비대칭 여밈", "여밈"}, new String[]{"CLOSE_DOUBLE", "더블 브레스티드", "여밈"},
+            new String[]{"CLOSE_WRAP", "랩·타이(리본 묶음)", "여밈"}, new String[]{"CLOSE_STRING", "스트링(드로스트링)", "여밈"},
+            new String[]{"CLOSE_TOGGLE", "토글·스냅(떡볶이 단추·똑딱)", "여밈"},
+            new String[]{"SLEEVE_RAGLAN", "래글런 소매", "소매밑단"}, new String[]{"SLEEVE_PUFF", "퍼프·벌룬 소매", "소매밑단"},
+            new String[]{"SLEEVE_DROP", "드롭숄더", "소매밑단"}, new String[]{"SLEEVE_CUFF", "단추 커프스(소매 단추)", "소매밑단"},
+            new String[]{"HEM_BAND", "밴딩·시보리(립 밑단)", "소매밑단"}, new String[]{"HEM_SLIT", "트임(슬릿)", "소매밑단"},
+            new String[]{"HEM_UNBAL", "언발 밑단", "소매밑단"},
+            new String[]{"DECO_POCKET", "포켓 강조(카고·패치·플랩 포켓)", "장식"}, new String[]{"DECO_BELT", "벨트(벨티드)", "장식"},
+            new String[]{"DECO_SHIRRING", "셔링·주름(플리츠·턱)", "장식"}, new String[]{"DECO_FUR", "퍼 트리밍(퍼 카라)", "장식"},
+            new String[]{"DECO_STITCH", "스티치", "장식"}, new String[]{"DECO_FRINGE", "프린지·태슬", "장식"},
+            new String[]{"DECO_RUFFLE", "러플·프릴·티어드", "장식"}, new String[]{"DECO_PANEL", "절개·패널(배색 절개)", "장식"},
+            new String[]{"DECO_LACE", "레이스", "장식"},
+            new String[]{"TEX_WASH", "워싱(빈티지·피그먼트 다잉)", "짜임가공"}, new String[]{"TEX_DESTROY", "디스트로이드(데미지)", "짜임가공"},
+            new String[]{"TEX_RIB", "골지(리브)", "짜임가공"}, new String[]{"TEX_CABLE", "꽈배기(케이블)", "짜임가공"},
+            new String[]{"TEX_QUILT", "퀼팅", "짜임가공"}, new String[]{"TEX_HAIRY", "모헤어·헤어리(앙고라·퍼지)", "짜임가공"},
+            new String[]{"TEX_BRUSH", "기모", "짜임가공"},
+            new String[]{"DETAIL_ETC", "기타 디테일"});
+
+    public static final Map<String, List<String[]>> SEED = withDetail(Map.of(
             CATEGORY, List.of(
                     new String[]{"OUTER", "아우터", "겉옷,재킷,자켓,점퍼,잠바"}, new String[]{"TOP", "상의", "윗옷,탑"},
                     new String[]{"BOTTOM", "하의", "바지,팬츠,치마"}, new String[]{"DRESS", "원피스", "드레스"},
@@ -104,6 +140,13 @@ public final class TrendCodes {
                     new String[]{"A_LINE", "A라인", "SHAPE,OUTER,BOTTOM,DRESS"}, new String[]{"H_LINE", "H라인", "SHAPE,OUTER,BOTTOM,DRESS"},
                     new String[]{"FLARE", "플레어", "SHAPE,BOTTOM,DRESS"},
                     new String[]{"BOOTCUT", "부츠컷", "SHAPE,BOTTOM"}), // 2026-10-28 정답셋에 나와 추가 — 무릎 아래가 살짝 퍼지는 바지
+            PATTERN, List.of(
+                    new String[]{"SOLID", "무지(단색)"}, new String[]{"STRIPE", "스트라이프(줄무늬)"},
+                    new String[]{"CHECK", "체크(깅엄·타탄·하운드투스·글렌)"}, new String[]{"FLORAL", "플로럴(꽃무늬)"},
+                    new String[]{"DOT", "도트(물방울)"}, new String[]{"ANIMAL", "애니멀(레오파드·지브라·뱀피)"},
+                    new String[]{"CAMO", "카모(밀리터리 위장)"}, new String[]{"PAISLEY", "페이즐리"},
+                    new String[]{"ARGYLE", "아가일·노르딕(니트 무늬)"}, new String[]{"GRAPHIC", "그래픽·로고 프린트"},
+                    new String[]{"COLOR_BLOCK", "컬러 블록(배색)"}, new String[]{"PATTERN_ETC", "기타 패턴"}),
             GENDER, List.of(
                     new String[]{"WOMEN", "여성복(우먼즈)"}, new String[]{"MEN", "남성복(맨즈)"}, new String[]{"UNISEX", "공용(유니섹스)"}),
             // 여러 개를 고른다(간절기 = 봄·가을). SS/FW는 이 값들을 묶어 본다
@@ -128,6 +171,7 @@ public final class TrendCodes {
                     new String[]{"BOTTOM_CHINO", "면바지(치노)"}, new String[]{"BOTTOM_CARGO", "카고 팬츠"},
                     new String[]{"BOTTOM_TRACK", "트랙·조거 팬츠"}, new String[]{"BOTTOM_SHORTS", "반바지"},
                     new String[]{"BOTTOM_SKIRT", "스커트"}, new String[]{"BOTTOM_LEGGINGS", "레깅스"},
+                    new String[]{"BOTTOM_GURKHA", "구르카 팬츠(넓은 허리 밴드·버클 조임 하이웨이스트)"}, // 2026-10-28 사용자 요청
                     new String[]{"BOTTOM_ETC", "기타 하의"},
                     new String[]{"DRESS_DRESS", "원피스"}, new String[]{"DRESS_JUMPSUIT", "점프수트"},
                     new String[]{"SETUP_SUIT", "수트(테일러드 재킷+같은 원단 하의)"},
@@ -139,13 +183,20 @@ public final class TrendCodes {
                     new String[]{TrendItemValue.KEYWORD, "키워드"}, new String[]{TrendItemValue.ITEM_TYPE, "아이템 종류"},
                     new String[]{TrendItemValue.MATERIAL, "소재"},
                     new String[]{TrendItemValue.COLOR, "컬러"}, new String[]{TrendItemValue.SILHOUETTE, "실루엣"},
-                    new String[]{TrendItemValue.SEASON, "시즌"}, new String[]{"CATEGORY", "카테고리"}),
+                    new String[]{TrendItemValue.SEASON, "시즌"}, new String[]{"CATEGORY", "카테고리"},
+                    new String[]{TrendItemValue.PATTERN, "패턴"}, new String[]{TrendItemValue.DETAIL, "디테일"}),
             // 유행을 묻는 말 — AI 해석이 실패했을 때 규칙으로 알아본다(질문에 이 말이 들어 있으면 유행 질문)
             TREND_WORD, List.of(
                     new String[]{"TREND", "유행"}, new String[]{"TREND2", "트렌드"}, new String[]{"POPULAR", "인기"},
                     new String[]{"RISING", "뜨는"}, new String[]{"RISING2", "떠오르"}, new String[]{"HOT", "핫한"},
                     new String[]{"MAINSTREAM", "대세"}, new String[]{"WORN", "많이 입"}, new String[]{"SEEN", "많이 보이"},
-                    new String[]{"SELLING", "잘 나가"}));
+                    new String[]{"SELLING", "잘 나가"})));
+
+    private static Map<String, List<String[]>> withDetail(Map<String, List<String[]>> base) {
+        Map<String, List<String[]>> all = new java.util.HashMap<>(base);
+        all.put(DETAIL, DETAIL_SEED);
+        return Map.copyOf(all);
+    }
 
     private TrendCodes() {
     }

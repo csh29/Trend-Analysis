@@ -20,6 +20,9 @@
     <properties>
         <java.version>17</java.version>
         <h2.version>2.5.252</h2.version>
+        <!-- 빌드 폴더. 앱을 IDE로 띄워 둔 채 테스트할 때는 -DbuildDir=target-test로 따로 빌드한다 — target/classes를 다시 컴파일하면
+             devtools가 떠 있는 앱을 재시작해 로그인이 풀린다(2026-10-28). -->
+        <buildDir>target</buildDir>
     </properties>
 
     <dependencies>
@@ -82,6 +85,7 @@
     </dependencies>
 
     <build>
+        <directory>${project.basedir}/${buildDir}</directory>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

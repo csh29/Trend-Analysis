@@ -16,6 +16,8 @@
     const ITEM_COLUMNS = [
         { id: 'category', label: '카테고리', width: 90, align: 'center' },
         { id: 'type', label: '종류', width: 110, align: 'center' },
+        { id: 'patterns', label: '패턴', width: 90, align: 'center' },
+        { id: 'details', label: '디테일', width: 160 },
         { id: 'genders', label: '대상', width: 80, align: 'center' },
         { id: 'materials', label: '소재', title: true },
         { id: 'colors', label: '컬러', title: true },
@@ -54,7 +56,7 @@
         const backdrop = document.createElement('div');
         backdrop.className = 'modal-backdrop';
         backdrop.innerHTML =
-            '<div class="modal" style="max-width:720px;">' +
+            '<div class="modal" style="max-width:720px; max-height:80vh;">' +
             '  <h3 data-role="title">분석 결과</h3>' +
             '  <div data-role="body"></div>' +
             '  <div class="modal-actions">' +
@@ -143,6 +145,8 @@
                     materials: names(item.materials),
                     colors: names(item.colors),
                     silhouettes: names(item.silhouettes),
+                    patterns: names(item.patterns),
+                    details: names(item.details),
                     genders: names(item.genders)
                 };
             }));

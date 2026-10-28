@@ -84,6 +84,10 @@ class StructureInput:
     seasons: list[CodeOption]
     # 옷의 대상 라인(여성복·남성복·공용) — 없으면(예전 Spring) genders 칸을 받지 않는다(2026-10-26)
     genders: list[CodeOption] = field(default_factory=list)
+    # 옷의 패턴·무늬(무지·체크…) — 없으면(예전 Spring) patterns 칸을 받지 않는다(2026-10-28)
+    patterns: list[CodeOption] = field(default_factory=list)
+    # 옷의 디자인 디테일(하프넥·사선 여밈·꽈배기…) — 없으면(예전 Spring) details 칸을 받지 않는다(2026-10-28)
+    details: list[CodeOption] = field(default_factory=list)
 
     @property
     def has_text(self) -> bool:
@@ -112,6 +116,12 @@ def build_schema(data: StructureInput) -> dict:
     if data.genders:  # 0~1개(판단할 수 없으면 빈 배열) — 하나만 남기는 것은 Spring 검증
         item["properties"]["genders"] = enum_array(data.genders)
         item["required"].append("genders")
+    if data.patterns:  # 0~1개(가장 눈에 띄는 무늬) — 하나만 남기는 것은 Spring 검증
+        item["properties"]["patterns"] = enum_array(data.patterns)
+        item["required"].append("patterns")
+    if data.details:  # 0~3개(눈에 띄는 것만) — 3개로 자르는 것은 Spring 검증
+        item["properties"]["details"] = enum_array(data.details)
+        item["required"].append("details")
     return {
         "type": "object",
         "properties": {
@@ -137,6 +147,8 @@ def _allowed_values_text(data: StructureInput) -> str:
         line("silhouettes", data.silhouettes),
         line("seasons", data.seasons),
         *([line("genders", data.genders)] if data.genders else []),
+        *([line("patterns", data.patterns)] if data.patterns else []),
+        *([line("details", data.details)] if data.details else []),
     ])
 
 
@@ -161,7 +173,7 @@ def build_content(data: StructureInput) -> list[dict]:
 def candidate_counts(data: StructureInput) -> str:
     """Claude가 판단할 후보(허용 코드) 건수 — 로그용."""
     return (f"본문 {len(data.text or '')}자·이미지 {len(data.images)}장 / 카테고리 {len(data.categories)}·종류 {len(data.item_types)}·소재 {len(data.materials)}·컬러 {len(data.colors)}·"
-            f"실루엣 {len(data.silhouettes)}·시즌 {len(data.seasons)}·대상 {len(data.genders)}")
+            f"실루엣 {len(data.silhouettes)}·시즌 {len(data.seasons)}·대상 {len(data.genders)}·패턴 {len(data.patterns)}·디테일 {len(data.details)}")
 
 
 def structure(data: StructureInput, api_key: str, client: anthropic.Anthropic | None = None) -> tuple[dict, dict]:

@@ -73,7 +73,7 @@ class TrendFactsSeasonTest {
                 .containsExactlyInAnyOrder("레더 재킷", "슬랙스");
         assertThat(colors.rows().get(1).items()).extracting(TrendFactsService.NameCount::name)
                 .containsExactlyInAnyOrder("코트", "레더 재킷");
-        assertThat(fw.lines()).anyMatch(l -> l.startsWith("[컬러] 블랙 2건") && l.contains("[주요 아이템: "));
+        assertThat(fw.lines()).anyMatch(l -> l.startsWith("[컬러] 블랙 유행점수 2 · 2건") && l.contains("[주요 아이템: "));
 
         // 해석이 기간을 빠뜨려도 시즌을 정했으면 시즌 기간(6개월)으로 센다
         TrendFactsService.Facts noPeriod = trendFactsService.count(new QuestionInterpreter.Interpretation(true, null, null, null, null,

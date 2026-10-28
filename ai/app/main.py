@@ -42,6 +42,8 @@ class AllowedCodes(BaseModel):
     silhouettes: list[CodeOptionModel] = Field(min_length=1)
     seasons: list[CodeOptionModel] = Field(min_length=1)
     genders: list[CodeOptionModel] = []  # 옷의 대상 라인 — 예전 Spring은 보내지 않는다
+    patterns: list[CodeOptionModel] = []  # 옷의 패턴·무늬 — 예전 Spring은 보내지 않는다
+    details: list[CodeOptionModel] = []  # 옷의 디자인 디테일 — 예전 Spring은 보내지 않는다
 
 
 MAX_IMAGES = 5  # 원문 한 건에 붙는 이미지 상한(Spring 첨부 상한과 같다)
@@ -132,6 +134,8 @@ class InterpretRequest(BaseModel):
     colors: list[CodeHintModel] = []
     silhouettes: list[CodeHintModel] = []
     genders: list[CodeHintModel] = []  # 대상 라인(여성복…) — 예전 Spring은 보내지 않는다
+    patterns: list[CodeHintModel] = []  # 패턴(체크…) — 예전 Spring은 보내지 않는다
+    details: list[CodeHintModel] = []  # 디테일(하프넥…) — 예전 Spring은 보내지 않는다
 
 
 @app.get("/health")
@@ -171,6 +175,8 @@ def structure_document(req: StructureRequest, x_claude_api_key: str | None = Hea
         silhouettes=[CodeOption(o.value, o.name) for o in req.allowed.silhouettes],
         seasons=[CodeOption(o.value, o.name) for o in req.allowed.seasons],
         genders=[CodeOption(o.value, o.name) for o in req.allowed.genders],
+        patterns=[CodeOption(o.value, o.name) for o in req.allowed.patterns],
+        details=[CodeOption(o.value, o.name) for o in req.allowed.details],
     )
     log.info("정형화 시작 doc_id=%s type=%s model=%s 판단 후보: %s", req.doc_id, req.doc_type, req.model,
              candidate_counts(data))
@@ -273,6 +279,8 @@ def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Hea
             colors=[interpreter.CodeHint(c.value, c.name) for c in req.colors],
             silhouettes=[interpreter.CodeHint(c.value, c.name) for c in req.silhouettes],
             genders=[interpreter.CodeHint(c.value, c.name) for c in req.genders],
+            patterns=[interpreter.CodeHint(c.value, c.name) for c in req.patterns],
+            details=[interpreter.CodeHint(c.value, c.name) for c in req.details],
             # 앞 대화는 최근 몇 건만, 질문은 상한까지만 — 화면이 보낸 값이라 길이를 믿지 않는다
             history=[interpreter.Turn(h.question[:MAX_QUESTION_LENGTH], h.trend, h.category or "", h.item_type or "",
                                       h.period_label or "", h.period_from or "", h.period_to or "")

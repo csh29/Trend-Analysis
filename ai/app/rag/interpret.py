@@ -34,9 +34,13 @@ MAX_TOKENS = 2000
 MAX_HISTORY = 3  # 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다
 MAX_QUESTION_LENGTH = 500
 MAX_TERMS = 3
-ATTRIBUTES = ["materials", "colors", "silhouettes", "genders"]  # 대상을 좁히는 속성 값 칸(genders: "여성 아우터" → WOMEN)
+ATTRIBUTES = ["materials", "colors", "silhouettes", "genders", "patterns", "details"]  # 대상을 좁히는 속성 값 칸(genders: "여성 아우터" → WOMEN, patterns: "체크 셔츠" → CHECK)
 # 유행 질문이 묻는 축 — Spring 집계 값 종류(TrendItemValue·TrendWeeklyStat.CATEGORY)와 같은 코드
-FOCUS = ["ITEM_TYPE", "CATEGORY", "MATERIAL", "COLOR", "SILHOUETTE"]
+FOCUS = ["ITEM_TYPE", "CATEGORY", "MATERIAL", "COLOR", "SILHOUETTE", "PATTERN", "DETAIL"]
+# 증감을 묻는 유행 질문(급상승·감소·전월 대비) — Spring이 증감 순으로 세고 직전 대비 %를 붙인다(2026-10-28 사용자 요청)
+CHANGE = ["UP", "DOWN", "BOTH"]
+# 지금 경로(집계 한 번·검색 한 번)로 못 담는 복합 질문 유형 — 혼합형 1단계는 로그로 비율만 본다(2026-10-28 사용자 결정, 도구 경로는 다음 단계)
+COMPLEX = ["COMPARE", "SERIES", "MEDIA", "BRIEF"]
 MAX_TERM_LENGTH = 20
 
 
@@ -73,6 +77,8 @@ class InterpretInput:
     colors: list[CodeHint] = field(default_factory=list)
     silhouettes: list[CodeHint] = field(default_factory=list)
     genders: list[CodeHint] = field(default_factory=list)
+    patterns: list[CodeHint] = field(default_factory=list)
+    details: list[CodeHint] = field(default_factory=list)
 
 
 def build_schema(data: InterpretInput) -> dict:
@@ -92,9 +98,11 @@ def build_schema(data: InterpretInput) -> dict:
             # 카테고리·종류 코드로 옮기지 못한 패션 단어(무스탕·발마칸…) — Spring이 키워드·아이템명에서 센다. 개수 제한은 normalize가 한다
             "terms": {"type": "array", "items": {"type": "string"}},
             "focus": {"type": "string", "enum": [""] + FOCUS},  # 유행 질문이 묻는 축(없으면 "")
+            "change": {"type": "string", "enum": [""] + CHANGE},  # 증감을 묻는지(없으면 "")
+            "complex": {"type": "string", "enum": [""] + COMPLEX},  # 복합 질문 유형(없으면 "")
         },
         "required": ["question", "fashion", "trend", "category", "item_type", "has_period", "period_from", "period_to", "period_label",
-                     "terms", "focus"],
+                     "terms", "focus", "change", "complex"],
         "additionalProperties": False,
     }
     if data.seasons:  # 질문이 가리키는 시즌 — 유행 집계가 원문의 시즌 값으로 거른다
@@ -159,6 +167,8 @@ def normalize(result: dict, data: InterpretInput) -> dict:
             "category": category, "item_type": item_type, "period": period, "terms": _terms(result.get("terms")),
             "seasons": _seasons(result.get("seasons"), data),
             "focus": result.get("focus") if result.get("focus") in FOCUS else None,
+            "change": result.get("change") if result.get("trend") and result.get("change") in CHANGE else None,
+            "complex": result.get("complex") if result.get("fashion", True) is not False and result.get("complex") in COMPLEX else None,
             **{key: _codes(result.get(key), getattr(data, key)) for key in ATTRIBUTES}}
 
 
@@ -187,7 +197,7 @@ def _terms(raw) -> list[str]:
 
 
 def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | None = None) -> dict:
-    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, materials, colors, silhouettes, genders, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
+    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, change, complex, materials, colors, silhouettes, genders, patterns, details, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
     if not data.categories or not data.item_types:
         raise AiServiceError("해석에 쓸 공통코드가 없습니다.", retryable=False, status_code=400)
     started = time.monotonic()
@@ -200,8 +210,8 @@ def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | 
                                              "effort": "low"})
     usage = usage_of(response, time.monotonic() - started)
     result = normalize(parse_json(response, usage), data)
-    log.info("질문 해석 model=%s 소요=%.1fs 앞 대화=%d건 다시 씀=%s 패션=%s 유행=%s 카테고리=%s 종류=%s 속성=%s 축=%s 단어=%s 시즌=%s 기간=%s 토큰 in=%d out=%d",
+    log.info("질문 해석 model=%s 소요=%.1fs 앞 대화=%d건 다시 씀=%s 패션=%s 유행=%s 카테고리=%s 종류=%s 속성=%s 축=%s 증감=%s 복합=%s 단어=%s 시즌=%s 기간=%s 토큰 in=%d out=%d",
              data.model, usage["elapsed_ms"] / 1000, len(data.history), result["question"] != data.question,
-             result["fashion"], result["trend"], result["category"], result["item_type"], [v for k in ATTRIBUTES for v in result[k]], result["focus"], result["terms"], result["seasons"],
+             result["fashion"], result["trend"], result["category"], result["item_type"], [v for k in ATTRIBUTES for v in result[k]], result["focus"], result["change"], result["complex"], result["terms"], result["seasons"],
              result["period"]["label"] if result["period"] else "-", usage["input_tokens"], usage["output_tokens"])
     return {**result, "usage": usage}

@@ -69,6 +69,7 @@ http://localhost:8080 에 접속해 로그인한다. 분석까지 보려면 AI �
 ./mvnw test
 ```
 
+- **앱을 IDE로 띄워 둔 채 테스트할 때는 `./mvnw test -DbuildDir=target-test`**로 빌드 폴더를 나눈다. `target/classes`를 다시 컴파일하면 devtools가 떠 있는 앱을 재시작해 세션이 풀린다(로그인 화면으로 튕긴다).
 - 변경을 마치기 전에 통과시킨다. 기능별로 고칠 때 확인할 것은 각 기능 문서의 "확인할 것"·"테스트" 절에 있다. 그 절이 없는 기능 문서는 "주의점"에 적는다.
 - `@SpringBootTest` + `@AutoConfigureMockMvc`로 전체 컨텍스트를 띄운다. 보안 필터·`DataInitializer`까지 실제와 같이 돈다.
 - 로그인은 `@WithMockUser(username = "...")`로 흉내 낸다. 메뉴·권한은 그 username으로 DB를 조회하므로, **DB에 있는 사용자 이름**을 써야 권한이 붙는다. 권한 없음은 `nobody`처럼 없는 이름으로 확인한다.

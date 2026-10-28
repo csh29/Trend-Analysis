@@ -35,7 +35,7 @@ GOLD_DIR = AI_DIR / "evals" / "gold"
 RESULTS = AI_DIR / "evals" / "results"
 BACKEND = AI_DIR.parent / "backend"
 MODEL = "claude-sonnet-5"
-ATTRS = ("materials", "colors", "silhouettes", "genders")  # genders는 정답에 칸이 있는 아이템만 채점한다
+ATTRS = ("materials", "colors", "silhouettes", "genders", "patterns", "details")  # genders·patterns는 정답에 칸이 있는 아이템만 채점한다
 
 
 def api_key() -> str:
@@ -58,10 +58,13 @@ def seed_codes() -> dict:
     def opts(rows):
         return [st.CodeOption(v, n) for v, n, _ in rows]
 
+    # 디테일 초안은 SEED 밖 DETAIL_SEED에 따로 있다(Map.of 10쌍 제한)
+    i = java.index("DETAIL_SEED = List.of(")
+    detail_rows = re.findall(r'new String\[\]\{"([^"]+)", "([^"]+)"(?:, ("[^"]*"|[A-Z_]+))?\}', java[i:java.index("SEED = withDetail", i)])
     image_materials = [st.CodeOption(v, n) for v, n, a in group("MATERIAL") if a == "ATTR_IMAGE"]
     return dict(categories=opts(group("CATEGORY")), item_types=opts(group("ITEM_TYPE")), materials=image_materials,
                 colors=opts(group("COLOR")), silhouettes=opts(group("SILHOUETTE")), seasons=opts(group("SEASON")),
-                genders=opts(group("GENDER")))
+                genders=opts(group("GENDER")), patterns=opts(group("PATTERN")), details=opts(detail_rows))
 
 
 def match(gold: list[dict], pred: list[dict]) -> list[tuple[dict, dict | None]]:
