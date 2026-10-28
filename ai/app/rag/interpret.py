@@ -34,7 +34,7 @@ MAX_TOKENS = 2000
 MAX_HISTORY = 3  # 이어 묻기는 거의 바로 앞 질문을 가리킨다 — 많이 넣으면 엉뚱한 앞 질문에 이어 붙인다
 MAX_QUESTION_LENGTH = 500
 MAX_TERMS = 3
-ATTRIBUTES = ["materials", "colors", "silhouettes"]  # 대상을 좁히는 속성 값 칸
+ATTRIBUTES = ["materials", "colors", "silhouettes", "genders"]  # 대상을 좁히는 속성 값 칸(genders: "여성 아우터" → WOMEN)
 # 유행 질문이 묻는 축 — Spring 집계 값 종류(TrendItemValue·TrendWeeklyStat.CATEGORY)와 같은 코드
 FOCUS = ["ITEM_TYPE", "CATEGORY", "MATERIAL", "COLOR", "SILHOUETTE"]
 MAX_TERM_LENGTH = 20
@@ -72,6 +72,7 @@ class InterpretInput:
     materials: list[CodeHint] = field(default_factory=list)
     colors: list[CodeHint] = field(default_factory=list)
     silhouettes: list[CodeHint] = field(default_factory=list)
+    genders: list[CodeHint] = field(default_factory=list)
 
 
 def build_schema(data: InterpretInput) -> dict:
@@ -186,7 +187,7 @@ def _terms(raw) -> list[str]:
 
 
 def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | None = None) -> dict:
-    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, materials, colors, silhouettes, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
+    """{question, fashion, trend, category, item_type, period, terms, seasons, focus, materials, colors, silhouettes, genders, usage}. Claude 호출 실패는 AiServiceError(Spring이 규칙으로 대신한다)."""
     if not data.categories or not data.item_types:
         raise AiServiceError("해석에 쓸 공통코드가 없습니다.", retryable=False, status_code=400)
     started = time.monotonic()

@@ -1,0 +1,31 @@
+{
+  "_doc": [
+    "P-06 검색(벡터) 평가 질문(2026-10-26). 정답 문서는 손으로 고르지 않고 분석 결과로 정한다(rule) — 원문의 의류 아이템 하나가 rule의 칸을 모두 만족하면 정답.",
+    "rule 칸: types(아이템 종류 중 하나), category, materials·silhouettes(그 값 중 하나), text(키워드·아이템명에 그 말 중 하나가 들어감 — 공백 무시). 칸끼리는 모두(AND).",
+    "negative는 자료에 없는 주제 — 정답이 없고, 1위 점수가 기준 유사도(0.60)보다 낮아야 한다.",
+    "정답이 분석 결과에 기대므로 분석이 틀린 원문(예: 레더 재킷을 데님 재킷으로 분류)은 정답에서 빠진다 — 그런 경우 결과에서 '정답 밖 상위 문서'로 보인다."
+  ],
+  "questions": [
+    {"id": "S01", "q": "레더 재킷 코디 사례 보여줘", "rule": {"types": ["OUTER_LEATHER_JACKET"]}},
+    {"id": "S02", "q": "와이드 데님 팬츠 스타일링", "rule": {"category": "BOTTOM", "silhouettes": ["WIDE"], "text": ["데님", "청바지"]}},
+    {"id": "S03", "q": "무스탕 아우터 사례", "rule": {"text": ["무스탕", "시어링"]}},
+    {"id": "S04", "q": "데님 트러커 재킷 어떻게 입어?", "rule": {"types": ["OUTER_DENIM_JACKET"]}},
+    {"id": "S05", "q": "숏패딩 스타일", "rule": {"types": ["OUTER_PADDING"]}},
+    {"id": "S06", "q": "니트 스웨터 코디", "rule": {"types": ["TOP_KNIT", "TOP_CARDIGAN"]}},
+    {"id": "S07", "q": "플리스 집업 자켓", "rule": {"text": ["플리스", "후리스"]}},
+    {"id": "S08", "q": "스커트 코디 보여줘", "rule": {"types": ["BOTTOM_SKIRT"]}},
+    {"id": "S09", "q": "코듀로이 소재 옷", "rule": {"materials": ["CORDUROY"]}},
+    {"id": "S10", "q": "트렌치코트 스타일링", "rule": {"types": ["OUTER_TRENCH"]}},
+    {"id": "S11", "q": "블레이저 출근룩", "rule": {"types": ["OUTER_BLAZER"]}},
+    {"id": "S12", "q": "체크 셔츠 코디", "rule": {"types": ["TOP_SHIRT"], "text": ["체크"]}},
+    {"id": "S13", "q": "카고 팬츠 스타일", "rule": {"types": ["BOTTOM_CARGO"]}},
+    {"id": "S14", "q": "스웨이드 재킷", "rule": {"materials": ["SUEDE"]}},
+    {"id": "S15", "q": "트랙 재킷 저지 스타일", "rule": {"types": ["OUTER_TRACK_JACKET", "SETUP_TRACKSUIT"]}},
+    {"id": "S16", "q": "크롭 기장 아우터", "rule": {"category": "OUTER", "silhouettes": ["CROPPED"]}},
+    {"id": "N01", "q": "비키니 수영복 트렌드", "negative": true},
+    {"id": "N02", "q": "러닝화 스니커즈 추천", "negative": true},
+    {"id": "N03", "q": "웨딩드레스 디자인", "negative": true},
+    {"id": "N04", "q": "주식 투자 잘하는 방법", "negative": true},
+    {"id": "N05", "q": "아이 유치원 가방 추천", "negative": true}
+  ]
+}

@@ -47,8 +47,7 @@ class AiClientWireTest {
     }
 
     private static AiClient.AnswerRequest request() {
-        return new AiClient.AnswerRequest("요즘 와이드 팬츠", "claude-sonnet-5", 8, 0.6, "2026-10-19",
-                List.of(new AiClient.StatRow("키워드", "와이드 팬츠", 3, 1, 200.0, true, false)),
+        return new AiClient.AnswerRequest("요즘 와이드 팬츠", "claude-sonnet-5", 8, 0.6,
                 LocalDate.of(2026, 10, 22).toString(), AiClient.AnswerRequest.SEARCH, "OUTER",
                 new AiClient.AnswerPeriod("2026-10-12", "2026-10-18", "지난주", true, false), List.of(), List.of());
     }
@@ -68,7 +67,6 @@ class AiClientWireTest {
         assertThat(sent.path("today").isTextual()).isTrue();
         assertThat(sent.path("today").asText()).isEqualTo("2026-10-22");
         assertThat(sent.path("top_k").asInt()).isEqualTo(8);
-        assertThat(sent.path("stats").get(0).path("is_new").isBoolean()).isTrue();
         // 질문 해석 결과(Spring) — AI 서비스의 PeriodModel은 from/to 이름으로 받는다
         assertThat(sent.path("mode").asText()).isEqualTo("SEARCH");
         assertThat(sent.path("period").path("from").asText()).isEqualTo("2026-10-12");

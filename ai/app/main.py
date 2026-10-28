@@ -41,6 +41,7 @@ class AllowedCodes(BaseModel):
     colors: list[CodeOptionModel] = Field(min_length=1)
     silhouettes: list[CodeOptionModel] = Field(min_length=1)
     seasons: list[CodeOptionModel] = Field(min_length=1)
+    genders: list[CodeOptionModel] = []  # 옷의 대상 라인 — 예전 Spring은 보내지 않는다
 
 
 MAX_IMAGES = 5  # 원문 한 건에 붙는 이미지 상한(Spring 첨부 상한과 같다)
@@ -77,16 +78,6 @@ class IndexRequest(BaseModel):
     meta: dict = {}
 
 
-class StatRowModel(BaseModel):
-    type_label: str
-    label: str
-    count: int
-    prev_count: int = 0
-    prev_rate: float | None = None
-    surge: bool = False
-    is_new: bool = False
-
-
 MAX_QUESTION_LENGTH = 500
 
 
@@ -102,8 +93,6 @@ class AnswerRequest(BaseModel):
     model: str
     top_k: int = Field(default=8, ge=1, le=20)
     min_score: float = Field(ge=0.0, le=1.0)
-    stats_week: str | None = None
-    stats: list[StatRowModel] = []
     today: date | None = None  # 최신성·기간의 기준일 — Spring 서버 날짜. 없으면 이 서버 날짜
     # 질문 해석은 Spring이 한다(유행 질문인지·카테고리·기간 — QuestionInterpreter)
     mode: str = Field(default="SEARCH", pattern="^(SEARCH|TREND)$")
@@ -142,6 +131,7 @@ class InterpretRequest(BaseModel):
     materials: list[CodeHintModel] = []  # 대상을 좁히는 속성 값 후보 — 예전 Spring은 보내지 않는다
     colors: list[CodeHintModel] = []
     silhouettes: list[CodeHintModel] = []
+    genders: list[CodeHintModel] = []  # 대상 라인(여성복…) — 예전 Spring은 보내지 않는다
 
 
 @app.get("/health")
@@ -180,6 +170,7 @@ def structure_document(req: StructureRequest, x_claude_api_key: str | None = Hea
         colors=[CodeOption(o.value, o.name) for o in req.allowed.colors],
         silhouettes=[CodeOption(o.value, o.name) for o in req.allowed.silhouettes],
         seasons=[CodeOption(o.value, o.name) for o in req.allowed.seasons],
+        genders=[CodeOption(o.value, o.name) for o in req.allowed.genders],
     )
     log.info("정형화 시작 doc_id=%s type=%s model=%s 판단 후보: %s", req.doc_id, req.doc_type, req.model,
              candidate_counts(data))
@@ -253,8 +244,6 @@ def answer_question(req: AnswerRequest, x_claude_api_key: str | None = Header(de
     try:
         question = rag.ensure_question(req.question, MAX_QUESTION_LENGTH)
         data = rag.AnswerInput(question=question, model=req.model, top_k=req.top_k, min_score=req.min_score,
-                               stats_week=req.stats_week,
-                               stats=[rag.StatRow(**s.model_dump()) for s in req.stats],
                                today=req.today or date.today(), mode=req.mode, category=req.category,
                                period=rag.Period(req.period.start, req.period.end, req.period.label, req.period.explicit)
                                if req.period else None,
@@ -283,6 +272,7 @@ def interpret_question(req: InterpretRequest, x_claude_api_key: str | None = Hea
             materials=[interpreter.CodeHint(c.value, c.name) for c in req.materials],
             colors=[interpreter.CodeHint(c.value, c.name) for c in req.colors],
             silhouettes=[interpreter.CodeHint(c.value, c.name) for c in req.silhouettes],
+            genders=[interpreter.CodeHint(c.value, c.name) for c in req.genders],
             # 앞 대화는 최근 몇 건만, 질문은 상한까지만 — 화면이 보낸 값이라 길이를 믿지 않는다
             history=[interpreter.Turn(h.question[:MAX_QUESTION_LENGTH], h.trend, h.category or "", h.item_type or "",
                                       h.period_label or "", h.period_from or "", h.period_to or "")

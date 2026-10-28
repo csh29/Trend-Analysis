@@ -16,6 +16,7 @@
     const ITEM_COLUMNS = [
         { id: 'category', label: '카테고리', width: 90, align: 'center' },
         { id: 'type', label: '종류', width: 110, align: 'center' },
+        { id: 'genders', label: '대상', width: 80, align: 'center' },
         { id: 'materials', label: '소재', title: true },
         { id: 'colors', label: '컬러', title: true },
         { id: 'silhouettes', label: '실루엣', title: true }
@@ -141,7 +142,8 @@
                     type: item.type ? item.type.name : '-',
                     materials: names(item.materials),
                     colors: names(item.colors),
-                    silhouettes: names(item.silhouettes)
+                    silhouettes: names(item.silhouettes),
+                    genders: names(item.genders)
                 };
             }));
             body.append(title, table);

@@ -68,8 +68,7 @@ TODAY = date(2026, 10, 22)
 
 def data(min_score=0.6, question="와이드 팬츠 유행?", **kwargs):
     return rag.AnswerInput(question=question, model="claude-sonnet-5", top_k=8, min_score=min_score,
-                           stats_week="2026-10-19",
-                           stats=[rag.StatRow("키워드", "와이드 팬츠", 9, 3, 200.0, True, False)], today=TODAY, **kwargs)
+                           today=TODAY, **kwargs)
 
 
 LAST_WEEK = rag.Period(date(2026, 10, 12), date(2026, 10, 18), "지난주", True)
@@ -120,8 +119,6 @@ class RagTest(unittest.TestCase):
         self.assertIn('<source n="1" type="이미지 분석 요약"', sent)
         self.assertIn("와이드 팬츠가 유행", sent)
         self.assertNotIn("패딩 재킷", sent)  # 기준(0.6) 미달 청크는 보내지 않는다
-        self.assertIn("키워드 와이드 팬츠: 9건 (전주 3건, 전주 대비 +200.0%) 급상승", sent)
-        self.assertIn("2026-10-19", sent)
         self.assertTrue(result["grounded"])
         self.assertEqual(["TXT-1"], [s["doc_id"] for s in result["sources"]])  # 중복·없는 번호는 뺀다
         self.assertEqual(2, result["sources"][0]["n"])
@@ -251,7 +248,7 @@ class RagTest(unittest.TestCase):
                                      "cat_OUTER": True, "cat_BOTTOM": True, "meta_v": 2}]), Store.updated)
 
     def test_prompt_sections_loaded(self):
-        self.assertIn("{week}", rag.PROMPT["stats_header"])
+        self.assertIn("{today}", rag.PROMPT["period"])
 
     def test_system_prompt_sends_only_rules_for_the_mode(self):
         # 유행 질문엔 유행 규칙만, 검색 질문엔 검색 규칙만 — 공통 규칙은 둘 다
@@ -281,11 +278,10 @@ class RagApiTest(unittest.TestCase):
         with mock.patch.object(main.rag, "answer", return_value={"grounded": False}) as a, \
                 mock.patch.object(main.vector_store, "get_collection", return_value=None):
             res = self.client.post("/answer", headers={"X-Claude-Api-Key": "secret"},
-                                   json={"question": "와이드 팬츠", "model": "m", "min_score": 0.6,
-                                         "stats": [{"type_label": "키워드", "label": "와이드 팬츠", "count": 3}]})
+                                   json={"question": "와이드 팬츠", "model": "m", "min_score": 0.6})
         self.assertEqual(200, res.status_code)
         self.assertEqual("secret", a.call_args.args[2])
-        self.assertEqual("와이드 팬츠", a.call_args.args[1].stats[0].label)
+        self.assertEqual("와이드 팬츠", a.call_args.args[1].question)
         self.assertNotIn("secret", res.text)
 
     def test_answer_accepts_spring_interpretation(self):

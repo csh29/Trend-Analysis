@@ -23,6 +23,7 @@ class TrendResultValidatorTest {
             TrendCodes.COLOR, List.of(code(TrendCodes.COLOR, "BROWN", "브라운"), code(TrendCodes.COLOR, "BLACK", "블랙")),
             TrendCodes.SILHOUETTE, List.of(code(TrendCodes.SILHOUETTE, "OVERSIZED", "오버사이즈")),
             TrendCodes.SEASON, List.of(code(TrendCodes.SEASON, "FALL", "가을"), code(TrendCodes.SEASON, "WINTER", "겨울")),
+            TrendCodes.GENDER, List.of(code(TrendCodes.GENDER, "WOMEN", "여성복"), code(TrendCodes.GENDER, "MEN", "남성복")),
             TrendCodes.ITEM_TYPE, List.of(code(TrendCodes.ITEM_TYPE, "OUTER_ETC", "기타 아우터"),
                     code(TrendCodes.ITEM_TYPE, "OUTER_PADDING", "패딩"), code(TrendCodes.ITEM_TYPE, "BOTTOM_ETC", "기타 하의"),
                     code(TrendCodes.ITEM_TYPE, "BOTTOM_DENIM", "데님 팬츠"), code(TrendCodes.ITEM_TYPE, "ETC", "기타"))));
@@ -62,6 +63,19 @@ class TrendResultValidatorTest {
         assertThat(v.items().get(1).colors()).containsExactly("BLACK");      // 속성은 그 아이템 것만
         assertThat(v.keywords()).containsExactly("레더 재킷", "뉴트로");
         assertThat(v.seasons()).containsExactly("FALL", "WINTER");
+        assertThat(v.items().get(0).genders()).isEmpty(); // 성별 칸이 없는 예전 결과는 빈 값(실패 아님)
+    }
+
+    @Test
+    void 대상_라인은_하나만_남기고_공통코드_밖_값은_거부한다() {
+        Map<String, Object> raw = valid();
+        Map<String, Object> outer = item("OUTER", "레더 재킷", List.of(), List.of());
+        outer.put("genders", List.of("WOMEN", "MEN"));
+        raw.put("items", List.of(outer));
+        assertThat(TrendResultValidator.validate(raw, codes).validated().items().get(0).genders()).containsExactly("WOMEN");
+
+        outer.put("genders", List.of("KIDS"));
+        assertThat(TrendResultValidator.validate(raw, codes).errors()).anyMatch(e -> e.contains("genders"));
     }
 
     @Test

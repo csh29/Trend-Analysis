@@ -131,9 +131,6 @@ class RagApiTest {
         assertThat(sent.getValue().minScore()).isEqualTo(0.60);
         assertThat(sent.getValue().model()).isEqualTo("claude-sonnet-5");
         assertThat(sent.getValue().today()).isEqualTo(LocalDate.now().toString()); // 최신성·기간의 기준일 — "2026-10-22" 꼴 문자열
-        // 주간 집계 참고 수치는 보내지 않는다 — 질문 대상과 상관없는 수치를 섞어 썼다(2026-10-23 기준 점수)
-        assertThat(sent.getValue().stats()).isEmpty();
-        assertThat(sent.getValue().statsWeek()).isNull();
     }
 
     @Test

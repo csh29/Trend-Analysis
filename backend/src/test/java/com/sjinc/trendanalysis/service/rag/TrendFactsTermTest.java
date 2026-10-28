@@ -72,6 +72,58 @@ class TrendFactsTermTest {
         assertThat(facts.lines()).anyMatch(l -> l.startsWith("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] 무스탕 3건 · 매체 2곳 · 직전 1건 (나온 표현: "));
     }
 
+    /** 옷 여러 벌짜리 원문 — garments는 {카테고리, 종류, 이름, 컬러, 실루엣} (컬러·실루엣은 빈 문자열이면 없음). */
+    private void outfit(String docId, int daysAgo, String media, List<String> keywords, String[]... garments) {
+        SourceDocument doc = sourceDocumentRepository.save(SourceDocument.builder()
+                .docType(SourceDocument.TYPE_IMAGE).docId(docId).title(docId + ".png").media(media)
+                .publishedAt(TODAY.minusDays(daysAgo)).status(SourceDocument.DONE).registeredBy("admin").registeredAt(LocalDateTime.now()).build());
+        TrendItem item = TrendItem.builder().documentId(doc.getId()).category(garments[0][0])
+                .summary(docId + " 요약").resultJson("{}").createdAt(LocalDateTime.now()).build();
+        for (int i = 0; i < keywords.size(); i++) {
+            item.addValue(TrendItemValue.KEYWORD, keywords.get(i), i);
+        }
+        for (int no = 0; no < garments.length; no++) {
+            String[] g = garments[no];
+            item.addGarmentValue(TrendItemValue.ITEM, g[2], 0, no, g[0]);
+            item.addGarmentValue(TrendItemValue.ITEM_TYPE, g[1], 0, no, g[0]);
+            if (!g[3].isEmpty()) item.addGarmentValue(TrendItemValue.COLOR, g[3], 0, no, g[0]);
+            if (!g[4].isEmpty()) item.addGarmentValue(TrendItemValue.SILHOUETTE, g[4], 0, no, g[0]);
+        }
+        trendItemRepository.save(item);
+    }
+
+    @Test
+    void 질문_단어_대상_옷의_포인트를_센다() {
+        // 앞 테스트 원문(TM-1 키워드 "레더 재킷")과 섞이지 않게 "가죽 재킷"으로 센다.
+        // 2026-10-26: "레더 재킷 9건"만으로는 어떤 레더 재킷이 뜨는지 몰랐다 — 대상 옷의 컬러·실루엣, 함께 나온 옷, 키워드를 센다
+        outfit("PT-1", 1, "매체A", List.of("그런지", "가죽 재킷"),
+                new String[]{"OUTER", "OUTER_LEATHER_JACKET", "블랙 가죽 라이더 재킷", "BLACK", "CROPPED"},
+                new String[]{"BOTTOM", "BOTTOM_DENIM", "와이드 데님 팬츠", "BLUE", "WIDE"});
+        outfit("PT-2", 2, "매체B", List.of("그런지"),
+                new String[]{"OUTER", "OUTER_LEATHER_JACKET", "가죽 재킷", "BLACK", ""});
+        outfit("PT-3", 40, "매체A", List.of(),
+                new String[]{"OUTER", "OUTER_LEATHER_JACKET", "가죽재킷", "BLACK", ""});
+
+        TrendFactsService.Facts facts = trendFactsService.count(new QuestionInterpreter.Interpretation(true, null, null,
+                null, null, null, List.of("가죽 재킷", "와이드 팬츠")), TODAY);
+
+        TrendFactsService.TermRow leather = facts.terms().get(0);
+        assertThat(leather.count()).isEqualTo(2);
+        assertThat(leather.prevCount()).isEqualTo(1); // 붙여 쓴 "가죽재킷"도 걸린다
+        TrendFactsService.TermPoint color = leather.points().get(0);
+        assertThat(color.label()).isEqualTo("컬러");
+        assertThat(color.values()).containsExactly(new TrendFactsService.ValueCount("블랙", 2, 1));
+        assertThat(leather.points()).extracting(TrendFactsService.TermPoint::label).containsExactly("컬러", "실루엣");
+        assertThat(leather.together()).containsExactly(new TrendFactsService.NameCount("데님 팬츠", 1));
+        assertThat(leather.keywords()).containsExactly(new TrendFactsService.NameCount("그런지", 2)); // 질문 단어 자체인 키워드는 뺀다
+
+        // 낱말이 모두 들어 있으면 걸린다 — "와이드 팬츠" → "와이드 데님 팬츠"
+        TrendFactsService.TermRow wide = facts.terms().get(1);
+        assertThat(wide.count()).isEqualTo(1);
+        assertThat(wide.together()).containsExactly(new TrendFactsService.NameCount("레더 재킷", 1));
+        assertThat(facts.lines()).contains("  - 가죽 재킷 옷의 컬러: 블랙 2건(직전 1)");
+    }
+
     @Test
     void 질문_단어는_빈_값_긴_값_중복을_거르고_세_개까지() {
         assertThat(RagService.terms(Arrays.asList(" 무스탕 ", null, "", "무스탕", "가".repeat(21), "발마칸  코트", "고프코어", "카고")))

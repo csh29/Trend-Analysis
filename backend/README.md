@@ -7,7 +7,7 @@
 | --- | --- |
 | Language | Java 17 |
 | Framework | Spring Boot 3.3.4 |
-| Build Tool | Maven (`mvnw` 스크립트는 있지만 `.mvn/wrapper/`는 커밋 제외 — 새로 클론했으면 설치된 `mvn`이나 IDE로 빌드) |
+| Build Tool | Maven |
 | Group / Artifact | `org.example` / `trend-analysis` |
 | 기본 패키지 | `com.sjinc.trendanalysis` |
 | View | Thymeleaf (서버 렌더링) |
@@ -38,12 +38,10 @@
 java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar --spring.profiles.active=local
 ```
 
-또는 IDE에서 `TrendAnalysisApplication`을 실행한다(실행 설정에 `local` 프로파일). `./mvnw spring-boot:run`은 경로의 한글 때문에 main class를 못 찾아 실패한다.
-실행 후 http://localhost:8080 으로 접속한다.
+또는 IDE에서 `TrendAnalysisApplication`을 실행한다(실행 설정에 `local` 프로파일).
+실행 후 http://localhost:8080 으로 접속한다. 빌드·실행 주의점(`spring-boot:run` 불가, 새 클론에서 `mvnw` 불가 등)은 [`docs/llm/backend/backend-development.md`](../docs/llm/backend/backend-development.md).
 
 ## 화면 프레임워크
-
-security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 
 | 위치 | 역할 |
 | --- | --- |
@@ -58,6 +56,8 @@ security-monitoring 프로젝트의 화면 공통 틀을 그대로 가져왔다.
 | `static/js/page-buttons.js`, `hotkeys.js` | 공통 버튼 핸들러, 펑션키(F3 조회/F4 신규/F5 삭제/F9 저장/F12 초기화) |
 | `static/js/xlsx-writer.js`, `zip-writer.js` | 그리드 우클릭 엑셀 다운로드 |
 | `static/js/com-cd.js` | 공통코드 select 채우기(`/api/com-cds`) |
+| `static/js/line-chart.js` | 추이 차트(SVG, 외부 라이브러리 없음) |
+| `static/js/modal-drag.js`, `code-highlight.js` | 모달 끌어 옮기기, 코드 조각 구문 강조 |
 
 ## 트렌드 분석 화면
 
@@ -95,7 +95,7 @@ AI 서비스는 `ai/start-ai.cmd`로 띄우고 `ai/stop-ai.cmd`로 끄며, 프�
 ```
 
 임베딩은 `Qwen/Qwen3-VL-Embedding-2B`(CPU, RAM 약 4.5GB)이고 첫 색인 때 모델(약 4GB)을 내려받는다.
-Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.env`의 `CHROMA_MODE=http`와 `CHROMA_HOST`만 바꾸면 서버형으로 전환된다.
+Chroma는 내장형(`ai/chroma_data/`)이다. 서버형 전환 기준·방법은 [`docs/llm/features/analysis-pipeline.md`](../docs/llm/features/analysis-pipeline.md).
 
 ### 트렌드 집계 (P-05)
 
@@ -113,11 +113,11 @@ Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.e
 ### RAG 검색 (P-06)
 
 홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 **트렌드 챗봇**(대화형)으로 되어 있다. 작은 모델이 질문을 해석해(패션 질문인지·유행 질문인지·범위·기간, 앞 질문에 이어 묻기) 유행 질문은 원문 수·매체 수를 세서, 그 밖의 질문은 비슷한 원문을 찾아 Claude가 답하고 출처(매체·날짜·원문 링크 또는 사진)를 붙인다. API는 `/api/rag`(로그인만 필요).
-패션·트렌드 질문이 아니면 답하지 않고, 근거가 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 자세한 규칙은 `docs/llm/features/rag-search.md`.
+패션·트렌드 질문이 아니면 답하지 않고, 근거가 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 자세한 규칙은 [`docs/llm/features/rag-search.md`](../docs/llm/features/rag-search.md).
 
 | 키 | 용도 |
 | --- | --- |
-| `rag.min-score` | 근거로 쓰는 최소 유사도(0~1), 기본 0.60(임시값) |
+| `rag.min-score` | 근거로 쓰는 최소 유사도(0~1), 기본 0.60 |
 | `rag.top-k` | 찾는 청크 수, 기본 8 |
 
 ## 관리 화면
@@ -132,25 +132,12 @@ Chroma는 지금 내장형(`ai/chroma_data/`)이다. 시스템 오픈 때 `ai/.e
 | 공통코드마스터 관리 | `program/com-cd-master-mng.html` | `/api/com-cd-groups` |
 | 공통코드 관리 | `program/com-cd-mng.html` | `/api/com-cds` |
 
-초기 관리자(`admin`)의 비밀번호는 최초 기동 때 무작위로 만들어 서버 로그에 한 번만 찍는다.
-잃어버렸으면 `backend/data/`를 지우고 다시 기동한다(데이터가 모두 초기화된다).
+초기 관리자(`admin`)의 비밀번호는 최초 기동 때 무작위로 만들어 서버 로그에 한 번만 찍는다. 잃어버렸을 때는 [`docs/llm/features/admin-screens.md`](../docs/llm/features/admin-screens.md).
 
 ### 화면 추가
 
-1. `templates/program/<화면id>.html`을 만든다(`program/com-cd-master-mng.html`처럼 조회영역+그리드+공통 버튼 구조).
-2. 프로그램 관리 화면에서 같은 프로그램ID로 등록한다(메뉴 그룹·아이콘·사용 버튼 지정).
-
-3. 사용자별 권한관리에서 쓸 사용자에게 그 프로그램 권한을 준다.
-
-`/program/<화면id>`로 열리며, `ViewController`는 고치지 않는다. 새 API는 컨트롤러에 `@RequiresProgram("<화면id>")`을 붙인다.
+`templates/program/<화면id>.html`을 만들고 프로그램 관리에 같은 id로 등록한 뒤 사용자에게 권한을 주면 `/program/<화면id>`로 열린다. 절차와 규칙은 [`docs/llm/features/screen-framework.md`](../docs/llm/features/screen-framework.md).
 
 ## 로그인·권한
 
-security-monitoring의 로그인 프로세스를 그대로 따른다.
-
-- **로그인:** Spring Security 폼 로그인(`/login`). 계정은 `users` 테이블, 비밀번호는 BCrypt(`CustomUserDetailsService`). 사용여부 N 계정은 로그인할 수 없다.
-- **메뉴·버튼:** 사이드바에는 로그인 사용자가 권한을 가진 프로그램만, 툴바에는 "프로그램이 쓰는 버튼 ∩ 사용자에게 허용된 버튼"만 보인다(사용자별 권한관리).
-- **화면 접근:** 프로그램으로 등록된 화면은 그 권한이 없으면 403(`ViewController`).
-- **API 접근:** 허용 목록(`/login`, 정적 파일, `/error`) 외 요청은 `RequiresProgramAuthorizationManager`가 로그인과 `@RequiresProgram` 권한으로 판단한다. 미로그인 API는 401, 화면은 로그인 페이지로 보낸다.
-- **CSRF:** `XSRF-TOKEN` 쿠키를 공통 fetch 래퍼(`loading-overlay.html`)가 `X-XSRF-TOKEN` 헤더로 실어 보낸다.
-- **사용자 관리 제한:** 자기 자신은 비밀번호만 바꿀 수 있고 삭제할 수 없다. 자신보다 높은 역할(공통코드 `ROLE` 정렬순서)의 계정은 저장·삭제할 수 없고, 그런 역할을 줄 수도 없다.
+Spring Security 폼 로그인(`/login`)과 프로그램(화면) 단위 권한이다. 사이드바에는 권한이 있는 프로그램만, 툴바에는 허용된 버튼만 보이고, 권한 없는 화면·API는 403이다. 규칙은 [`docs/llm/features/auth-permission.md`](../docs/llm/features/auth-permission.md), 사용자 관리 제한은 [`docs/llm/features/admin-screens.md`](../docs/llm/features/admin-screens.md).

@@ -9,14 +9,13 @@ import java.util.List;
  *
  * @param reason         근거 없음 사유 — NO_EVIDENCE(근거 없음), MODEL_DECLINED(근거가 질문에 맞지 않음). 답했으면 null
  * @param bestScore      검색된 근거 중 가장 높은 유사도(0~1). 유행 질문(집계로 답함)은 null
- * @param statsWeek      검색 질문에 덧붙인 주간 집계의 기준 주. 없으면 null
  * @param period         근거의 기간. explicit이면 질문이 정한 기간, 아니면 근거 원문의 게시일 범위(검색) 또는 집계 기간(유행).
  *                       stale이면 가장 최근 근거도 8주가 넘었다(화면이 알린다)
  * @param interpretation 질문을 어떻게 알아들었는지(유행 질문인지·범위·누가 해석했는지) — 화면에 보여 근거를 확인하게 한다
  * @param facts          유행 질문이면 판단 근거가 된 집계(원문 수·매체 수), 아니면 null
  */
 public record RagAnswerView(String question, boolean grounded, String answer, List<Point> points, String reason,
-                            List<Source> sources, Double bestScore, double minScore, LocalDate statsWeek, Period period,
+                            List<Source> sources, Double bestScore, double minScore, Period period,
                             Interpretation interpretation, Facts facts) {
 
     public record Period(LocalDate from, LocalDate to, String label, boolean explicit, boolean stale) {
@@ -36,8 +35,11 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
                         List<TermFact> terms) {
     }
 
-    /** 질문 단어가 키워드·아이템명에 나온 원문 수. expressions는 실제로 나온 표현 상위(예: "무스탕 칼라 1건"). */
-    public record TermFact(String term, int count, int mediaCount, int prevCount, List<String> expressions) {
+    /**
+     * 질문 단어가 키워드·아이템명에 나온 원문 수. expressions는 실제로 나온 표현 상위(예: "무스탕 칼라 1건").
+     * details는 대상 옷의 포인트 한 줄씩(예: "컬러: 블랙 6건(직전 1) · 브라운 2건(직전 0)", "함께 나온 옷: 데님 팬츠 3건").
+     */
+    public record TermFact(String term, int count, int mediaCount, int prevCount, List<String> expressions, List<String> details) {
     }
 
     public record Dimension(String label, List<FactRow> rows) {

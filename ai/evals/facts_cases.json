@@ -1,0 +1,20 @@
+{
+  "_doc": "챗봇 유행 집계 검증 조건(2026-10-26). 해석 결과를 직접 준다 — backend FactsCheckRunner가 판단 근거를 뽑고 facts_check.py가 SQL로 센 값과 맞댄다. today를 고정해 같은 DB면 같은 결과가 나오게 한다.",
+  "today": "2026-10-26",
+  "cases": [
+    {"id": "F01", "note": "전체 — 아이템 종류 순위"},
+    {"id": "F02", "note": "아우터", "category": "OUTER"},
+    {"id": "F03", "note": "아우터 · 묻는 축 소재", "category": "OUTER", "focus": "MATERIAL"},
+    {"id": "F04", "note": "전체 · 묻는 축 컬러", "focus": "COLOR"},
+    {"id": "F05", "note": "전체 · 묻는 축 실루엣", "focus": "SILHOUETTE"},
+    {"id": "F06", "note": "레더 재킷 종류", "itemType": "OUTER_LEATHER_JACKET"},
+    {"id": "F07", "note": "와이드 팬츠 = 하의 + WIDE", "category": "BOTTOM", "filters": {"SILHOUETTE": ["WIDE"]}},
+    {"id": "F08", "note": "크롭 아우터 = 아우터 + CROPPED", "category": "OUTER", "filters": {"SILHOUETTE": ["CROPPED"]}},
+    {"id": "F09", "note": "블랙 상의 = 상의 + BLACK", "category": "TOP", "filters": {"COLOR": ["BLACK"]}},
+    {"id": "F10", "note": "F/W 아우터 = 아우터 + 가을·겨울 시즌", "category": "OUTER", "seasons": ["FALL", "WINTER"]},
+    {"id": "F11", "note": "질문 단어 둘", "terms": ["레더 재킷", "와이드 팬츠"]},
+    {"id": "F12", "note": "질문 단어 무스탕", "terms": ["무스탕"]},
+    {"id": "F13", "note": "지난주 지정 기간", "from": "2026-10-19", "to": "2026-10-25"},
+    {"id": "F14", "note": "데이터 없는 기간 — 가장 최근 자료로 옮기지 않는다(지정 기간)", "from": "2026-01-01", "to": "2026-01-31"}
+  ]
+}

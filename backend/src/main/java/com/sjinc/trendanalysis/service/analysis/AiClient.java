@@ -49,7 +49,8 @@ public class AiClient {
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AllowedCodes(List<CodeOption> categories, List<CodeOption> itemTypes, List<CodeOption> materials,
-                               List<CodeOption> colors, List<CodeOption> silhouettes, List<CodeOption> seasons) {
+                               List<CodeOption> colors, List<CodeOption> silhouettes, List<CodeOption> seasons,
+                               List<CodeOption> genders) {
     }
 
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
@@ -71,19 +72,12 @@ public class AiClient {
                                Map<String, String> names, Map<String, String> meta) {
     }
 
-    /** P-06 주간 집계 한 줄 — 근거가 아니라 답변에 덧붙이는 참고 수치. */
-    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record StatRow(String typeLabel, String label, int count, int prevCount, Double prevRate, boolean surge,
-                          boolean isNew) {
-    }
-
     /**
      * today는 최신성 가중치·기간 해석의 기준일 — 서버 날짜를 "2026-10-22" 문자열로 보낸다. 날짜는 이 클라이언트에서 모두 문자열로 주고받는다:
      * RestClient 기본 JSON 설정은 LocalDate를 [2026,10,22] 배열로 써서 AI 서비스가 422로 거부했다(2026-10-22).
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-    public record AnswerRequest(String question, String model, int topK, double minScore, String statsWeek,
-                                List<StatRow> stats, String today, String mode, String category, AnswerPeriod period,
+    public record AnswerRequest(String question, String model, int topK, double minScore, String today, String mode, String category, AnswerPeriod period,
                                 List<String> trendFacts, List<String> evidenceDocIds) {
 
         public static final String SEARCH = "SEARCH";
@@ -97,7 +91,8 @@ public class AiClient {
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record InterpretRequest(String question, String model, String today, List<CodeHint> categories,
                                    List<CodeHint> itemTypes, List<InterpretTurn> history, List<CodeHint> seasons,
-                                   List<CodeHint> materials, List<CodeHint> colors, List<CodeHint> silhouettes) {
+                                   List<CodeHint> materials, List<CodeHint> colors, List<CodeHint> silhouettes,
+                                   List<CodeHint> genders) {
     }
 
     /** 챗봇의 앞 질문과 그 해석(이어 묻기용). 기간은 콕 집은 질문만, 날짜는 문자열. */
@@ -118,11 +113,11 @@ public class AiClient {
     public record InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                     Map<String, Object> usage, Boolean fashion, String question, List<String> terms,
                                     List<String> seasons, String focus, List<String> materials, List<String> colors,
-                                    List<String> silhouettes) {
+                                    List<String> silhouettes, List<String> genders) {
 
         public InterpretResponse(boolean trend, String category, String itemType, AnswerPeriod period,
                                  Map<String, Object> usage, Boolean fashion, String question) {
-            this(trend, category, itemType, period, usage, fashion, question, null, null, null, null, null, null);
+            this(trend, category, itemType, period, usage, fashion, question, null, null, null, null, null, null, null);
         }
 
         public boolean offTopic() {

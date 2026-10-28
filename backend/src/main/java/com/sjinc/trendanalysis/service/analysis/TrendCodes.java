@@ -17,6 +17,11 @@ public final class TrendCodes {
     public static final String SILHOUETTE = "TREND_SILHOUETTE";
     public static final String SEASON = "TREND_SEASON";
     /**
+     * 옷의 대상 라인(여성복·남성복·공용) — 입은 사람의 성별이 아니라 어느 라인의 옷인지다. 기획·MD는 라인별로 본다(2026-10-26 사용자 요청).
+     * 의류 아이템마다 0~1개, 판단할 수 없으면 비운다. 판단 기준은 ai/prompts/structure/common.md.
+     */
+    public static final String GENDER = "TREND_GENDER";
+    /**
      * 아이템 종류(패딩·블루종·데님 팬츠…) — "유행 = 많이 입는 것"을 세려면 아이템명(LLM 자유 문장)으로는 "데님 트러커 재킷"과
      * "트러커 재킷"이 갈라져서, 집계용으로 정한 목록에서 고르게 한다(2026-10-22 사용자 결정). 코드값은 "카테고리_종류"(OUTER_PADDING)라
      * 앞부분으로 어느 카테고리 것인지 안다 — 검증이 아이템 카테고리와 맞는지 본다. 기타 카테고리는 "ETC" 하나.
@@ -26,14 +31,13 @@ public final class TrendCodes {
     /** 카테고리가 맞는 것이 없을 때 LLM이 쓰는 코드(프롬프트 규칙과 같아야 한다). */
     public static final String CATEGORY_ETC = "ETC";
 
-    /** 값 종류(키워드·아이템 종류·소재…) 이름과 쓰임 — 트렌드 분석 화면 유형 목록, RAG 참고 집계(속성 RAG). */
+    /** 값 종류(키워드·아이템 종류·소재…) 이름 — 트렌드 분석 화면 유형 목록. */
     public static final String VALUE_TYPE = "TREND_VALUE_TYPE";
     /** 유행을 묻는 말(유행·인기·뜨는…) — 질문 해석의 규칙 대체용(AI 해석이 실패했을 때). */
     public static final String TREND_WORD = "RAG_TREND_WORD";
 
     /** 코드 속성(ComCd.attr1) 값. */
     public static final String ATTR_IMAGE = "IMAGE";
-    public static final String ATTR_RAG = "RAG";
 
     /** 아이템 종류 코드가 속한 카테고리(코드값 앞부분). "ETC"는 기타 카테고리. */
     public static String categoryOfType(String typeCode) {
@@ -50,7 +54,8 @@ public final class TrendCodes {
             TrendItemValue.MATERIAL, MATERIAL,
             TrendItemValue.COLOR, COLOR,
             TrendItemValue.SILHOUETTE, SILHOUETTE,
-            TrendItemValue.SEASON, SEASON);
+            TrendItemValue.SEASON, SEASON,
+            TrendItemValue.GENDER, GENDER);
 
     /**
      * 기본 데이터 초안 {코드값, 이름, 속성(없으면 생략)}. DataInitializer가 그룹이 없을 때 넣고, 이미 있는 그룹은 속성이 빈 코드에만
@@ -76,13 +81,16 @@ public final class TrendCodes {
                     new String[]{"FUR", "퍼(모피·페이크퍼)", ATTR_IMAGE},
                     new String[]{"SHEARLING", "무스탕(시어링·양털 가죽)", ATTR_IMAGE}, new String[]{"FLEECE", "플리스", ATTR_IMAGE}, new String[]{"TWEED", "트위드", ATTR_IMAGE},
                     new String[]{"CORDUROY", "코듀로이(골덴)", ATTR_IMAGE}, new String[]{"NYLON", "나일론"},
-                    new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴", ATTR_IMAGE}),
+                    new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴", ATTR_IMAGE},
+                    // 2026-10-28 정답셋(사람이 단 라벨)에 나와 추가 — 사진으로는 가릴 수 없어 IMAGE가 아니다
+                    new String[]{"RAYON", "레이온"}, new String[]{"ACRYLIC", "아크릴"}),
             COLOR, List.of(
                     new String[]{"BLACK", "블랙"}, new String[]{"WHITE", "화이트"}, new String[]{"IVORY", "아이보리"},
                     new String[]{"GRAY", "그레이"}, new String[]{"BEIGE", "베이지"}, new String[]{"BROWN", "브라운"},
                     new String[]{"KHAKI", "카키"}, new String[]{"NAVY", "네이비"}, new String[]{"BLUE", "블루"},
                     new String[]{"SKYBLUE", "스카이블루"}, new String[]{"GREEN", "그린"}, new String[]{"RED", "레드"},
                     new String[]{"BURGUNDY", "버건디"}, new String[]{"PINK", "핑크"}, new String[]{"PURPLE", "퍼플"},
+                    // 데님 워싱은 따로 두지 않는다 — 연청·중청 BLUE, 진청·생지 NAVY, 블랙진 BLACK(2026-10-28 사용자 결정)
                     new String[]{"YELLOW", "옐로우"}, new String[]{"ORANGE", "오렌지"}, new String[]{"MULTI", "멀티컬러(패턴)"}),
             SILHOUETTE, List.of(
                     // 속성 = 축,이 실루엣을 쓸 수 있는 카테고리(없으면 모든 카테고리). 기타(ETC)는 어느 실루엣도 쓰지 않는다
@@ -92,7 +100,10 @@ public final class TrendCodes {
                     new String[]{"BOXY", "박시", "SHAPE,OUTER,TOP,DRESS,SETUP"}, new String[]{"WIDE", "와이드", "SHAPE,BOTTOM,SETUP"},
                     new String[]{"CROPPED", "크롭", "LENGTH,OUTER,TOP,BOTTOM"}, new String[]{"LONG", "롱", "LENGTH,OUTER,TOP,BOTTOM,DRESS"},
                     new String[]{"A_LINE", "A라인", "SHAPE,OUTER,BOTTOM,DRESS"}, new String[]{"H_LINE", "H라인", "SHAPE,OUTER,BOTTOM,DRESS"},
-                    new String[]{"FLARE", "플레어", "SHAPE,BOTTOM,DRESS"}),
+                    new String[]{"FLARE", "플레어", "SHAPE,BOTTOM,DRESS"},
+                    new String[]{"BOOTCUT", "부츠컷", "SHAPE,BOTTOM"}), // 2026-10-28 정답셋에 나와 추가 — 무릎 아래가 살짝 퍼지는 바지
+            GENDER, List.of(
+                    new String[]{"WOMEN", "여성복(우먼즈)"}, new String[]{"MEN", "남성복(맨즈)"}, new String[]{"UNISEX", "공용(유니섹스)"}),
             // 여러 개를 고른다(간절기 = 봄·가을). SS/FW는 이 값들을 묶어 본다
             SEASON, List.of(
                     new String[]{"SPRING", "봄"}, new String[]{"SUMMER", "여름"}, new String[]{"FALL", "가을"},
@@ -120,12 +131,12 @@ public final class TrendCodes {
                     new String[]{"SETUP_SUIT", "수트(테일러드 재킷+같은 원단 하의)"},
                     new String[]{"SETUP_TRACKSUIT", "트레이닝 셋업(트랙 재킷+트랙 팬츠)"},
                     new String[]{"ETC", "기타"}),
-            // 트렌드 분석 화면 유형 목록(정렬순서대로)·RAG 참고 집계(속성 RAG). 코드값은 집계 값 종류라 바꾸지 않는다.
+            // 트렌드 분석 화면 유형 목록(정렬순서대로). 코드값은 집계 값 종류라 바꾸지 않는다.
             // 아이템명(ITEM)은 없다 — 아이템 종류와 뜻이 겹쳐 헷갈린다(2026-10-23 사용자 결정)
             VALUE_TYPE, List.of(
-                    new String[]{TrendItemValue.KEYWORD, "키워드", ATTR_RAG}, new String[]{TrendItemValue.ITEM_TYPE, "아이템 종류", ATTR_RAG},
-                    new String[]{TrendItemValue.MATERIAL, "소재", ATTR_RAG},
-                    new String[]{TrendItemValue.COLOR, "컬러", ATTR_RAG}, new String[]{TrendItemValue.SILHOUETTE, "실루엣", ATTR_RAG},
+                    new String[]{TrendItemValue.KEYWORD, "키워드"}, new String[]{TrendItemValue.ITEM_TYPE, "아이템 종류"},
+                    new String[]{TrendItemValue.MATERIAL, "소재"},
+                    new String[]{TrendItemValue.COLOR, "컬러"}, new String[]{TrendItemValue.SILHOUETTE, "실루엣"},
                     new String[]{TrendItemValue.SEASON, "시즌"}, new String[]{"CATEGORY", "카테고리"}),
             // 유행을 묻는 말 — AI 해석이 실패했을 때 규칙으로 알아본다(질문에 이 말이 들어 있으면 유행 질문)
             TREND_WORD, List.of(

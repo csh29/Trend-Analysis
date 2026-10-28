@@ -17,7 +17,7 @@ public record TrendCodeBook(Map<String, List<ComCd>> groups) {
     public static TrendCodeBook of(Function<String, List<ComCd>> loader) {
         Map<String, List<ComCd>> groups = new LinkedHashMap<>();
         for (String group : List.of(TrendCodes.CATEGORY, TrendCodes.ITEM_TYPE, TrendCodes.MATERIAL, TrendCodes.COLOR,
-                TrendCodes.SILHOUETTE, TrendCodes.SEASON)) {
+                TrendCodes.SILHOUETTE, TrendCodes.SEASON, TrendCodes.GENDER)) {
             groups.put(group, loader.apply(group));
         }
         return new TrendCodeBook(groups);

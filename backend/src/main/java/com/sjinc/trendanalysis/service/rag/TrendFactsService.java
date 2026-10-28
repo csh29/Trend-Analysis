@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -42,10 +43,14 @@ import java.util.stream.Collectors;
  *       아이템명(Claude 자유 문장)을 원문 수로 세어 상위 몇 개를 같이 준다(2026-10-23 사용자 결정. 새 종류 코드를 만들기 전에도 답이 비지 않게).</li>
  *   <li>질문 단어(해석이 코드로 못 옮긴 말 — 무스탕·발마칸…): 키워드·아이템명에 그 말이 들어간 원문을 센다(2026-10-23 사용자 결정).
  *       코드가 없으면 해석이 그 말을 버려 "무스탕 유행해?"가 "아우터 유행"으로 넓어졌다. 범위(카테고리)와 상관없이 세고, 실제로 나온
- *       표현을 같이 준다 — "무스탕 칼라"처럼 옷 자체가 아닌 언급도 걸리므로 옷 개수가 아니라 언급 수다. 그 원문을 예시 원문 앞에 둔다.</li>
+ *       표현을 같이 준다 — "무스탕 칼라"처럼 옷 자체가 아닌 언급도 걸리므로 옷 개수가 아니라 언급 수다. 그 원문을 예시 원문 앞에 둔다.
+ *       여러 낱말이면 낱말이 모두 들어 있으면 걸린다("와이드 팬츠" → "와이드 데님 팬츠"도 — 2026-10-26).</li>
+ *   <li>질문 단어의 포인트: 아이템명에 그 말이 들어간 옷(대상 옷)의 컬러·소재·실루엣을 원문 수로 세어 직전과 비교하고, 같은 원문에
+ *       함께 나온 다른 옷 종류(매치)와 키워드(스타일)를 센다 — "레더 재킷 9건"만으로는 어떤 레더 재킷이 뜨는지 알 수 없었다(2026-10-26 사용자 요청).
+ *       키워드에만 나온 원문은 대상 옷을 몰라 포인트에서 빠진다.</li>
  *   <li>시즌(질문이 F/W·올가을처럼 시즌을 가리킬 때): 원문의 시즌 값(정형화 seasons)이 그 시즌인 원문만 센다 — 게시일 기간(6개월)만으로는
  *       S/S 자료가 섞인다. 시즌 값이 없는 원문은 빠진다(2026-10-23 사용자 결정).</li>
- *   <li>속성 조건(해석의 filters — "와이드 팬츠" → 하의 + 실루엣 WIDE): 그 값을 가진 의류 아이템만 범위로 센다. 종류마다 값 하나라도
+ *   <li>속성 조건(해석의 filters — "와이드 팬츠" → 하의 + 실루엣 WIDE, "여성 아우터" → 아우터 + 여성복): 그 값을 가진 의류 아이템만 범위로 센다. 종류마다 값 하나라도
  *       맞으면 되고(OR), 종류끼리는 모두 맞아야 한다(AND). 대상 이름 뒤에 " · 와이드"처럼 붙는다(2026-10-26 — 글자 비교로는 "와이드 데님 팬츠"가 빠졌다).</li>
  *   <li>묻는 축(해석의 focus — "요즘 유행하는 핏은?"이면 실루엣)이 있으면 그 축이 첫 축이 된다 — 화면의 막대와 예시 원문이 그 축의
  *       상위 값으로 나온다. 없으면 아이템 종류(종류를 콕 집었으면 소재)가 첫 축이다(2026-10-23).</li>
@@ -65,6 +70,10 @@ public class TrendFactsService {
     static final int STALE_DAYS = 56;
     static final int ETC_NAMES = 3;
     static final int CROSS_ITEMS = 3;
+    static final int TERM_VALUES = 3;
+    static final int EXAMPLES_PER_TERM = 3;
+    /** 질문 단어 대상 옷에서 세는 축 — 어떤 레더 재킷이 뜨는지(색·소재·핏). */
+    static final List<String> TERM_POINTS = List.of(TrendItemValue.COLOR, TrendItemValue.MATERIAL, TrendItemValue.SILHOUETTE);
 
     private final SourceDocumentRepository sourceDocumentRepository;
     private final TrendItemRepository trendItemRepository;
@@ -82,8 +91,20 @@ public class TrendFactsService {
     public record NameCount(String name, int count) {
     }
 
-    /** 질문 단어 하나의 언급 집계. expressions는 그 말이 들어간 키워드·아이템명 상위(원문 수 순). */
-    public record TermRow(String term, int count, int mediaCount, int prevCount, List<NameCount> expressions) {
+    /**
+     * 질문 단어 하나의 언급 집계. expressions는 그 말이 들어간 키워드·아이템명 상위(원문 수 순).
+     * points는 대상 옷의 컬러·소재·실루엣 축, together는 같은 원문에 함께 나온 옷 종류, keywords는 그 원문들의 다른 키워드(모두 기간 안 원문 수 순).
+     */
+    public record TermRow(String term, int count, int mediaCount, int prevCount, List<NameCount> expressions,
+                          List<TermPoint> points, List<NameCount> together, List<NameCount> keywords) {
+    }
+
+    /** 질문 단어 대상 옷의 축 하나(컬러 등)와 그 값들. */
+    public record TermPoint(String label, List<ValueCount> values) {
+    }
+
+    /** 값 하나 — 기간 안 원문 수와 직전 기간 원문 수. */
+    public record ValueCount(String name, int count, int prevCount) {
     }
 
     /** 축 하나(아이템 종류·소재…)의 상위 값들. */
@@ -121,6 +142,18 @@ public class TrendFactsService {
                 lines.add("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] " + t.term() + " " + t.count() + "건 · 매체 " + t.mediaCount()
                         + "곳 · 직전 " + t.prevCount() + "건" + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
                         .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")"));
+                for (TermPoint pt : t.points()) {
+                    lines.add("  - " + t.term() + " 옷의 " + pt.label() + ": " + pt.values().stream()
+                            .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ")").collect(Collectors.joining(", ")));
+                }
+                if (!t.together().isEmpty()) {
+                    lines.add("  - " + t.term() + "와 같은 원문에 함께 나온 옷: " + t.together().stream()
+                            .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")));
+                }
+                if (!t.keywords().isEmpty()) {
+                    lines.add("  - " + t.term() + " 원문의 다른 키워드: " + t.keywords().stream()
+                            .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")));
+                }
             }
             return lines;
         }
@@ -252,14 +285,26 @@ public class TrendFactsService {
         List<TermRow> terms = new ArrayList<>();
         List<String> termEvidence = new ArrayList<>();
         for (String term : question.terms()) {
-            String key = compact(term);
-            if (key.isEmpty()) continue;
+            List<String> keys = keys(term);
+            if (keys.isEmpty()) continue;
             Tally t = new Tally();
+            // 대상 옷의 축별 값 → 기간 안·직전 원문, 함께 나온 옷 종류·다른 키워드 → 기간 안 원문
+            Map<String, Map<String, Set<Long>>> pointNow = new LinkedHashMap<>();
+            Map<String, Map<String, Set<Long>>> pointPrev = new HashMap<>();
+            Map<String, Set<Long>> together = new LinkedHashMap<>();
+            Map<String, Set<Long>> keywords = new LinkedHashMap<>();
             for (SourceDocument doc : docs) { // 최신 원문부터
                 TrendItem item = items.get(doc.getId());
-                List<String> hits = item == null || !scope.inSeason(item) ? List.of() : mentions(item, key);
+                List<String> hits = item == null || !scope.inSeason(item) ? List.of() : mentions(item, keys);
                 if (hits.isEmpty()) continue;
-                if (TrendAggregationService.statDate(doc).isBefore(period.from())) {
+                boolean current = !TrendAggregationService.statDate(doc).isBefore(period.from());
+                List<TrendItem.Garment> targets = item.garments().stream().filter(g -> matches(g.name(), keys)).toList();
+                Map<String, Map<String, Set<Long>>> into = current ? pointNow : pointPrev;
+                for (String type : TERM_POINTS) {
+                    targets.forEach(g -> valuesOf(g, type).forEach(v -> into.computeIfAbsent(type, k -> new LinkedHashMap<>())
+                            .computeIfAbsent(v, k -> new HashSet<>()).add(doc.getId())));
+                }
+                if (!current) {
                     t.prevDocs.add(doc.getId());
                     continue;
                 }
@@ -267,9 +312,28 @@ public class TrendFactsService {
                 t.media.add(doc.getMedia());
                 t.examples.add(doc);
                 hits.forEach(h -> t.names.computeIfAbsent(h, k -> new HashSet<>()).add(doc.getId()));
+                if (!targets.isEmpty()) {
+                    item.garments().stream().filter(g -> !targets.contains(g) && g.type() != null)
+                            .forEach(g -> together.computeIfAbsent(g.type(), k -> new HashSet<>()).add(doc.getId()));
+                }
+                item.valuesOf(TrendItemValue.KEYWORD).stream().filter(k -> k != null && !matches(k, keys)).map(TrendFactsService::itemName)
+                        .filter(k -> !k.isEmpty()).forEach(k -> keywords.computeIfAbsent(k, x -> new HashSet<>()).add(doc.getId()));
             }
-            terms.add(new TermRow(term, t.docs.size(), t.media.size(), t.prevDocs.size(), topNames(t.names)));
-            t.examples.stream().limit(EXAMPLES_PER_VALUE).map(SourceDocument::getDocId)
+            List<TermPoint> points = new ArrayList<>();
+            for (String type : TERM_POINTS) {
+                Map<String, Set<Long>> now = pointNow.getOrDefault(type, Map.of());
+                if (now.isEmpty()) continue;
+                Map<String, String> labels = names(TrendCodes.VALUE_TYPE_GROUPS.get(type));
+                Map<String, Set<Long>> prev = pointPrev.getOrDefault(type, Map.of());
+                points.add(new TermPoint(typeLabels.getOrDefault(type, type), topNames(now, TERM_VALUES).stream()
+                        .map(n -> new ValueCount(shortName(labels.getOrDefault(n.name(), n.name())), n.count(),
+                                prev.getOrDefault(n.name(), Set.of()).size())).toList()));
+            }
+            terms.add(new TermRow(term, t.docs.size(), t.media.size(), t.prevDocs.size(), topNames(t.names), points,
+                    topNames(together, TERM_VALUES).stream()
+                            .map(n -> new NameCount(shortName(itemTypeNames.getOrDefault(n.name(), n.name())), n.count())).toList(),
+                    topNames(keywords, TERM_VALUES)));
+            t.examples.stream().limit(EXAMPLES_PER_TERM).map(SourceDocument::getDocId)
                     .filter(id -> !termEvidence.contains(id)).forEach(termEvidence::add);
         }
         // 질문 단어가 나온 원문을 앞에 — 답이 그 말을 다룰 근거가 된다
@@ -333,11 +397,26 @@ public class TrendFactsService {
                 && ("ETC".equals(value) || value.endsWith("_ETC"));
     }
 
-    /** 질문 단어가 들어간 키워드·아이템명(공백 정리한 표현, 중복 없이). 비교는 공백·대소문자를 무시한다. */
-    private static List<String> mentions(TrendItem item, String key) {
+    /** 질문 단어가 들어간 키워드·아이템명(공백 정리한 표현, 중복 없이). */
+    private static List<String> mentions(TrendItem item, List<String> keys) {
         List<String> texts = new ArrayList<>(item.valuesOf(TrendItemValue.KEYWORD));
         item.garments().forEach(g -> texts.add(g.name()));
-        return texts.stream().filter(v -> v != null && compact(v).contains(key)).map(TrendFactsService::itemName).distinct().toList();
+        return texts.stream().filter(v -> matches(v, keys)).map(TrendFactsService::itemName).distinct().toList();
+    }
+
+    /** 질문 단어의 낱말들(공백으로 나눔, 소문자). */
+    static List<String> keys(String term) {
+        return Arrays.stream(term.strip().split("\\s+")).map(TrendFactsService::compact).filter(k -> !k.isEmpty()).toList();
+    }
+
+    /**
+     * 글에 질문 단어의 낱말이 모두 들어 있는지 — 공백·대소문자를 무시한다. 낱말마다 따로 보므로 "와이드 팬츠"는 "와이드 데님 팬츠"에도
+     * 걸린다(붙여 쓴 "와이드팬츠"도 걸린다).
+     */
+    static boolean matches(String text, List<String> keys) {
+        if (text == null) return false;
+        String c = compact(text);
+        return keys.stream().allMatch(c::contains);
     }
 
     private static String compact(String text) {
@@ -367,6 +446,7 @@ public class TrendFactsService {
             case TrendItemValue.MATERIAL -> g.materials();
             case TrendItemValue.COLOR -> g.colors();
             case TrendItemValue.SILHOUETTE -> g.silhouettes();
+            case TrendItemValue.GENDER -> g.genders();
             default -> List.of();
         };
     }

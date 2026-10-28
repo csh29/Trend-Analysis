@@ -4,7 +4,7 @@
 
 ## 1. 실행
 
-평소에는 `ai/start-ai.cmd`(기동)·`ai/stop-ai.cmd`(종료)·`ai/restart-ai.cmd`(종료 후 기동 — 프롬프트·코드 수정 뒤)를 쓴다(더블클릭 가능, 본체는 같은 이름의 `.ps1`). `.cmd`는 인자를 그대로 `.ps1`에 넘기므로 아무 말이나 붙이면 첫 매개변수(`-BindHost`)가 된다 — 옵션은 이름을 붙여 쓴다(`restart-ai.cmd -Port 8001`). 종료는 포트와 상관없이 `.ai-server.pid`의 프로세스도 끈다. 재기동은 종료 뒤 포트가 비었는지로 성공을 본다(`stop-ai.ps1`은 정상 종료 때 `exit`를 쓰지 않아 종료 코드가 `taskkill` 값으로 남는다).
+평소에는 `ai/start-ai.cmd`(기동)·`ai/stop-ai.cmd`(종료)·`ai/restart-ai.cmd`(종료 후 기동 — 프롬프트·코드 수정 뒤)를 쓴다(더블클릭 가능, 본체는 같은 이름의 `.ps1`). `.cmd`는 인자를 그대로 `.ps1`에 넘기므로 아무 말이나 붙이면 첫 매개변수(`-BindHost`)가 된다 — 옵션은 이름을 붙여 쓴다(`restart-ai.cmd -Port 8001`). 종료는 포트와 상관없이 `.ai-server.pid`의 프로세스도 끈다. 재기동 성공 여부는 종료 코드가 아니라 종료 뒤 포트가 비었는지로 본다.
 
 - 기동은 백그라운드로 띄우고 `/health`가 응답할 때까지 기다린다. 이미 떠 있으면 다시 띄우지 않는다. `.venv`가 없으면 만들고 패키지를 설치한다.
 - 로그는 `ai/logs/ai-server.log`·`ai-server.err.log`(uvicorn·분석 로그는 err 쪽), PID는 `ai/.ai-server.pid` — 둘 다 커밋 제외. 기동할 때 이전 로그는 `ai/logs/archive/`에 날짜를 붙여 옮긴다(최근 20개).
@@ -25,9 +25,9 @@ py -m venv .venv
 .venv/Scripts/python -m uvicorn app.main:app --host 127.0.0.1 --port 8001
 ```
 
-- 워커는 1개로 띄운다(`--workers`를 주지 않는다). 내장형 Chroma 폴더는 한 프로세스만 열어야 안전하다.
+- 워커는 1개로 띄운다(`--workers`를 주지 않는다). **내장형 Chroma 폴더(`chroma_data/`)는 한 프로세스만 연다** — 조회도 다른 프로세스로 폴더를 직접 열지 말고 실행 중인 서비스 API로 한다(아래).
 - 첫 색인 때 임베딩 모델 `Qwen/Qwen3-VL-Embedding-2B`(약 4GB)를 내려받는다(`~/.cache/huggingface`). 모델은 첫 색인·검색 때 올라가며 RAM을 약 4.5GB 쓴다.
-- torch는 CPU 빌드다(이 PC GPU는 VRAM 2GB라 모델이 안 올라간다). CPU에서는 청크 하나에 수 초 걸려 긴 텍스트 색인이 느리다 — Spring의 AI 호출 대기 시간(3분)을 넘기면 색인 실패로 남는다.
+- torch는 CPU 빌드다(이 PC GPU는 VRAM 2GB라 모델이 안 올라간다). CPU 임베딩 시간은 글자 수에 따라 늘어 이 PC에서 100자 약 5초, 300자 약 14초, 500자(청크 최대 `CHUNK_SIZE`) 약 20초다(`GET /search` 질의 임베딩으로 잰 값, 모델을 처음 올리는 첫 호출은 약 1분 더). Spring의 AI 호출 대기 시간(3분)을 넘기면 색인 실패로 남으므로, 본문이 약 3,500자(500자 청크 약 9개)를 넘으면 색인 실패를 의심한다(제안값).
 
 ### 색인(Chroma) 데이터 조회
 
@@ -35,19 +35,17 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 
 - `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다).
 
-- 실행 중인 서비스를 통해 읽는다. 내장형 Chroma 폴더(`chroma_data/`)를 다른 프로세스로 직접 열지 않는다(한 프로세스만 열어야 안전하다).
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.
 
 ## 2. 설정 (`ai/.env`)
 
 `ai/.env`(커밋 제외)를 읽고, 같은 이름의 환경변수가 있으면 그 값이 이긴다. 키·기본값·설명은 `ai/.env.example`(복사해서 쓴다)과 `app/core/config.py`에 있다. Claude API 키는 여기 두지 않는다(Spring에서 요청 헤더로 받는다).
 
-- 시스템 오픈 때 `CHROMA_MODE=http`·`CHROMA_HOST`만 바꿔 서버형으로 전환한다(코드 수정 없음).
-- 임베딩 모델(`EMBEDDING_MODEL`)을 바꾸면 컬렉션(`CHROMA_COLLECTION`)도 새로 준다(아래 4절).
+- 내장형↔서버형 전환(`CHROMA_MODE`·`CHROMA_HOST`)의 시점·방법과 임베딩 모델(`EMBEDDING_MODEL`)을 바꿀 때 컬렉션(`CHROMA_COLLECTION`) 처리는 [`analysis-pipeline.md`](../features/analysis-pipeline.md)에 있다.
 
 ## 3. 파일 구성
 
-**AI를 다루는 Python 코드(`app/`)와 Claude가 읽는 글(`prompts/`)을 나누고, 코드는 기능(프로세스)별 패키지로 묶는다**(2026-10-22 사용자 결정).
+**AI를 다루는 Python 코드(`app/`)와 Claude가 읽는 글(`prompts/`)을 나누고, 코드는 기능(프로세스)별 패키지로 묶는다**(사용자 결정).
 
 ```
 ai/
@@ -71,7 +69,7 @@ ai/
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
 │  └─ rag/                 interpret.md(질문 해석) · answer.md(답변 모양·유행 판단·기간·근거 규칙)
-├─ tests/                  test_core · test_api · test_rag
+├─ tests/                  단위 테스트(5절)
 ├─ start-ai.* / stop-ai.* / restart-ai.*  기동·종료·재기동 스크립트(ai 폴더에 둔다 — 더블클릭)
 └─ requirements.txt        버전 고정. torch는 CPU 빌드
 ```
@@ -88,11 +86,10 @@ ai/
   - md를 고치면 AI 서비스를 재기동한다(기동 때 한 번 읽는다). `## 키` 제목은 코드가 찾는 이름이라 바꾸지 않는다.
   - 개발자용 메모는 md 주석(`<!-- -->`)에 쓴다 — Claude에게 가지 않는다.
 - **Chroma 클라이언트는 `app/indexing/vector_store.py`의 `create_client`에서만 만든다.** 다른 모듈은 `get_collection()`만 쓴다. 내장형↔서버형 전환을 설정(`CHROMA_MODE`) 하나로 끝내기 위한 규칙이다.
-- 임베딩 모델을 바꾸면 기존 컬렉션과 섞이지 않게 `CHROMA_COLLECTION`을 새로 주거나 재색인한다(같은 컬렉션으로 열면 기동이 막힌다).
 - 패키지 버전은 `requirements.txt`에 고정한다. Chroma는 서버형으로 갈 때 서버와 같은 버전이어야 하고, 임베딩 결과가 라이브러리 버전에 따라 달라지면 기존 색인과 어긋난다.
 - Claude 호출 방식(모델 ID, `output_config`, 오류 클래스)은 추측하지 말고 claude-api 스킬 문서로 확인한다. SDK는 `anthropic` 1.x다.
 - 오류는 `AiServiceError`(`app/core/claude.py`)로 올리고 라우트가 `HTTPException(detail={"message", "retryable"})`로 돌려준다. Spring `AiClient`가 이 형식을 읽어 재시도 여부를 정한다.
-- 보안: AI 서비스는 127.0.0.1에만 연다(인증 없는 내부 API). Claude API 키는 요청 헤더(`X-Claude-Api-Key`)로만 받고 저장·로그·응답에 남기지 않는다.
+- 보안(127.0.0.1 바인딩, Claude 키는 요청 헤더 `X-Claude-Api-Key`로만)은 [`analysis-pipeline.md`](../features/analysis-pipeline.md) 규칙을 따른다.
 
 ## 5. 테스트
 
@@ -107,6 +104,6 @@ ai/
 | 변경 | 확인할 것 |
 | --- | --- |
 | `vector_store`·`config` | `CHROMA_MODE`만으로 내장형/서버형이 바뀜(코드 수정 없이) |
-| `embedding` | 모델을 바꿨으면 재색인 뒤 `GET /search?q=`로 "가죽 아우터"·"청바지 트렌드"·"니트 유행"을 돌려, 상위 결과가 관련 원문인지와 관련/무관 질문의 점수 차이(`rag.min-score` 판단 근거)를 예전 모델과 비교한다 |
+| `embedding` | 모델을 바꿨으면 재색인 뒤 `GET /search?q=`로 "가죽 아우터"·"청바지 트렌드"·"니트 유행"을 돌려, 상위 결과가 관련 원문인지와 관련/무관 질문의 점수 차이(`rag.min-score` 판단 근거)를 바꾸기 전 모델과 비교한다 |
 | `structurer`·`indexer`·`prompts/structure` | [`analysis-pipeline.md`](../features/analysis-pipeline.md) 규칙의 "같이 고친다" 목록 |
 | `rag`·`prompts/rag` | [`rag-search.md`](../features/rag-search.md) 테스트 절(프롬프트는 실제 호출로 확인) |

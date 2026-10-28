@@ -35,7 +35,7 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li>유행 질문: 유행 = 많이 입어 대중화된 것(2026-10-22 사용자 정의) — 범위 원문을 세고(TrendFactsService) 그 집계와 예시
  *       원문으로 AI 서비스가 답한다. 문장이 비슷한 자료만 보고 "유행"이라고 하지 않게.</li>
- *   <li>그 밖의 질문: AI 서비스가 문장 유사도로 근거를 찾는다(카테고리·기간으로 거름). 주간 집계 상위 값을 참고로 덧붙인다.</li>
+ *   <li>그 밖의 질문: AI 서비스가 문장 유사도로 근거를 찾는다(카테고리·기간으로 거름). 집계 수치는 붙이지 않는다.</li>
  * </ul>
  * 패션·트렌드 질문이 아니면(해석의 fashion=false) 어느 쪽으로도 보내지 않고 OFF_TOPIC으로 답한다.
  * 근거는 원문 문서(제목·매체·날짜·링크)로 되돌리고, 삭제됐거나 분석 완료가 아니면 출처에서 뺀다.
@@ -114,7 +114,7 @@ public class RagService {
         Interpreted interpreted = interpret(text, today, history);
         if (!interpreted.fashion()) {
             log.info("RAG 질문 {}자 — 패션 질문이 아니라 답하지 않음", text.length());
-            return new RagAnswerView(text, false, OFF_TOPIC_ANSWER, List.of(), "OFF_TOPIC", List.of(), null, minScore, null,
+            return new RagAnswerView(text, false, OFF_TOPIC_ANSWER, List.of(), "OFF_TOPIC", List.of(), null, minScore,
                     null, interpreted.view(), null);
         }
         return interpreted.question().trend() ? askTrend(text, interpreted, today) : askSearch(text, interpreted, today);
@@ -144,7 +144,7 @@ public class RagService {
         List<ComCd> seasons = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.SEASON, "Y");
         // 대상을 좁히는 속성 값 후보(값 종류 → 사용 중 코드)
         Map<String, List<ComCd>> attributes = new LinkedHashMap<>();
-        for (String type : List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE)) {
+        for (String type : List.of(TrendItemValue.MATERIAL, TrendItemValue.COLOR, TrendItemValue.SILHOUETTE, TrendItemValue.GENDER)) {
             attributes.put(type, comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.VALUE_TYPE_GROUPS.get(type), "Y"));
         }
         List<AiClient.InterpretTurn> turns = turns(history, categories, itemTypes);
@@ -154,7 +154,7 @@ public class RagService {
                     categories.stream().map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList(),
                     itemTypes.stream().map(t -> new AiClient.CodeHint(t.getCodeValue(), t.getCodeName(), "")).toList(), turns,
                     hints(seasons), hints(attributes.get(TrendItemValue.MATERIAL)), hints(attributes.get(TrendItemValue.COLOR)),
-                    hints(attributes.get(TrendItemValue.SILHOUETTE))), apiKey);
+                    hints(attributes.get(TrendItemValue.SILHOUETTE)), hints(attributes.get(TrendItemValue.GENDER))), apiKey);
             String category = known(categories, r.category());
             String itemType = known(itemTypes, r.itemType());
             if (itemType != null) {
@@ -174,6 +174,7 @@ public class RagService {
             putKnown(filters, TrendItemValue.MATERIAL, attributes.get(TrendItemValue.MATERIAL), r.materials());
             putKnown(filters, TrendItemValue.COLOR, attributes.get(TrendItemValue.COLOR), r.colors());
             putKnown(filters, TrendItemValue.SILHOUETTE, attributes.get(TrendItemValue.SILHOUETTE), r.silhouettes());
+            putKnown(filters, TrendItemValue.GENDER, attributes.get(TrendItemValue.GENDER), r.genders()); // "여성 아우터" → 여성복
             log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 속성={} 축={} 단어={} 시즌={} 기간={} 토큰 {}",
                     turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, filters, focus, terms, pickedSeasons,
                     period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
@@ -244,28 +245,27 @@ public class RagService {
         RagAnswerView.Facts factsView = factsView(facts);
         if (facts.docCount() == 0) {
             return new RagAnswerView(text, false, "근거 자료 없음 — " + p.label() + "(" + p.from() + " ~ " + p.to() + ")에 "
-                    + facts.scopeLabel() + " 원문이 없습니다.", List.of(), "NO_EVIDENCE", List.of(), null, minScore, null,
+                    + facts.scopeLabel() + " 원문이 없습니다.", List.of(), "NO_EVIDENCE", List.of(), null, minScore,
                     period, interpreted.view(), factsView);
         }
-        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore, null, List.of(),
+        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
                 today.toString(), AiClient.AnswerRequest.TREND, interpreted.question().category(),
                 new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), p.explicit(), facts.stale()),
                 facts.lines(), facts.evidenceDocIds()), apiKey);
         log.info("RAG 유행 질문 {}자 범위={} 기간={}~{} 원문 {}건 매체 {}곳 근거={} 출처 {}건 토큰 {}", text.length(), facts.scopeLabel(),
                 p.from(), p.to(), facts.docCount(), facts.mediaCount(), response.grounded(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
-        return view(text, response, period, null, interpreted, factsView);
+        return view(text, response, period, interpreted, factsView);
     }
 
     /**
-     * 그 밖의 질문 — 문장 유사도 검색(카테고리·기간으로 거름). 근거 원문만 준다.
-     * 주간 집계 상위 값(전체 카테고리·이번 주)을 참고로 덧붙였었는데, 질문 대상과 상관없는 그 수치를 대상의 수치처럼 섞어 썼다
-     * (2026-10-23 기준 점수: 검색 답 4건 모두 지어낸 값 — "전주 대비 50%", "9건 급상승"). 그래서 뺐다. 수치가 필요한 질문은 유행 집계로 간다.
+     * 그 밖의 질문 — 문장 유사도 검색(카테고리·기간으로 거름). 근거 원문만 준다. 집계 수치는 붙이지 않는다 — 질문 대상과
+     * 상관없는 수치를 대상의 수치처럼 섞어 썼다. 수치가 필요한 질문은 유행 집계로 간다.
      */
     private RagAnswerView askSearch(String text, Interpreted interpreted, LocalDate today) {
         QuestionInterpreter.Period p = interpreted.question().period();
         AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
-                null, List.of(), today.toString(), AiClient.AnswerRequest.SEARCH,
+                today.toString(), AiClient.AnswerRequest.SEARCH,
                 interpreted.question().category(),
                 p == null ? null : new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), true, false),
                 List.of(), List.of()), apiKey);
@@ -275,22 +275,22 @@ public class RagService {
         log.info("RAG 질문 {}자 카테고리={} 근거={} 사유={} 최고 유사도={} 출처 {}건 토큰 {}", text.length(),
                 interpreted.question().category(), response.grounded(), response.reason(), response.bestScore(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
-        return view(text, response, period, null, interpreted, null);
+        return view(text, response, period, interpreted, null);
     }
 
-    private RagAnswerView view(String text, AiClient.AnswerResponse response, RagAnswerView.Period period, LocalDate week,
+    private RagAnswerView view(String text, AiClient.AnswerResponse response, RagAnswerView.Period period,
                                Interpreted interpreted, RagAnswerView.Facts facts) {
         if (!response.grounded()) {
             return new RagAnswerView(text, false, noEvidenceMessage(response, period), List.of(), response.reason(), List.of(),
-                    response.bestScore(), minScore, week, period, interpreted.view(), facts);
+                    response.bestScore(), minScore, period, interpreted.view(), facts);
         }
         List<RagAnswerView.Source> sources = sources(response.sources());
         if (sources.isEmpty()) { // 인용한 문서가 모두 삭제·재분석 중이면 출처 없는 답이 된다 — 내보내지 않는다
             return new RagAnswerView(text, false, "근거 자료 없음 — 근거 문서가 삭제되었거나 다시 분석 중입니다.",
-                    List.of(), "SOURCE_MISSING", List.of(), response.bestScore(), minScore, week, period, interpreted.view(), facts);
+                    List.of(), "SOURCE_MISSING", List.of(), response.bestScore(), minScore, period, interpreted.view(), facts);
         }
         return new RagAnswerView(text, true, response.answer(), points(response.points(), sources), null, sources,
-                response.bestScore(), minScore, week, period, interpreted.view(), facts);
+                response.bestScore(), minScore, period, interpreted.view(), facts);
     }
 
     private static RagAnswerView.Facts factsView(TrendFactsService.Facts facts) {
@@ -302,7 +302,21 @@ public class RagService {
                                         r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList())).toList()))
                         .toList(),
                 facts.terms().stream().map(t -> new RagAnswerView.TermFact(t.term(), t.count(), t.mediaCount(), t.prevCount(),
-                        t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList())).toList());
+                        t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList(), termDetails(t))).toList());
+    }
+
+    /** 질문 단어 대상 옷의 포인트 줄 — 축마다 한 줄, 함께 나온 옷·키워드 한 줄씩. */
+    private static List<String> termDetails(TrendFactsService.TermRow t) {
+        List<String> lines = new ArrayList<>();
+        t.points().forEach(p -> lines.add(p.label() + ": " + p.values().stream()
+                .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ")").collect(Collectors.joining(" · "))));
+        if (!t.together().isEmpty()) {
+            lines.add("함께 나온 옷: " + t.together().stream().map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(" · ")));
+        }
+        if (!t.keywords().isEmpty()) {
+            lines.add("키워드: " + t.keywords().stream().map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(" · ")));
+        }
+        return lines;
     }
 
     private static String known(List<ComCd> codes, String value) {

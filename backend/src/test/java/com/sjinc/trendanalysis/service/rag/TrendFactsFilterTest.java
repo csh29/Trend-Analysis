@@ -32,7 +32,7 @@ class TrendFactsFilterTest {
     @Autowired
     private TrendItemRepository trendItemRepository;
 
-    private void doc(String docId, String category, String type, String name, String silhouette, String color) {
+    private void doc(String docId, String category, String type, String name, String silhouette, String color, String gender) {
         SourceDocument doc = sourceDocumentRepository.save(SourceDocument.builder()
                 .docType(SourceDocument.TYPE_IMAGE).docId(docId).title(docId + ".png").media("매체-" + docId)
                 .publishedAt(TODAY.minusDays(3)).status(SourceDocument.DONE).registeredBy("admin").registeredAt(LocalDateTime.now()).build());
@@ -42,15 +42,16 @@ class TrendFactsFilterTest {
         item.addGarmentValue(TrendItemValue.ITEM_TYPE, type, 0, 0, category);
         item.addGarmentValue(TrendItemValue.SILHOUETTE, silhouette, 0, 0, category);
         item.addGarmentValue(TrendItemValue.COLOR, color, 0, 0, category);
+        if (gender != null) item.addGarmentValue(TrendItemValue.GENDER, gender, 0, 0, category);
         trendItemRepository.save(item);
     }
 
     @Test
     void 속성_조건으로_그_값을_가진_옷만_센다() {
-        doc("FI-1", "BOTTOM", "BOTTOM_DENIM", "와이드 데님 팬츠", "WIDE", "BLACK");
-        doc("FI-2", "BOTTOM", "BOTTOM_SLACKS", "와이드 슬랙스", "WIDE", "BEIGE");
-        doc("FI-3", "BOTTOM", "BOTTOM_DENIM", "슬림 데님 팬츠", "SLIM", "BLUE");
-        doc("FI-4", "OUTER", "OUTER_COAT", "와이드 코트", "WIDE", "BLACK");
+        doc("FI-1", "BOTTOM", "BOTTOM_DENIM", "와이드 데님 팬츠", "WIDE", "BLACK", "WOMEN");
+        doc("FI-2", "BOTTOM", "BOTTOM_SLACKS", "와이드 슬랙스", "WIDE", "BEIGE", "MEN");
+        doc("FI-3", "BOTTOM", "BOTTOM_DENIM", "슬림 데님 팬츠", "SLIM", "BLUE", null);
+        doc("FI-4", "OUTER", "OUTER_COAT", "와이드 코트", "WIDE", "BLACK", "WOMEN");
 
         // "와이드 팬츠 유행해?" → 하의 + 실루엣 와이드
         TrendFactsService.Facts wide = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "BOTTOM", "하의",
@@ -68,6 +69,12 @@ class TrendFactsFilterTest {
                 null, null, null, List.of(), List.of(), null,
                 Map.of(TrendItemValue.SILHOUETTE, List.of("WIDE"), TrendItemValue.COLOR, List.of("BLACK"))), TODAY);
         assertThat(wideBlack.docCount()).isEqualTo(1);
+
+        // 대상 라인도 속성 조건이다 — "여성 하의" → 하의 + 여성복(2026-10-26)
+        TrendFactsService.Facts women = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "BOTTOM", "하의",
+                null, null, null, List.of(), List.of(), null, Map.of(TrendItemValue.GENDER, List.of("WOMEN"))), TODAY);
+        assertThat(women.docCount()).isEqualTo(1);
+        assertThat(women.scopeLabel()).isEqualTo("하의 · 여성복");
 
         // 조건이 없으면 하의 전부
         TrendFactsService.Facts bottoms = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "BOTTOM", "하의",

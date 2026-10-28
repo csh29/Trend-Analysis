@@ -20,7 +20,8 @@ def summary_chunk(structured: dict, names: dict[str, str]) -> str:
     # 아이템 한 줄씩 — 속성을 그 아이템에 붙여 써야 "블랙 스커트"와 "그레이 카디건"이 섞이지 않는다
     for item in structured.get("items") or []:
         attrs = [f"{label} {labels(item[key])}"
-                 for key, label in (("materials", "소재"), ("colors", "컬러"), ("silhouettes", "실루엣")) if item.get(key)]
+                 for key, label in (("materials", "소재"), ("colors", "컬러"), ("silhouettes", "실루엣"), ("genders", "대상"))
+                 if item.get(key)]
         category = names.get(item.get("category"), item.get("category") or "")
         kind = names.get(item.get("type"), "") if item.get("type") else ""  # 아이템 종류 이름(예: 데님 재킷(트러커))
         label = f"{category}·{kind}" if kind else category

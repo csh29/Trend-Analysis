@@ -11,8 +11,7 @@
 
 ## 2. 환경
 
-- 파이썬(`py`)·한글 경로(큰따옴표)·한국어(주석·로그·커밋) 규칙은 루트 [`CLAUDE.md`](../../CLAUDE.md)의 "항상 지키는 것"에 있다.
-- AI 서비스 가상환경은 `ai/` 폴더에서 `.venv/Scripts/python`으로 쓴다.
+- 파이썬(`py`)·한글 경로(큰따옴표)·한국어(주석·로그·커밋) 규칙은 루트 [`CLAUDE.md`](../../CLAUDE.md)의 "항상 지키는 것"에 있다. AI 서비스 가상환경은 [`ai/ai-development.md`](ai/ai-development.md).
 
 ## 3. 주석·문서
 
@@ -20,7 +19,7 @@
 - 고친 곳에 맞는 문서를 같이 고친다.
   - 기능의 결정 사항·규칙·주의점이 바뀌면 → `features/<기능>.md`. **API·컬럼·파일 목록처럼 코드에서 읽을 수 있는 것은 적지 않는다** — 코드와 어긋나 틀린 문서가 된다. 이유가 있는 규칙, 사용자 결정, 겪은 함정만 남긴다.
   - 빌드·실행·구조·영역 공통 규칙이 바뀌면 → `backend/backend-development.md` 또는 `ai/ai-development.md`
-  - 새 기능이면 `features/`에 문서를 만들고 `llm-analysis.md` 목차와 루트 `CLAUDE.md`에 넣는다.
+  - 새 기능이면 `features/`에 문서를 만들고 루트 `CLAUDE.md` 문서 표와 `llm-analysis.md` 구현 현황 표에 넣는다.
   - 사람이 읽는 실행 방법·화면 목록이 바뀌면 `backend/README.md`도 고친다.
 - 한 내용은 한 문서에만 쓰고 다른 문서는 링크한다.
 
@@ -38,7 +37,7 @@
 ## 6. 작업 체크리스트
 
 - [ ] 이미 있는 공통 모듈·공통 처리를 썼는가?
-- [ ] backend를 고쳤으면 `./mvnw test`가 통과하는가? 새 API에 권한 없음(403) 테스트를 붙였는가(일부러 로그인만 요구하는 API는 미로그인 401)?
+- [ ] backend를 고쳤으면 `./mvnw test`가 통과하는가? 새 API에 권한 테스트를 붙였는가([`auth-permission.md`](features/auth-permission.md) "확인할 것")?
 - [ ] `ai/`를 고쳤으면 `ai/` 폴더에서 `.venv/Scripts/python -m unittest`가 통과하는가? 프롬프트를 고쳤으면 실제 호출로 확인했는가?
 - [ ] 화면을 고쳤으면 브라우저에서 확인했는가?
 - [ ] 바뀐 결정·규칙에 맞게 기능 문서·영역 문서를 고쳤는가? 실행 방법·화면 목록이 바뀌었으면 `backend/README.md`도?

@@ -11,7 +11,7 @@
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import anthropic
 
@@ -82,6 +82,8 @@ class StructureInput:
     colors: list[CodeOption]
     silhouettes: list[CodeOption]
     seasons: list[CodeOption]
+    # 옷의 대상 라인(여성복·남성복·공용) — 없으면(예전 Spring) genders 칸을 받지 않는다(2026-10-26)
+    genders: list[CodeOption] = field(default_factory=list)
 
     @property
     def has_text(self) -> bool:
@@ -107,6 +109,9 @@ def build_schema(data: StructureInput) -> dict:
         "required": ["category", "item", "type", "materials", "colors", "silhouettes"],
         "additionalProperties": False,
     }
+    if data.genders:  # 0~1개(판단할 수 없으면 빈 배열) — 하나만 남기는 것은 Spring 검증
+        item["properties"]["genders"] = enum_array(data.genders)
+        item["required"].append("genders")
     return {
         "type": "object",
         "properties": {
@@ -131,6 +136,7 @@ def _allowed_values_text(data: StructureInput) -> str:
         line("colors", data.colors),
         line("silhouettes", data.silhouettes),
         line("seasons", data.seasons),
+        *([line("genders", data.genders)] if data.genders else []),
     ])
 
 
@@ -155,7 +161,7 @@ def build_content(data: StructureInput) -> list[dict]:
 def candidate_counts(data: StructureInput) -> str:
     """Claude가 판단할 후보(허용 코드) 건수 — 로그용."""
     return (f"본문 {len(data.text or '')}자·이미지 {len(data.images)}장 / 카테고리 {len(data.categories)}·종류 {len(data.item_types)}·소재 {len(data.materials)}·컬러 {len(data.colors)}·"
-            f"실루엣 {len(data.silhouettes)}·시즌 {len(data.seasons)}")
+            f"실루엣 {len(data.silhouettes)}·시즌 {len(data.seasons)}·대상 {len(data.genders)}")
 
 
 def structure(data: StructureInput, api_key: str, client: anthropic.Anthropic | None = None) -> tuple[dict, dict]:

@@ -76,12 +76,16 @@ public class DataInitializer implements CommandLineRunner {
         jdbcTemplate.execute("ALTER TABLE trend_items DROP COLUMN IF EXISTS sentiment");
         // 2026-10-23 사용자 결정: 트렌드 분석 유형에서 아이템명을 뺐다(아이템 종류와 뜻이 겹친다) — 지난 집계 줄도 지운다
         jdbcTemplate.update("DELETE FROM trend_weekly_stats WHERE value_type = ?", TrendItemValue.ITEM);
+        // 2026-10-28: 값 종류 속성 RAG(챗봇 참고 집계)는 읽는 곳이 없다 — 공통코드 화면에 남은 값을 비운다
+        jdbcTemplate.update("UPDATE com_cd_dtl SET attr1 = NULL WHERE code_group = ? AND attr1 = 'RAG'", TrendCodes.VALUE_TYPE);
     }
 
     /** 초안에 나중에 더한 코드 — 기존 DB에 없으면 그룹 끝에 넣는다(그룹 → 코드값). 화면에서 지운 코드도 다시 들어온다. */
     private static final java.util.Map<String, List<String>> NEW_CODES = java.util.Map.of(
             // 2026-10-23 사용자 결정: 무스탕을 따로 센다(몸판이 무스탕일 때만 — 깃·안감만이면 주 소재 규칙으로 빠진다)
-            TrendCodes.MATERIAL, List.of("SHEARLING"));
+            // 2026-10-28 정답셋(사람이 단 라벨)에 나왔는데 코드에 없던 값: 소재 레이온·아크릴, 실루엣 부츠컷
+            TrendCodes.MATERIAL, List.of("SHEARLING", "RAYON", "ACRYLIC"),
+            TrendCodes.SILHOUETTE, List.of("BOOTCUT"));
 
     private void addNewCodes(String group) {
         List<ComCd> codes = comCdRepository.findByCodeGroupOrderBySortOrderAsc(group);
@@ -97,7 +101,9 @@ public class DataInitializer implements CommandLineRunner {
 
     /** 초안에서 뺀 코드 — 기존 DB에 남아 있으면 지운다(그룹 → 코드값). */
     private static final java.util.Map<String, List<String>> RETIRED_CODES = java.util.Map.of(
-            TrendCodes.VALUE_TYPE, List.of(TrendItemValue.ITEM));
+            TrendCodes.VALUE_TYPE, List.of(TrendItemValue.ITEM),
+            // 2026-10-28 사용자 결정: 데님 워싱은 블루·네이비·블랙으로 센다 — 잠깐 넣었던 컬러 데님을 지운다
+            TrendCodes.COLOR, List.of("DENIM"));
 
     private void deleteRetiredCodes(String group) {
         List<String> retired = RETIRED_CODES.getOrDefault(group, List.of());
@@ -142,9 +148,9 @@ public class DataInitializer implements CommandLineRunner {
     /** 트렌드 항목 표준 코드(카테고리·소재·컬러·실루엣) 초안. 그룹 단위로 없을 때만 넣는다 — 화면에서 고친 값을 덮어쓰지 않는다. */
     private void seedTrendCodesIfAbsent() {
         List<String> groups = List.of(TrendCodes.CATEGORY, TrendCodes.MATERIAL, TrendCodes.COLOR, TrendCodes.SILHOUETTE,
-                TrendCodes.SEASON, TrendCodes.ITEM_TYPE, TrendCodes.VALUE_TYPE, TrendCodes.TREND_WORD);
+                TrendCodes.SEASON, TrendCodes.ITEM_TYPE, TrendCodes.VALUE_TYPE, TrendCodes.TREND_WORD, TrendCodes.GENDER);
         List<String> names = List.of("트렌드 카테고리", "트렌드 소재", "트렌드 컬러", "트렌드 실루엣", "트렌드 시즌", "트렌드 아이템 종류",
-                "트렌드 값 종류", "유행 질문 단어");
+                "트렌드 값 종류", "유행 질문 단어", "트렌드 대상(성별)");
         for (int g = 0; g < groups.size(); g++) {
             String group = groups.get(g);
             if (comCdGroupRepository.existsById(group)) {
@@ -174,6 +180,7 @@ public class DataInitializer implements CommandLineRunner {
             TrendCodes.CATEGORY, "AI 정형화(P-03)가 이 코드값 중에서만 고른다. 속성 = 질문에서 이 카테고리를 알아보는 일상 표현(쉼표)",
             TrendCodes.ITEM_TYPE, "AI 정형화(P-03)가 고른다. 코드값은 카테고리_종류(OUTER_PADDING) — 앞부분이 그 카테고리 코드여야 한다",
             TrendCodes.VALUE_TYPE, "트렌드 분석 화면 유형 목록·이름. 코드값은 집계 값 종류라 바꾸지 않는다",
+            TrendCodes.GENDER, "AI 정형화(P-03)가 아이템마다 0~1개 고른다 — 입은 사람이 아니라 옷의 라인. 판단할 수 없으면 비운다",
             TrendCodes.TREND_WORD, "질문에 이 말(코드명)이 있으면 유행 질문으로 본다 — AI 질문 해석이 실패했을 때 쓰는 규칙");
 
     /**

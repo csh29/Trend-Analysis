@@ -153,7 +153,16 @@ class StructurerTest(unittest.TestCase):
         self.assertNotIn("category", schema["properties"])  # 문서 단위 카테고리는 없다
         self.assertEqual(["FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])  # 시즌은 문서 단위
         self.assertIn("seasons", schema["required"])
+        self.assertNotIn("genders", item["properties"])  # 대상 라인 코드를 안 보내면(예전 Spring) 그 칸을 받지 않는다
         self.assertNotIn("source", schema["properties"])  # 출처는 LLM이 만들지 않는다
+
+    def test_schema_asks_gender_when_codes_given(self):
+        data = sample_input()
+        data.genders = [CodeOption("WOMEN", "여성복"), CodeOption("MEN", "남성복"), CodeOption("UNISEX", "공용")]
+        item = build_schema(data)["properties"]["items"]["items"]
+        self.assertEqual(["WOMEN", "MEN", "UNISEX"], item["properties"]["genders"]["items"]["enum"])  # 아이템마다
+        self.assertIn("genders", item["required"])
+        self.assertIn("- genders: WOMEN=여성복", system_prompt(data)[1]["text"])
 
     def test_image_content_puts_image_first(self):
         content = build_content(sample_input("IMAGE"))

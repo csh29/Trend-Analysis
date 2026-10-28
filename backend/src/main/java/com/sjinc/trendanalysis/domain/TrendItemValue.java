@@ -38,6 +38,8 @@ public class TrendItemValue {
     public static final String MATERIAL = "MATERIAL";
     public static final String COLOR = "COLOR";
     public static final String SILHOUETTE = "SILHOUETTE";
+    /** 옷의 대상 라인(공통코드 TREND_GENDER — 여성복·남성복·공용). 의류 아이템 단위, 판단할 수 없으면 없다(2026-10-26 사용자 요청). */
+    public static final String GENDER = "GENDER";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

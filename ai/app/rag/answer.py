@@ -24,7 +24,7 @@ from app.core.claude import AiServiceError, create_message, parse_json, usage_of
 log = logging.getLogger("trend-ai")
 
 PROMPT = prompt_loader.load("rag/answer", ["system", "system_trend", "system_search", "period", "period_recent", "period_stale", "trend_header",
-                                           "stats_header", "sources_header", "task", "task_trend"])
+                                           "sources_header", "task", "task_trend"])
 MAX_TOKENS = 4000
 HALF_LIFE_DAYS = 28   # 최신성 가중치가 절반이 되는 날수 — "요즘"을 4주 단위로 본다
 CANDIDATES = 30       # 최신성으로 다시 고르기 전에 유사도로 모으는 후보 청크 수
@@ -99,15 +99,6 @@ def example_documents(collection, doc_ids: list[str]) -> list[dict]:
     return groups
 
 
-@dataclass
-class StatRow:
-    type_label: str  # 키워드·아이템·소재…
-    label: str
-    count: int
-    prev_count: int
-    prev_rate: float | None
-    surge: bool
-    is_new: bool
 
 
 @dataclass
@@ -125,8 +116,6 @@ class AnswerInput:
     model: str
     top_k: int
     min_score: float
-    stats_week: str | None = None
-    stats: list[StatRow] = field(default_factory=list)
     today: date = field(default_factory=date.today)  # Spring 서버 날짜 — 최신성·기간의 기준
     mode: str = "SEARCH"                              # SEARCH | TREND
     category: str | None = None                       # 질문의 카테고리 코드(SEARCH에서 거른다)
@@ -171,17 +160,6 @@ def where_filter(data: AnswerInput) -> dict | None:
     return conditions[0] if len(conditions) == 1 else {"$and": conditions}
 
 
-def _stats_text(data: AnswerInput) -> str:
-    if not data.stats:
-        return ""
-    lines = []
-    for s in data.stats:
-        rate = "-" if s.prev_rate is None else f"{s.prev_rate:+.1f}%"
-        flag = " 급상승" if s.surge else (" 신규" if s.is_new else "")
-        lines.append(f"- {s.type_label} {s.label}: {s.count}건 (전주 {s.prev_count}건, 전주 대비 {rate}){flag}")
-    return PROMPT["stats_header"].replace("{week}", data.stats_week or "-") + "\n" + "\n".join(lines)
-
-
 def _sources_text(groups: list[dict]) -> str:
     blocks = []
     for g in groups:
@@ -220,9 +198,6 @@ def period_info(data: AnswerInput, groups: list[dict]) -> dict:
 def build_content(data: AnswerInput, groups: list[dict], info: dict | None = None) -> str:
     parts = [_period_text(data, info)] if info else []
     parts.append(_sources_text(groups))
-    stats = _stats_text(data)
-    if stats:
-        parts.append(stats)
     parts.append(f"<question>\n{data.question}\n</question>")
     parts.append(PROMPT["task"])
     return "\n\n".join(parts)

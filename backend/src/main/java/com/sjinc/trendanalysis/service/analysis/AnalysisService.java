@@ -228,7 +228,7 @@ public class AnalysisService {
                 options(codes.codes(TrendCodes.CATEGORY)), options(codes.codes(TrendCodes.ITEM_TYPE)),
                 options(codes.codes(TrendCodes.MATERIAL)),
                 options(codes.codes(TrendCodes.COLOR)), options(codes.codes(TrendCodes.SILHOUETTE)),
-                options(codes.codes(TrendCodes.SEASON)));
+                options(codes.codes(TrendCodes.SEASON)), options(codes.codes(TrendCodes.GENDER)));
         // 원문 1건 = 본문 + 이미지 — 텍스트 원문에 첨부한 이미지도 한 요청에 같이 보낸다
         List<AiClient.ImageInput> images = imageService.readDocumentImages(doc).stream()
                 .map(image -> new AiClient.ImageInput(Base64.getEncoder().encodeToString(image.bytes()), image.contentType()))
@@ -272,6 +272,7 @@ public class AnalysisService {
                 addGarmentValues(item, TrendItemValue.MATERIAL, g.materials(), no, g.category());
                 addGarmentValues(item, TrendItemValue.COLOR, g.colors(), no, g.category());
                 addGarmentValues(item, TrendItemValue.SILHOUETTE, g.silhouettes(), no, g.category());
+                addGarmentValues(item, TrendItemValue.GENDER, g.genders(), no, g.category());
             }
             trendItemRepository.save(item);
         });
@@ -312,6 +313,7 @@ public class AnalysisService {
             garment.put("materials", g.materials());
             garment.put("colors", g.colors());
             garment.put("silhouettes", g.silhouettes());
+            garment.put("genders", g.genders());
             return garment;
         }).toList());
         map.put("keywords", v.keywords());

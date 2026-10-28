@@ -77,9 +77,12 @@ public class TrendItem {
         return values.stream().filter(v -> v.getValueType().equals(valueType)).map(TrendItemValue::getValue).toList();
     }
 
-    /** 의류 아이템 하나 — 같은 garmentNo의 값을 모은 것. type은 아이템 종류 코드(종류 도입 전 결과는 null). */
+    /**
+     * 의류 아이템 하나 — 같은 garmentNo의 값을 모은 것. type은 아이템 종류 코드(종류 도입 전 결과는 null).
+     * genders는 대상 라인(0~1개, 성별 도입 전 결과와 판단할 수 없는 옷은 비어 있다).
+     */
     public record Garment(int no, String category, String name, String type, List<String> materials, List<String> colors,
-                          List<String> silhouettes) {
+                          List<String> silhouettes, List<String> genders) {
     }
 
     /**
@@ -121,7 +124,7 @@ public class TrendItem {
         String type = sorted.stream().filter(v -> TrendItemValue.ITEM_TYPE.equals(v.getValueType())).map(TrendItemValue::getValue)
                 .findFirst().orElse(null);
         return new Garment(no, garmentCategory, name, type, of(sorted, TrendItemValue.MATERIAL), of(sorted, TrendItemValue.COLOR),
-                of(sorted, TrendItemValue.SILHOUETTE));
+                of(sorted, TrendItemValue.SILHOUETTE), of(sorted, TrendItemValue.GENDER));
     }
 
     private static List<String> of(List<TrendItemValue> list, String type) {

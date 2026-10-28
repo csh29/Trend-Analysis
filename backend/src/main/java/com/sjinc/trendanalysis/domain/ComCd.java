@@ -50,7 +50,7 @@ public class ComCd {
     /**
      * 코드 속성 — 코드마다 프로그램이 읽는 값(비고는 사람이 읽는 설명). 그룹마다 뜻이 다르다:
      * TREND_SILHOUETTE = 축(FIT·LENGTH·SHAPE), TREND_MATERIAL = IMAGE(사진으로 구분되는 소재), TREND_CATEGORY = 일상 표현
-     * 쉼표 목록(재킷,바지…), TREND_VALUE_TYPE = RAG(답변에 참고 집계로 보냄). 그룹의 비고에 무엇을 쓰는지 적는다.
+     * 쉼표 목록(재킷,바지…). 그룹의 비고에 무엇을 쓰는지 적는다.
      */
     @Column(name = "attr1", length = 500)
     private String attr1;

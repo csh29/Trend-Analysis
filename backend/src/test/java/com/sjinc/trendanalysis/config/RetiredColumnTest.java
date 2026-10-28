@@ -85,4 +85,31 @@ class RetiredColumnTest {
         assertThat(shearling.get(0).getCodeName()).isEqualTo("무스탕(시어링·양털 가죽)");
         assertThat(shearling.get(0).getAttr1()).isEqualTo(TrendCodes.ATTR_IMAGE);
     }
+
+    @Test
+    void 예전_DB에_정답셋에서_나온_코드를_넣는다() {
+        java.util.Map<String, List<String>> added = java.util.Map.of(TrendCodes.MATERIAL, List.of("RAYON", "ACRYLIC"),
+                TrendCodes.SILHOUETTE, List.of("BOOTCUT"));
+        added.forEach((group, values) -> comCdRepository.findByCodeGroupOrderBySortOrderAsc(group).stream()
+                .filter(c -> values.contains(c.getCodeValue())).forEach(comCdRepository::delete));
+
+        dataInitializer.run();
+
+        added.forEach((group, values) -> assertThat(comCdRepository.findByCodeGroupOrderBySortOrderAsc(group))
+                .extracting(ComCd::getCodeValue).containsAll(values));
+        ComCd bootcut = comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.SILHOUETTE).stream()
+                .filter(c -> c.getCodeValue().equals("BOOTCUT")).findFirst().orElseThrow();
+        assertThat(bootcut.getAttr1()).isEqualTo("SHAPE,BOTTOM"); // 축·카테고리 속성도 같이 들어간다
+    }
+
+    @Test
+    void 예전_DB의_컬러_데님을_지운다() {
+        comCdRepository.save(ComCd.builder().codeGroup(TrendCodes.COLOR).codeValue("DENIM").codeName("데님(인디고·청 워싱)")
+                .sortOrder(99).useYn("Y").build());
+
+        dataInitializer.run();
+
+        assertThat(comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.COLOR))
+                .extracting(ComCd::getCodeValue).doesNotContain("DENIM").contains("BLUE", "NAVY");
+    }
 }

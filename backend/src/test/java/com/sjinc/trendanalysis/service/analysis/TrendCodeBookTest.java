@@ -35,7 +35,7 @@ class TrendCodeBookTest {
     @Test
     void 실루엣_축은_공통코드_속성으로_정한다() {
         assertThat(seedBook().silhouetteAxes()).containsEntry("OVERSIZED", "FIT").containsEntry("CROPPED", "LENGTH")
-                .containsEntry("BOXY", "SHAPE").hasSize(10);
+                .containsEntry("BOXY", "SHAPE").containsEntry("BOOTCUT", "SHAPE").hasSize(11);
     }
 
     @Test

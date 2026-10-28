@@ -238,7 +238,8 @@ public class DocumentService {
                     g.type() == null ? null : code(codes, TrendCodes.ITEM_TYPE, g.type()),
                     codesOf(codes, TrendCodes.MATERIAL, g.materials()),
                     codesOf(codes, TrendCodes.COLOR, g.colors()),
-                    codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()))).toList();
+                    codesOf(codes, TrendCodes.SILHOUETTE, g.silhouettes()),
+                    codesOf(codes, TrendCodes.GENDER, g.genders()))).toList();
             return new AnalysisView.Result(garments, item.valuesOf(TrendItemValue.KEYWORD),
                     codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
                     item.getSummary(), item.getResultJson());
