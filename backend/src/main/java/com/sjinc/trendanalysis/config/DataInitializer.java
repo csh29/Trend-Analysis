@@ -84,7 +84,8 @@ public class DataInitializer implements CommandLineRunner {
     private static final java.util.Map<String, List<String>> NEW_CODES = java.util.Map.of(
             // 2026-10-23 사용자 결정: 무스탕을 따로 센다(몸판이 무스탕일 때만 — 깃·안감만이면 주 소재 규칙으로 빠진다)
             // 2026-10-28 정답셋(사람이 단 라벨)에 나왔는데 코드에 없던 값: 소재 레이온·아크릴, 실루엣 부츠컷
-            TrendCodes.MATERIAL, List.of("SHEARLING", "RAYON", "ACRYLIC"),
+            // 2026-10-28 사용자 요청: 벨벳 기사의 소재가 비어 벨벳을 따로 센다
+            TrendCodes.MATERIAL, List.of("SHEARLING", "RAYON", "ACRYLIC", "VELVET"),
             TrendCodes.SILHOUETTE, List.of("BOOTCUT"));
 
     private void addNewCodes(String group) {

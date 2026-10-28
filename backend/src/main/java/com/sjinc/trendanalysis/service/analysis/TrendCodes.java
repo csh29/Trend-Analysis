@@ -83,7 +83,9 @@ public final class TrendCodes {
                     new String[]{"CORDUROY", "코듀로이(골덴)", ATTR_IMAGE}, new String[]{"NYLON", "나일론"},
                     new String[]{"POLYESTER", "폴리에스터"}, new String[]{"SATIN", "새틴", ATTR_IMAGE},
                     // 2026-10-28 정답셋(사람이 단 라벨)에 나와 추가 — 사진으로는 가릴 수 없어 IMAGE가 아니다
-                    new String[]{"RAYON", "레이온"}, new String[]{"ACRYLIC", "아크릴"}),
+                    new String[]{"RAYON", "레이온"}, new String[]{"ACRYLIC", "아크릴"},
+                    // 2026-10-28 사용자 요청: 매체 기사(벨벳 아이템)에서 소재가 비었다 — 새틴·코듀로이와 헷갈릴 수 있어 일단 IMAGE가 아니다
+                    new String[]{"VELVET", "벨벳(우단)"}),
             COLOR, List.of(
                     new String[]{"BLACK", "블랙"}, new String[]{"WHITE", "화이트"}, new String[]{"IVORY", "아이보리"},
                     new String[]{"GRAY", "그레이"}, new String[]{"BEIGE", "베이지"}, new String[]{"BROWN", "브라운"},
