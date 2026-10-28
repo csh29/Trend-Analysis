@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -95,6 +96,74 @@ class RagTrendApiTest {
                 List.of(new AiClient.AnswerPoint("데님 재킷: 3건", List.of(1))),
                 List.of(new AiClient.AnswerSource(1, docId, null, "예시")), null, null, null,
                 new AiClient.AnswerPeriod(TODAY.minusDays(27).toString(), TODAY.toString(), "최근 4주", false, false));
+    }
+
+    private static AiClient.InterpretResponse complex(String type) {
+        return new AiClient.InterpretResponse(true, "OUTER", null, null, null, true, null, null, null, null, null, null, null, null,
+                null, null, null, type);
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 비교_질문은_도구로_집계를_불러_인용한_원문으로_답한다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(complex("COMPARE"));
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
+                new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t1", "name", "count_trend",
+                        "input", Map.of("category", "OUTER", "focus", "ITEM_TYPE"))), Map.of("input_tokens", 100, "output_tokens", 20)),
+                new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t2", "name", "final_answer",
+                        "input", Map.of("summary", "최근 4주 아우터는 데님 재킷이 가장 많다", "grounded", true, "body", "",
+                                "points", List.of(Map.of("text", "데님 재킷 3건(매체 2곳)", "sources", List.of(1, 9)))))),
+                        Map.of("input_tokens", 300, "output_tokens", 50)));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("데님 재킷이랑 패딩 중 뭐가 더 많아?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.interpretation.by").value("AGENT"))
+                .andExpect(jsonPath("$.points[0].sources.length()").value(1)) // 도구 결과에 없는 [9]는 빠진다
+                .andExpect(jsonPath("$.sources.length()").value(1))
+                .andExpect(jsonPath("$.facts.docCount").value(4));         // 판단 근거는 첫 집계
+
+        ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
+        verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
+        // 둘째 단계 messages의 마지막은 도구 결과 — 집계 줄과 [1] 예시 원문이 실린다
+        String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
+        assertThat(toolResult).contains("[아이템 종류]").contains("[1] RT-");
+        verify(aiClient, org.mockito.Mockito.never()).answer(any(), any()); // 지금 경로는 부르지 않는다
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 도구_경로가_실패하면_지금_경로로_답한다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(complex("SERIES"));
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), any())).thenThrow(new AiCallException("AI 서비스 오류", true));
+        when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 6주 추이 어때?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.interpretation.by").value("AI"));
+        verify(aiClient).answer(any(), eq("test-key"));
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 기획_브리프는_해석이_유행_질문이_아니라고_해도_집계로_답한다() throws Exception {
+        // 원문 한 건에서 나온 값으로 경향을 말하지 않는다 — 복합 질문은 검색이 아니라 집계 경로(브리프 형식 줄을 붙인다)
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(new AiClient.InterpretResponse(false, "OUTER", null, null, null,
+                true, null, null, null, null, null, null, null, null, null, null, null, "BRIEF"));
+        when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 기획 브리프 만들어줘")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.interpretation.trend").value(true))
+                .andExpect(jsonPath("$.facts.docCount").value(4));
+
+        ArgumentCaptor<AiClient.AnswerRequest> sent = ArgumentCaptor.forClass(AiClient.AnswerRequest.class);
+        verify(aiClient).answer(sent.capture(), eq("test-key"));
+        assertThat(sent.getValue().mode()).isEqualTo(AiClient.AnswerRequest.TREND);
+        assertThat(sent.getValue().trendFacts().get(0)).startsWith("[형식] 기획 브리프");
     }
 
     @Test

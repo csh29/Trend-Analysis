@@ -90,7 +90,9 @@ def build_schema(data: InterpretInput) -> dict:
             "fashion": {"type": "boolean"},  # 패션·트렌드 질문인지 — 아니면 Spring이 답하지 않는다
             "trend": {"type": "boolean"},
             "category": {"type": "string", "enum": [""] + [c.value for c in data.categories]},
-            "item_type": {"type": "string", "enum": [""] + [t.value for t in data.item_types]},
+            # 종류·속성 코드는 enum으로 다시 싣지 않는다 — 허용 코드 목록(system)과 같은 코드가 스키마에 한 번 더 실려 입력이 약 2,700토큰
+            # 늘었다(2026-10-28). 목록 밖 값은 normalize(_known·_codes)와 Spring이 버린다
+            "item_type": {"type": "string"},
             "has_period": {"type": "boolean"},
             "period_from": {"type": "string"},
             "period_to": {"type": "string"},
@@ -111,19 +113,32 @@ def build_schema(data: InterpretInput) -> dict:
     for key in ATTRIBUTES:  # 대상을 좁히는 속성 값 — 유행 집계가 아이템의 그 값으로 거른다
         options = getattr(data, key)
         if options:
-            schema["properties"][key] = {"type": "array", "items": {"type": "string", "enum": [o.value for o in options]}}
+            schema["properties"][key] = {"type": "array", "items": {"type": "string"}}
             schema["required"].append(key)
     return schema
 
 
-def build_content(data: InterpretInput) -> str:
+def allowed_values_text(data: InterpretInput) -> str:
+    """허용 코드 목록(코드값=이름) — 공통코드가 같으면 매 질문 같아서 system 캐시 구간에 둔다."""
     categories = ", ".join(f"{c.value}={c.name}" + (f"({c.words})" if c.words else "") for c in data.categories)
     item_types = ", ".join(f"{t.value}={t.name}" for t in data.item_types)
     seasons = f"\n- seasons: " + ", ".join(f"{s.value}={s.name}" for s in data.seasons) if data.seasons else ""
     seasons += "".join(f"\n- {key}: " + ", ".join(f"{o.value}={o.name}" for o in getattr(data, key))
                        for key in ATTRIBUTES if getattr(data, key))
-    return (f"오늘: {data.today.isoformat()} ({'월화수목금토일'[data.today.weekday()]}요일)\n"
-            f"허용 값(코드값=이름):\n- category: {categories}\n- item_type: {item_types}{seasons}\n\n"
+    return f"허용 값(코드값=이름):\n- category: {categories}\n- item_type: {item_types}{seasons}"
+
+
+def system_prompt(data: InterpretInput) -> list[dict]:
+    """규칙 + 허용 코드 목록. 캐시는 걸지 않는다(2026-10-28 사용자 결정 — 챗봇은 5분 안에 이어 묻는 일이 많지 않을 것이라
+    캐시를 만드는 1.25배 비용이 손해가 될 수 있다). 날짜·앞 대화·질문처럼 바뀌는 값은 user에 둔다."""
+    return [
+        {"type": "text", "text": PROMPT["system"]},
+        {"type": "text", "text": allowed_values_text(data)},
+    ]
+
+
+def build_content(data: InterpretInput) -> str:
+    return (f"오늘: {data.today.isoformat()} ({'월화수목금토일'[data.today.weekday()]}요일)\n\n"
             f"{_history_text(data.history)}<question>\n{data.question}\n</question>\n\n{PROMPT['task']}")
 
 
@@ -148,7 +163,7 @@ def _date(value: str) -> date | None:
 
 def normalize(result: dict, data: InterpretInput) -> dict:
     """모델 결과를 정리한다 — 종류의 카테고리를 맞추고, 기간은 날짜가 바르고 from ≤ to ≤ 오늘일 때만 쓴다."""
-    item_type = result.get("item_type") or None
+    item_type = _known(result.get("item_type"), data.item_types)
     category = result.get("category") or None
     if item_type:
         category = item_type.split("_", 1)[0]  # 종류가 이긴다(코드값 앞부분 = 카테고리)
@@ -170,6 +185,11 @@ def normalize(result: dict, data: InterpretInput) -> dict:
             "change": result.get("change") if result.get("trend") and result.get("change") in CHANGE else None,
             "complex": result.get("complex") if result.get("fashion", True) is not False and result.get("complex") in COMPLEX else None,
             **{key: _codes(result.get(key), getattr(data, key)) for key in ATTRIBUTES}}
+
+
+def _known(raw, options: list[CodeHint]) -> str | None:
+    """허용 코드면 그 값, 아니면 None — 스키마에 enum이 없어 목록 밖 값이 올 수 있다."""
+    return raw if raw and any(o.value == raw for o in options) else None
 
 
 def _codes(raw, options: list[CodeHint]) -> list[str]:
@@ -204,7 +224,7 @@ def interpret(data: InterpretInput, api_key: str, client: anthropic.Anthropic | 
     response = create_message(client, api_key,
                               model=data.model,
                               max_tokens=MAX_TOKENS,
-                              system=PROMPT["system"],
+                              system=system_prompt(data),
                               messages=[{"role": "user", "content": build_content(data)}],
                               output_config={"format": {"type": "json_schema", "schema": build_schema(data)},
                                              "effort": "low"})

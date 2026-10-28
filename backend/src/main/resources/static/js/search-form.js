@@ -20,13 +20,13 @@
  *   - optionsQuery : options 대신 공통코드 그룹명(com-cd.js 필요).
  *   - withAll      : select 맨 앞에 빈 값 "전체" 옵션을 넣는다(문구는 allLabel).
  *   - onChange     : (value, values) — 값이 바뀌자마자 조회할 필드에 쓴다.
- *   - match        : (value, keyword) → boolean. matches()에서 부분 일치 대신 쓸 비교 함수.
+ *   - match        : (value, keyword) → boolean. matches()에서 부분 일치 대신 쓸 비교 함수. select에 주면 select도 화면에서 거른다.
  *
  * options:
  *   - onSearch : text 필드에서 Enter를 누르면 호출된다.
  *
- * matches(row): text는 row[id]의 대소문자 무시 부분 일치, multiselect는 고른 값 포함 여부를 보고 select는 보지 않는다
- *   (빈 조건은 통과). 그래서 필드 id를 행 데이터 키와 같게 준다.
+ * matches(row): text는 row[id]의 대소문자 무시 부분 일치, multiselect는 고른 값 포함 여부를 보고 select는 match가 있을 때만 본다
+ *   (빈 조건은 통과 — select는 서버 조회 조건으로 쓰는 경우가 많아서). 그래서 필드 id를 행 데이터 키와 같게 준다.
  */
 (function (global) {
     const DEFAULT_WIDTH = 180;
@@ -245,7 +245,7 @@
             matches: function (row) {
                 const cond = values();
                 return fields.every(function (field) {
-                    if (field.type === 'select') return true;
+                    if (field.type === 'select' && !field.match) return true;
                     if (field.type === 'multiselect') {
                         return cond[field.id].length === 0 || cond[field.id].indexOf(String(row[field.id])) >= 0;
                     }

@@ -63,6 +63,34 @@ class TrendFactsChangeTest {
     }
 
     @Test
+    void 판단_근거의_건수와_원문_목록_수가_같다() {
+        // 사용자가 숫자를 직접 검증한다 — 막대의 N건(이번·직전)과 같은 규칙으로 고른 원문 목록
+        TrendFactsService.Facts facts = count(null);
+        QuestionInterpreter.Period prev = facts.prevPeriod();
+        for (TrendFactsService.Row row : facts.dimensions().get(0).rows()) {
+            assertThat(trendFactsService.docs(facts.scope(), TrendItemValue.ITEM_TYPE, row.value(), facts.period().from(), facts.period().to()))
+                    .hasSize(row.count());
+            assertThat(trendFactsService.docs(facts.scope(), TrendItemValue.ITEM_TYPE, row.value(), prev.from(), prev.to()))
+                    .hasSize(row.prevCount());
+        }
+        assertThat(trendFactsService.docs(facts.scope(), TrendItemValue.ITEM_TYPE, "OUTER_PADDING", facts.period().from(), facts.period().to()))
+                .allSatisfy(d -> assertThat(d.docId()).startsWith("CHG-"));
+    }
+
+    @Test
+    void 주별_추이는_값이_나온_원문을_주마다_센다() {
+        // 도구 경로의 trend_series — 패딩: 최근 4건 + 40일 전 4건, 8주 안
+        List<TrendFactsService.WeekCount> weeks = trendFactsService.series(new QuestionInterpreter.Interpretation(true, "OUTER", "아우터",
+                null, null, null), TrendItemValue.ITEM_TYPE, "OUTER_PADDING", 8, TODAY);
+        assertThat(weeks).hasSize(8);
+        assertThat(weeks.get(7).current()).isTrue();
+        assertThat(weeks.stream().mapToInt(TrendFactsService.WeekCount::count).sum()).isEqualTo(8);
+        // 값 없이 범위 전체 — 8주 안의 아우터 원문(패딩 8, 레더 4, 트렌치 2)
+        assertThat(trendFactsService.series(new QuestionInterpreter.Interpretation(true, "OUTER", "아우터", null, null, null),
+                null, null, 8, TODAY).stream().mapToInt(TrendFactsService.WeekCount::count).sum()).isEqualTo(14);
+    }
+
+    @Test
     void 증감률은_서버가_계산한다() {
         assertThat(TrendFactsService.rate(3, 1)).isEqualTo("+200%");
         assertThat(TrendFactsService.rate(1, 3)).isEqualTo("-67%");

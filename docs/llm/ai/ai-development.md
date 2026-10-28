@@ -50,7 +50,7 @@ AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAP
 ```
 ai/
 ├─ app/                    Python 코드 (실행: uvicorn app.main:app)
-│  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /interpret, /answer, /search, /health …)
+│  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /interpret, /answer, /agent/step, /search, /health …)
 │  ├─ core/                여러 기능이 같이 쓰는 것
 │  │  ├─ config.py         ai/.env + 환경변수 설정
 │  │  ├─ prompt_loader.py  prompts/ 아래 md 읽기(이름 = 상대 경로, 예: "structure/common")
@@ -65,7 +65,8 @@ ai/
 │  │  └─ vector_store.py   Chroma 클라이언트를 만드는 유일한 곳
 │  └─ rag/                 P-06 검색·답변
 │     ├─ interpret.py      질문 해석(작은 모델 — 패션 질문인지·유행 질문인지·카테고리·종류·기간, 이어 묻기면 질문 다시 쓰기)
-│     └─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
+│     ├─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
+│     └─ agent.py          도구 경로 한 단계(비교·추이 질문 — Claude가 도구를 고르고 Spring이 실행·반복)
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
 │  └─ rag/                 interpret.md(질문 해석) · answer.md(답변 모양·유행 판단·기간·근거 규칙)

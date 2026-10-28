@@ -12,4 +12,10 @@ public record RagQuestionRequest(String question, List<Turn> history) {
     public record Turn(String question, boolean trend, String category, String itemType, String periodLabel,
                        String periodFrom, String periodTo) {
     }
+
+    /** 판단 근거 원문 목록 요청 — 답의 facts.query에 값(valueType·value, 없으면 범위 전체)과 기간을 더한 것. */
+    public record FactDocs(String category, String itemType, java.util.Map<String, java.util.List<String>> filters,
+                           java.util.List<String> seasons, String valueType, String value,
+                           java.time.LocalDate from, java.time.LocalDate to) {
+    }
 }

@@ -152,7 +152,13 @@ public class TrendFactsService {
      */
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
                         int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds,
-                        boolean focused, String change) {
+                        boolean focused, String change, QuestionInterpreter.Interpretation scope) {
+
+        /** 직전 기간(집계 기간 바로 앞 같은 길이) — 원문 목록·검증용. */
+        public QuestionInterpreter.Period prevPeriod() {
+            long days = ChronoUnit.DAYS.between(period.from(), period.to()) + 1;
+            return new QuestionInterpreter.Period(period.from().minusDays(days), period.from().minusDays(1), "직전 기간", false);
+        }
 
         /**
          * AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. 묻는 축이 정해졌으면(focused) 그 축(첫 축)만 보낸다 —
@@ -386,7 +392,7 @@ public class TrendFactsService {
         return new Facts(period, stale, scopeLabel(question) + filterLabel(scope) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
                 dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList(),
                 scope.focus() != null && !dimensions.isEmpty() && scope.focus().equals(dimensions.get(0).valueType()),
-                question.change());
+                question.change(), question);
     }
 
     /**
@@ -530,6 +536,64 @@ public class TrendFactsService {
             case TrendItemValue.DETAIL -> g.details();
             default -> List.of();
         };
+    }
+
+    /** 센 원문 하나 — garments는 그 원문에서 범위·값에 맞은 옷 이름. */
+    public record DocRow(String docId, String docType, String title, String media, LocalDate date, String url,
+                         List<String> garments) {
+    }
+
+    /**
+     * 판단 근거의 "N건"을 이루는 원문 목록 — count()와 같은 규칙(분석 완료·게시일 기간·시즌·범위에 맞는 옷이 있는 원문, 값이 있으면 그 값을
+     * 가진 옷이 있는 원문)으로 다시 고른다. 사용자가 숫자를 직접 검증하려고(2026-10-28 사용자 요청). 최신 원문부터.
+     */
+    public List<DocRow> docs(QuestionInterpreter.Interpretation question, String valueType, String value, LocalDate from, LocalDate to) {
+        Scope scope = new Scope(question.category(), question.itemType(), Set.copyOf(question.seasons()), null, question.filters());
+        List<SourceDocument> docs = sourceDocumentRepository.findByStatusAndPublishedAtBetween(SourceDocument.DONE, from, to);
+        Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(docs.stream().map(SourceDocument::getId).toList())
+                .stream().collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
+        docs.sort(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getId, Comparator.reverseOrder()));
+        List<DocRow> rows = new ArrayList<>();
+        for (SourceDocument doc : docs) {
+            TrendItem item = items.get(doc.getId());
+            LocalDate date = TrendAggregationService.statDate(doc);
+            if (item == null || !scope.inSeason(item) || date.isBefore(from) || date.isAfter(to)) continue;
+            List<TrendItem.Garment> hits = item.garments().stream().filter(scope::matches)
+                    .filter(g -> value == null || valuesOf(g, valueType).contains(value)).toList();
+            if (hits.isEmpty()) continue;
+            rows.add(new DocRow(doc.getDocId(), doc.getDocType(), doc.getTitle(), doc.getMedia(), date,
+                    doc.isImage() ? null : doc.getUrl(), hits.stream().map(TrendItem.Garment::name).filter(n -> n != null && !n.isBlank()).toList()));
+        }
+        return rows;
+    }
+
+    /** 주 하나의 원문 수. current는 이번 주(진행 중 — 다 차지 않았다). */
+    public record WeekCount(LocalDate weekStart, int count, boolean current) {
+    }
+
+    /**
+     * 주별 원문 수 — 범위(카테고리·종류·속성 조건·시즌)에서 값 하나(valueType·value, 둘 다 없으면 범위 전체)가 나온 분석 완료 원문을
+     * 주(월요일 시작)마다 센다. 도구 경로의 추이 질문용(2026-10-28 혼합형 2단계).
+     */
+    public List<WeekCount> series(QuestionInterpreter.Interpretation question, String valueType, String value, int weeks, LocalDate today) {
+        Scope scope = new Scope(question.category(), question.itemType(), Set.copyOf(question.seasons()), null, question.filters());
+        LocalDate thisWeek = today.with(java.time.DayOfWeek.MONDAY);
+        LocalDate from = thisWeek.minusWeeks(Math.max(1, weeks) - 1L);
+        List<SourceDocument> docs = sourceDocumentRepository.findByStatusAndPublishedAtBetween(SourceDocument.DONE, from, today);
+        Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(docs.stream().map(SourceDocument::getId).toList())
+                .stream().collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
+        Map<LocalDate, Set<Long>> byWeek = new java.util.TreeMap<>();
+        for (LocalDate w = from; !w.isAfter(thisWeek); w = w.plusWeeks(1)) byWeek.put(w, new HashSet<>());
+        for (SourceDocument doc : docs) {
+            TrendItem item = items.get(doc.getId());
+            if (item == null || !scope.inSeason(item)) continue;
+            List<TrendItem.Garment> garments = item.garments().stream().filter(scope::matches).toList();
+            boolean hit = value == null ? !garments.isEmpty()
+                    : garments.stream().anyMatch(g -> valuesOf(g, valueType).contains(value));
+            Set<Long> week = byWeek.get(TrendAggregationService.statDate(doc).with(java.time.DayOfWeek.MONDAY));
+            if (hit && week != null) week.add(doc.getId());
+        }
+        return byWeek.entrySet().stream().map(e -> new WeekCount(e.getKey(), e.getValue().size(), e.getKey().equals(thisWeek))).toList();
     }
 
     /** 범위 원문 중 가장 최근 게시일(분석 완료). 범위 원문이 없으면 null. */

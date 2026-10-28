@@ -18,6 +18,7 @@ from app.structuring import image_prep
 from app.indexing import indexer
 from app.rag import answer as rag
 from app.rag import interpret as interpreter
+from app.rag import agent
 from app.indexing import vector_store
 from app.core.config import settings
 from app.core.claude import AiServiceError
@@ -138,6 +139,22 @@ class InterpretRequest(BaseModel):
     details: list[CodeHintModel] = []  # 디테일(하프넥…) — 예전 Spring은 보내지 않는다
 
 
+class AgentStepRequest(BaseModel):
+    """도구 경로 한 단계 — messages는 Anthropic 형식(user·assistant, tool_use·tool_result 블록) 그대로. 코드 목록은 해석과 같다."""
+    model: str
+    today: date | None = None
+    messages: list[dict] = Field(min_length=1)
+    categories: list[CodeHintModel] = []
+    item_types: list[CodeHintModel] = []
+    seasons: list[CodeHintModel] = []
+    materials: list[CodeHintModel] = []
+    colors: list[CodeHintModel] = []
+    silhouettes: list[CodeHintModel] = []
+    genders: list[CodeHintModel] = []
+    patterns: list[CodeHintModel] = []
+    details: list[CodeHintModel] = []
+
+
 @app.get("/health")
 def health():
     return {
@@ -241,6 +258,33 @@ def search_chunks(q: str, top_k: int = Query(default=10, ge=1, le=50)):
     except AiServiceError as e:
         raise HTTPException(status_code=e.status_code, detail={"message": str(e), "retryable": False})
     return rag.search(vector_store.get_collection(), query, top_k)
+
+
+@app.post("/agent/step")
+def agent_step(req: AgentStepRequest, x_claude_api_key: str | None = Header(default=None)):
+    """도구 경로 한 단계(Claude 1회). 도구 실행·반복·상한은 Spring(AgentService)이 한다."""
+    if not x_claude_api_key:
+        raise HTTPException(status_code=401, detail={"message": "Claude API 키가 없습니다(claude.api.key).", "retryable": False})
+    hint = lambda items: [interpreter.CodeHint(c.value, c.name, c.words or "") for c in items]  # noqa: E731
+    today = req.today or date.today()
+    hints = interpreter.InterpretInput(question="", model=req.model, today=today, categories=hint(req.categories),
+                                       item_types=hint(req.item_types), seasons=hint(req.seasons), materials=hint(req.materials),
+                                       colors=hint(req.colors), silhouettes=hint(req.silhouettes), genders=hint(req.genders),
+                                       patterns=hint(req.patterns), details=hint(req.details))
+    try:
+        return agent.step(agent.AgentStepInput(model=req.model, today=today, messages=req.messages, hints=hints), x_claude_api_key)
+    except AiServiceError as e:
+        log.warning("도구 경로 한 단계 실패: %s", e)
+        detail = {"message": str(e), "retryable": e.retryable}
+        if e.usage:
+            detail["usage"] = e.usage
+        raise HTTPException(status_code=e.status_code, detail=detail)
+
+
+@app.get("/agent/task")
+def agent_task(today: date | None = None):
+    """첫 user 메시지 앞에 붙일 지시(오늘 날짜 포함) — 프롬프트 문구를 Spring에 두지 않으려고."""
+    return {"text": agent.task_text(today or date.today())}
 
 
 @app.post("/answer")

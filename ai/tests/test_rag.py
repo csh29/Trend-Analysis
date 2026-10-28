@@ -107,6 +107,17 @@ class RagTest(unittest.TestCase):
         self.assertEqual(0.75, result["best_score"])
         self.assertEqual([], messages.calls)  # 근거가 없으면 Claude를 부르지 않는다
 
+    def test_body_citations_are_cleaned_and_count_as_sources(self):
+        # 자유 형식 본문(표 등)의 [n]도 출처가 된다 — 없는 번호는 지우고, 본문만 있어도 근거가 있는 답이다
+        groups = [{"n": 1, "doc_id": "A", "score": 0.7, "chunks": ["a"]}, {"n": 2, "doc_id": "B", "score": 0.6, "chunks": ["b"]}]
+        result = rag._answer_from({"summary": "요약", "points": [], "grounded": True,
+                                   "body": "| 축 | 핵심 | 근거 |\n|---|---|---|\n| 컬러 | 블랙 3건 | [2][9] |"}, groups)
+        self.assertTrue(result["grounded"])
+        self.assertEqual(["B"], [s["doc_id"] for s in result["sources"]])
+        self.assertIn("[2]", result["body"])
+        self.assertNotIn("[9]", result["body"])
+        self.assertIn("body", rag.build_schema()["required"])
+
     def test_only_passed_sources_go_to_claude_and_cited_ones_come_back(self):
         body = json.dumps({"summary": "와이드 팬츠가 많이 보인다.", "grounded": True, "points": [
             {"text": "트랙 팬츠: 블랙 와이드가 반복된다.", "sources": [2, 2, 9]},
@@ -274,6 +285,25 @@ class RagApiTest(unittest.TestCase):
                                json={"question": "  ", "model": "m", "min_score": 0.6})
         self.assertEqual(400, res.status_code)
 
+    def test_agent_step_returns_blocks_and_needs_key(self):
+        # 도구 경로 한 단계 — Claude 응답 블록을 그대로 돌려준다(도구 실행·반복은 Spring). 도구 3개와 허용 코드가 붙는다
+        res = self.client.post("/agent/step", json={"model": "m", "messages": [{"role": "user", "content": "q"}]})
+        self.assertEqual(401, res.status_code)
+        from app.rag import agent
+        reply = mock.Mock(stop_reason="tool_use", content=[mock.Mock(model_dump=lambda exclude_none: {
+            "type": "tool_use", "id": "t1", "name": "count_trend", "input": {"category": "OUTER"}})],
+            usage=mock.Mock(input_tokens=10, output_tokens=5, cache_creation_input_tokens=0, cache_read_input_tokens=0))
+        with mock.patch.object(agent, "create_message", return_value=reply) as call:
+            res = self.client.post("/agent/step", headers={"X-Claude-Api-Key": "secret"},
+                                   json={"model": "m", "today": "2026-10-28", "messages": [{"role": "user", "content": "q"}],
+                                         "categories": [{"value": "OUTER", "name": "아우터"}], "item_types": [{"value": "OUTER_PADDING", "name": "패딩"}]})
+        self.assertEqual(200, res.status_code)
+        self.assertEqual("count_trend", res.json()["content"][0]["name"])
+        kwargs = call.call_args.kwargs
+        self.assertEqual(["count_trend", "trend_series", "final_answer"], [t["name"] for t in kwargs["tools"]])
+        self.assertIn("OUTER=아우터", kwargs["system"])
+        self.assertIn("2026-10-28", self.client.get("/agent/task", params={"today": "2026-10-28"}).json()["text"])
+
     def test_answer_passes_key(self):
         with mock.patch.object(main.rag, "answer", return_value={"grounded": False}) as a, \
                 mock.patch.object(main.vector_store, "get_collection", return_value=None):
@@ -311,10 +341,15 @@ class InterpretTest(unittest.TestCase):
     def test_schema_limits_codes_and_prompt_lists_hints(self):
         schema = self.interpret.build_schema(self.data)
         self.assertEqual(["", "OUTER", "BOTTOM"], schema["properties"]["category"]["enum"])
-        self.assertEqual(["", "OUTER_PADDING", "BOTTOM_DENIM"], schema["properties"]["item_type"]["enum"])
+        self.assertNotIn("enum", schema["properties"]["item_type"])  # 종류 코드는 스키마에 다시 싣지 않는다(목록 밖 값은 normalize가 버린다)
+        system = self.interpret.system_prompt(self.data)
+        self.assertIn("OUTER=아우터(재킷,점퍼)", system[1]["text"])  # 허용 코드 목록은 system 캐시 구간
+        self.assertNotIn("cache_control", system[1])  # 캐시는 걸지 않는다(사용자 결정)
         content = self.interpret.build_content(self.data)
-        self.assertIn("OUTER=아우터(재킷,점퍼)", content)
+        self.assertNotIn("OUTER=아우터", content)
         self.assertIn("오늘: 2026-10-22 (목요일)", content)
+        r = self.interpret.normalize({"trend": True, "category": "", "item_type": "SHOES_SNEAKER", "has_period": False}, self.data)
+        self.assertIsNone(r["item_type"])
 
     def test_normalize_item_type_wins_and_bad_periods_are_dropped(self):
         n = self.interpret.normalize
@@ -337,7 +372,7 @@ class InterpretTest(unittest.TestCase):
         schema = self.interpret.build_schema(data)
         self.assertEqual(["SPRING", "FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])
         self.assertIn("seasons", schema["required"])
-        self.assertIn("- seasons: SPRING=봄, FALL=가을, WINTER=겨울", self.interpret.build_content(data))
+        self.assertIn("- seasons: SPRING=봄, FALL=가을, WINTER=겨울", self.interpret.allowed_values_text(data))
         r = self.interpret.normalize({"trend": True, "category": "", "item_type": "", "has_period": False,
                                       "seasons": ["WINTER", "SUMMER", "FALL", "WINTER"]}, data)
         self.assertEqual(["FALL", "WINTER"], r["seasons"])
@@ -350,9 +385,9 @@ class InterpretTest(unittest.TestCase):
             silhouettes=[self.interpret.CodeHint("WIDE", "와이드"), self.interpret.CodeHint("CROPPED", "크롭")],
             colors=[self.interpret.CodeHint("BLACK", "블랙")])
         schema = self.interpret.build_schema(data)
-        self.assertEqual(["WIDE", "CROPPED"], schema["properties"]["silhouettes"]["items"]["enum"])
+        self.assertEqual({"type": "array", "items": {"type": "string"}}, schema["properties"]["silhouettes"])  # enum 없이 — normalize가 거른다
         self.assertNotIn("materials", schema["properties"])  # 후보가 없는 칸은 만들지 않는다
-        self.assertIn("- silhouettes: WIDE=와이드, CROPPED=크롭", self.interpret.build_content(data))
+        self.assertIn("- silhouettes: WIDE=와이드, CROPPED=크롭", self.interpret.allowed_values_text(data))
         r = self.interpret.normalize({"trend": True, "category": "BOTTOM", "item_type": "", "has_period": False,
                                       "silhouettes": ["SLIM", "WIDE", "WIDE"], "colors": []}, data)
         self.assertEqual((["WIDE"], [], []), (r["silhouettes"], r["colors"], r["materials"]))

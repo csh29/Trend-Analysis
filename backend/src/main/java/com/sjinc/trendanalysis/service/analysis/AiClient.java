@@ -144,12 +144,17 @@ public class AiClient {
     }
 
     /**
-     * answer는 결론 한 줄, points는 글머리 줄들. reason: 근거 없음이면 NO_EVIDENCE(기준 유사도 미달 — Claude를 부르지 않았다),
+     * answer는 결론 한 줄, points는 글머리 줄들, body는 자유 형식 본문(표·목록·문단, 마크다운 일부 — 줄마다 [n]). reason: 근거 없음이면 NO_EVIDENCE(기준 유사도 미달 — Claude를 부르지 않았다),
      * MODEL_DECLINED(근거가 질문과 맞지 않음).
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
-                                 Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period) {
+                                 Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period, String body) {
+
+        public AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
+                              Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period) {
+            this(grounded, answer, points, sources, bestScore, usage, reason, period, null);
+        }
     }
 
     public StructureResponse structure(StructureRequest request, String apiKey) {
@@ -179,6 +184,37 @@ public class AiClient {
                 .body(request)
                 .retrieve()
                 .body(InterpretResponse.class));
+    }
+
+    /**
+     * 도구 경로 한 단계 요청 — messages는 Anthropic 형식(user·assistant, tool_use·tool_result 블록)을 그대로 Map으로 주고받는다.
+     * 코드 목록은 해석과 같다(Claude가 도구 입력에 코드값을 쓴다).
+     */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AgentStepRequest(String model, String today, List<Map<String, Object>> messages, List<CodeHint> categories,
+                                   List<CodeHint> itemTypes, List<CodeHint> seasons, List<CodeHint> materials, List<CodeHint> colors,
+                                   List<CodeHint> silhouettes, List<CodeHint> genders, List<CodeHint> patterns, List<CodeHint> details) {
+    }
+
+    /** 도구 경로 한 단계 응답 — content는 응답 블록(text·tool_use). */
+    @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
+    public record AgentStepResponse(String stopReason, List<Map<String, Object>> content, Map<String, Object> usage) {
+    }
+
+    /** 도구 경로 한 단계(Claude 1회). 도구 실행·반복은 AgentService가 한다. */
+    public AgentStepResponse agentStep(AgentStepRequest request, String apiKey) {
+        return call(() -> restClient.post().uri("/agent/step")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Claude-Api-Key", apiKey)
+                .body(request)
+                .retrieve()
+                .body(AgentStepResponse.class));
+    }
+
+    /** 도구 경로 첫 지시문(오늘 날짜 포함) — 프롬프트 문구는 AI 서비스(prompts/rag/agent.md)에 둔다. */
+    public String agentTask(String today) {
+        JsonNode body = call(() -> restClient.get().uri("/agent/task?today={today}", today).retrieve().body(JsonNode.class));
+        return body == null ? "" : body.path("text").asText("");
     }
 
     /** P-04 색인. 넣은 청크 수. */

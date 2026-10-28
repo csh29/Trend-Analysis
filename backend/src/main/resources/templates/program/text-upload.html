@@ -90,6 +90,7 @@
 </div>
 
 <script src="/js/grid.js"></script>
+<script src="/js/com-cd.js"></script>
 <script src="/js/search-form.js"></script>
 <script src="/js/trend-analysis.js"></script>
 <script>
@@ -125,9 +126,20 @@
 
         Grid.renderHeader(document.getElementById('textGridHead'), COLUMNS);
 
+        // 카테고리는 행에 "아우터, 하의"처럼 의류 아이템 카테고리 이름을 이어 붙여 오므로, 고른 이름이 그중 하나면 남긴다.
         const search = SearchForm.render(document.getElementById('searchArea'), [
             { id: 'title', label: '제목', type: 'text' },
-            { id: 'keywordsText', label: '키워드', type: 'text' }
+            { id: 'keywordsText', label: '키워드', type: 'text' },
+            {
+                id: 'categoryName', label: '카테고리', type: 'select', withAll: true, width: 130,
+                options: function () {
+                    return ComCd.fetchCodes('TREND_CATEGORY').then(function (codes) {
+                        return codes.map(function (code) { return { value: code.codeName, label: code.codeName }; });
+                    });
+                },
+                match: function (value, name) { return String(value || '').split(', ').indexOf(name) >= 0; },
+                onChange: function () { searchTexts(); }
+            }
         ], { onSearch: searchTexts });
 
         function renderRows(texts) {

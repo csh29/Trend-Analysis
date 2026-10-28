@@ -11,6 +11,7 @@
     8주가 넘으면(stale) 자료 시점을 밝히게 한다.
 근거는 문서 단위로 묶어 번호를 붙인다(화면의 출처 하나 = 문서 하나). LangChain은 쓰지 않는다(2026-10-21 사용자 결정).
 """
+import re
 import logging
 import time
 from dataclasses import dataclass, field
@@ -124,8 +125,12 @@ class AnswerInput:
     evidence_doc_ids: list[str] = field(default_factory=list)  # TREND: 집계 상위 값이 나온 예시 원문
 
 
+CITE = re.compile(r"\[(\d+)\]")
+
+
 def build_schema() -> dict:
-    """결론 한 줄(summary) + 글머리 줄(points, 줄마다 근거 번호). 한 덩어리 글에 [1][2]가 섞이면 읽기 어려워서 나눴다."""
+    """결론 한 줄(summary) + 글머리 줄(points, 줄마다 근거 번호) 또는 자유 형식 본문(body — 표·번호 목록·문단, 줄·행마다 [n]).
+    질문이 형식(표로·문단으로·3줄로…)을 요구하거나 표가 나은 답(비교·브리프)이면 body를 쓰고 points는 비운다(2026-10-28 사용자 요청)."""
     point = {
         "type": "object",
         "properties": {
@@ -140,9 +145,10 @@ def build_schema() -> dict:
         "properties": {
             "summary": {"type": "string"},
             "points": {"type": "array", "items": point},
+            "body": {"type": "string"},  # 자유 형식 본문(마크다운 일부). 쓰지 않으면 ""
             "grounded": {"type": "boolean"},
         },
-        "required": ["summary", "points", "grounded"],
+        "required": ["summary", "points", "body", "grounded"],
         "additionalProperties": False,
     }
 
@@ -240,11 +246,15 @@ def _answer_from(result: dict, groups: list[dict]) -> dict:
         text = (point.get("text") or "").strip()
         if text:
             points.append({"text": text, "sources": [n for n in dict.fromkeys(point.get("sources") or []) if n in by_n]})
-    cited = [by_n[n] for n in dict.fromkeys(n for p in points for n in p["sources"])]
+    # 본문의 [n] — 없는 번호는 지운다(지어낸 인용이 화면에 남지 않게)
+    body = (result.get("body") or "").strip()
+    body = CITE.sub(lambda m: m.group(0) if int(m.group(1)) in by_n else "", body)
+    body_cites = [int(n) for n in CITE.findall(body)]
+    cited = [by_n[n] for n in dict.fromkeys([n for p in points for n in p["sources"]] + body_cites)]
     grounded = bool(result.get("grounded")) and bool(cited)
     sources = [{"n": g["n"], "doc_id": g["doc_id"], "score": g["score"], "chunk": g["chunks"][0]} for g in cited]
     return {"grounded": grounded, "answer": (result.get("summary") or "").strip(), "points": points if grounded else [],
-            "sources": sources, "reason": None if grounded else "MODEL_DECLINED"}
+            "body": body if grounded else "", "sources": sources, "reason": None if grounded else "MODEL_DECLINED"}
 
 
 def answer(collection, data: AnswerInput, api_key: str, client: anthropic.Anthropic | None = None) -> dict:
