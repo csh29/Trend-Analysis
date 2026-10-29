@@ -75,6 +75,10 @@ class TrendFactsFilterTest {
                 null, null, null, List.of(), List.of(), null, Map.of(TrendItemValue.GENDER, List.of("WOMEN"))), TODAY);
         assertThat(women.docCount()).isEqualTo(1);
         assertThat(women.scopeLabel()).isEqualTo("하의 · 여성복");
+        // 라인 값이 없는 하의(FI-3)는 조건으로 거를 수 없어 빠졌다고 알린다(진단 C4). 실루엣은 모두 값이 있어 알리지 않는다
+        assertThat(women.coverage()).containsExactly("[조건 정보] 범위 원문 3건 중 라인(여성·남성) 값이 있는 원문 2건만 조건으로 거를 수 있었다 — 값이 없는 1건은 세지 않았다");
+        assertThat(women.lines()).contains(women.coverage().get(0));
+        assertThat(wide.coverage()).isEmpty();
 
         // 조건이 없으면 하의 전부
         TrendFactsService.Facts bottoms = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "BOTTOM", "하의",

@@ -206,10 +206,11 @@ public class TrendFactsService {
      * @param change     증감 질문의 방향(UP·DOWN·BOTH) — 있으면 축마다 값이 증감 순이다(직전 원문이 있으면 비중 변화 순). 없으면 null(유행점수 순)
      * @param combos     공통 조합 — 같은 옷에서 함께 나온 서로 다른 축 값 두 개(예: "그레이 · 오버사이즈")와 그 원문 수. 특징 질문(묻는 축·증감 없음)만
      * @param keywords   범위 원문의 키워드 상위(공백만 정리한 표기, 원문 수 순). 특징 질문만
+     * @param coverage   조건 정보 줄 — 속성 조건 축 값이 없어 빠진 원문이 있으면 축마다 한 줄(coverage 메서드)
      */
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
                         int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds,
-                        boolean focused, String change, List<NameCount> combos, List<NameCount> keywords) {
+                        boolean focused, String change, List<NameCount> combos, List<NameCount> keywords, List<String> coverage) {
 
         /** 수집량 주의(TrendFactsService.volumeNote) — 없으면 null. */
         public String volumeNote() {
@@ -225,6 +226,7 @@ public class TrendFactsService {
             List<String> lines = new ArrayList<>();
             lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건 · 출처 " + mediaCount + "곳 (직전 기간 원문 " + prevDocCount + "건, "
                     + rate(docCount, prevDocCount) + ")");
+            lines.addAll(coverage);
             String note = volumeNote();
             if (note != null) {
                 lines.add("[수집량 주의] " + note);
@@ -343,8 +345,13 @@ public class TrendFactsService {
 
     private record Scope(String category, String itemType, Set<String> seasons, String focus, Map<String, List<String>> filters, int top) {
         boolean matches(TrendItem.Garment g) {
-            return (category == null || category.equals(g.category())) && (itemType == null || itemType.equals(g.type()))
+            return matchesBase(g)
                     && filters.entrySet().stream().allMatch(f -> valuesOf(g, f.getKey()).stream().anyMatch(f.getValue()::contains));
+        }
+
+        /** 속성 조건 없이 카테고리·종류만. */
+        boolean matchesBase(TrendItem.Garment g) {
+            return (category == null || category.equals(g.category())) && (itemType == null || itemType.equals(g.type()));
         }
 
         /** 질문이 시즌을 정했으면 원문의 시즌 값 중 하나가 그 시즌이어야 한다(시즌 값이 없는 원문은 빠진다). */
@@ -381,16 +388,27 @@ public class TrendFactsService {
         Map<Long, Set<String>> docValues = new HashMap<>();      // 기간 안 원문 → "축:값" — 대표 원문 고르기
         Map<String, Set<Long>> comboDocs = new LinkedHashMap<>(); // "축:값|축:값" → 원문
         Map<String, Set<Long>> keywordDocs = new LinkedHashMap<>();
+        Set<Long> baseDocs = new HashSet<>();                    // 속성 조건 전 범위(카테고리·종류·시즌)의 기간 안 원문
+        Map<String, Set<Long>> knownDocs = new LinkedHashMap<>(); // 조건 축 → 그 축 값이 있는 원문
+        scope.filters().keySet().forEach(axis -> knownDocs.put(axis, new HashSet<>()));
 
         // 최신 원문부터 — 예시 원문이 최근 것이 되게
         docs.sort(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getId, Comparator.reverseOrder()));
         for (SourceDocument doc : docs) {
             TrendItem item = items.get(doc.getId());
             if (item == null || !scope.inSeason(item)) continue;
-            List<TrendItem.Garment> garments = item.garments().stream().filter(scope::matches).toList();
-            if (garments.isEmpty()) continue;
             LocalDate date = TrendAggregationService.statDate(doc);
             boolean current = !date.isBefore(period.from());
+            if (current && !scope.filters().isEmpty()) { // 조건 축 값이 아예 없는 원문은 조건으로 거를 수 없다 — 몇 건이 빠졌는지 센다
+                List<TrendItem.Garment> base = item.garments().stream().filter(scope::matchesBase).toList();
+                if (!base.isEmpty()) {
+                    baseDocs.add(doc.getId());
+                    scope.filters().keySet().stream().filter(axis -> base.stream().anyMatch(g -> !valuesOf(g, axis).isEmpty()))
+                            .forEach(axis -> knownDocs.computeIfAbsent(axis, a -> new HashSet<>()).add(doc.getId()));
+                }
+            }
+            List<TrendItem.Garment> garments = item.garments().stream().filter(scope::matches).toList();
+            if (garments.isEmpty()) continue;
             if (current) {
                 scopeDocs.add(doc.getId());
                 scopeMedia.add(sourceKey(doc));
@@ -532,7 +550,23 @@ public class TrendFactsService {
         List<String> merged = new ArrayList<>(termEvidence);
         evidence.stream().filter(id -> !merged.contains(id)).forEach(merged::add);
         return new Facts(period, stale, scopeLabel(question) + filterLabel(scope) + seasonLabel(scope), scopeDocs.size(), scopeMedia.size(), prevScopeDocs.size(),
-                dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList(), focused, question.change(), combos, scopeKeywords);
+                dimensions, terms, merged.stream().limit(MAX_EXAMPLES).toList(), focused, question.change(), combos, scopeKeywords, coverage(baseDocs, knownDocs, typeLabels));
+    }
+
+    /**
+     * 조건 정보 — 속성 조건("남성", "와이드")의 축 값이 아예 없는 원문은 조건으로 거를 수 없어 빠진다(예: 라인 값은 최근 분석부터 생겼다).
+     * 빠진 원문이 있으면 축마다 한 줄. 답이 "남성 아우터 12건"을 전체 남성복처럼 말하지 않게 한다(2026-10-29 진단 C4).
+     */
+    private static List<String> coverage(Set<Long> baseDocs, Map<String, Set<Long>> knownDocs, Map<String, String> typeLabels) {
+        List<String> lines = new ArrayList<>();
+        knownDocs.forEach((axis, known) -> {
+            int missing = baseDocs.size() - known.size();
+            if (missing <= 0) return;
+            String label = TrendItemValue.GENDER.equals(axis) ? "라인(여성·남성)" : typeLabels.getOrDefault(axis, axis);
+            lines.add("[조건 정보] 범위 원문 " + baseDocs.size() + "건 중 " + label + " 값이 있는 원문 " + known.size()
+                    + "건만 조건으로 거를 수 있었다 — 값이 없는 " + missing + "건은 세지 않았다");
+        });
+        return lines;
     }
 
     /** 옷 하나의 "축:값" — 조합·대표 원문용. 종류를 콕 집었으면 종류는 빼고, 기타 묶음 값은 뺀다(여러 옷이 섞여 공통 특징이 아니다). */
