@@ -156,6 +156,8 @@ public class TrendFactsService {
     static final int MIN_PREV_DOCS = 10;
     /** 범위 원문 수가 직전 대비 이 배수 이상(또는 그 역수 이하) 달라지면 증감률에 수집량 변화가 섞였다고 본다. */
     static final double VOLUME_RATIO = 1.5;
+    /** 증감 순위에 넣는 최소 원문 수(이번·직전 중 큰 쪽) — 1건짜리 변화는 우연이다. */
+    static final int MIN_CHANGE_DOCS = 2;
 
     /**
      * 수집량 주의 — 범위 원문 수가 직전과 크게 다르거나 직전이 적으면 증감률(원문 수 기준)이 유행 변화가 아니라 수집량 변화를 보인다
@@ -235,7 +237,7 @@ public class TrendFactsService {
                     case "UP" -> "직전 대비 " + by + "이 늘어난 값만, 늘어난 " + by + "이 큰 순";
                     case "DOWN" -> "직전 대비 " + by + "이 줄어든 값만, 줄어든 " + by + "이 큰 순(이번 기간 0건 포함)";
                     default -> "직전 대비 " + by + "이 달라진 값만, 변화가 큰 순";
-                } + " — 축에 값이 없으면 그런 값이 없다는 뜻");
+                } + " — 이번·직전 모두 1건 이하인 값은 뺐다, 축에 값이 없으면 그런 값이 없다는 뜻");
             }
             for (Dimension d : focused ? dimensions.stream().limit(1).toList() : dimensions) {
                 if (d.rows().isEmpty()) continue;
@@ -595,6 +597,8 @@ public class TrendFactsService {
                 ? e -> sharePct(e.getValue().docs.size(), docTotal) - sharePct(e.getValue().prevDocs.size(), prevTotal)
                 : e -> e.getValue().docs.size() - e.getValue().prevDocs.size();
         return tallies.entrySet().stream()
+                // 이번·직전 모두 1건 이하인 값은 증감 순위에서 뺀다 — 0→1 "신규"가 급상승으로 답에 끼었다(2026-10-29 진단 C3)
+                .filter(e -> Math.max(e.getValue().docs.size(), e.getValue().prevDocs.size()) >= MIN_CHANGE_DOCS)
                 .filter(e -> switch (change) {
                     case "UP" -> delta.applyAsDouble(e) > 0;
                     case "DOWN" -> delta.applyAsDouble(e) < 0;
