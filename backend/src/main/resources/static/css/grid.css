@@ -87,3 +87,9 @@ body.grid-col-resizing{ cursor:col-resize; user-select:none; }
 .grid thead th.dragging{ opacity:.5; }
 .grid thead th.drag-before{ box-shadow:inset 3px 0 0 var(--accent); }
 .grid thead th.drag-after{ box-shadow:inset -3px 0 0 var(--accent); }
+
+/* 헤더 클릭 정렬(renderHeader sortable) — 정렬 중인 컬럼에 화살표 */
+.grid th.grid-sortable{ cursor:pointer; user-select:none; }
+.grid th.grid-sortable:hover{ text-decoration:underline; }
+.grid th.sort-asc::after{ content:" ▲"; font-size:10px; }
+.grid th.sort-desc::after{ content:" ▼"; font-size:10px; }

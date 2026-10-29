@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 챗봇 유행 집계 검증 — 해석 결과(범위·속성·시즌·질문 단어·기간)를 직접 주고 판단 근거 집계(TrendFactsService)만 파일로 남기고 끝낸다.
+ * 챗봇 유행 집계 검증 — 해석 결과(범위·속성·시즌·질문 단어·기간·증감)를 직접 주고 판단 근거 집계(TrendFactsService)만 파일로 남기고 끝낸다.
  * --rag.facts-check.cases=조건 파일로 띄울 때만 돈다. Claude를 부르지 않는다. 같은 조건을 SQL로 센 값과 맞대는 것은
  * ai/evals/facts_check.py가 한다(2026-10-26 — 집계는 계산이라 틀리면 버그다).
  */
@@ -58,7 +58,7 @@ public class FactsCheckRunner implements ApplicationRunner {
             c.path("filters").fields().forEachRemaining(e -> filters.put(e.getKey(), strings(e.getValue())));
             QuestionInterpreter.Interpretation q = new QuestionInterpreter.Interpretation(true, text(c, "category"), text(c, "category"),
                     text(c, "itemType"), text(c, "itemType"), period, strings(c.path("terms")), strings(c.path("seasons")),
-                    text(c, "focus"), filters);
+                    text(c, "focus"), filters, text(c, "change"));
             Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", c.path("id").asText());
             row.put("facts", trendFactsService.count(q, today));

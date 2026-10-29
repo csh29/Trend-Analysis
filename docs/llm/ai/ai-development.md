@@ -66,7 +66,7 @@ ai/
 │  └─ rag/                 P-06 검색·답변
 │     ├─ interpret.py      질문 해석(작은 모델 — 패션 질문인지·유행 질문인지·카테고리·종류·기간, 이어 묻기면 질문 다시 쓰기)
 │     ├─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
-│     └─ agent.py          도구 경로 한 단계(비교·추이 질문 — Claude가 도구를 고르고 Spring이 실행·반복)
+│     └─ agent.py          도구 경로 한 단계(유행 질문 — Claude가 도구를 고르고 Spring이 실행·반복)
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)
 │  ├─ structure/           common → silhouette → text / image → article(본문+이미지 우선순위)
 │  └─ rag/                 interpret.md(질문 해석) · answer.md(답변 모양·유행 판단·기간·근거 규칙)

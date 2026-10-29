@@ -140,7 +140,9 @@ class InterpretRequest(BaseModel):
 
 
 class AgentStepRequest(BaseModel):
-    """도구 경로 한 단계 — messages는 Anthropic 형식(user·assistant, tool_use·tool_result 블록) 그대로. 코드 목록은 해석과 같다."""
+    """도구 경로 한 단계 — messages는 Anthropic 형식(user·assistant, tool_use·tool_result 블록) 그대로. 코드 목록은 해석과 같다.
+    cache면 규칙·도구 정의를 캐시한다(같은 질문의 둘째 단계부터 — Spring이 정한다)."""
+    cache: bool = False
     model: str
     today: date | None = None
     messages: list[dict] = Field(min_length=1)
@@ -272,7 +274,7 @@ def agent_step(req: AgentStepRequest, x_claude_api_key: str | None = Header(defa
                                        colors=hint(req.colors), silhouettes=hint(req.silhouettes), genders=hint(req.genders),
                                        patterns=hint(req.patterns), details=hint(req.details))
     try:
-        return agent.step(agent.AgentStepInput(model=req.model, today=today, messages=req.messages, hints=hints), x_claude_api_key)
+        return agent.step(agent.AgentStepInput(model=req.model, today=today, messages=req.messages, hints=hints, cache=req.cache), x_claude_api_key)
     except AiServiceError as e:
         log.warning("도구 경로 한 단계 실패: %s", e)
         detail = {"message": str(e), "retryable": e.retryable}

@@ -69,6 +69,12 @@ public class TextDocumentController {
         return documentService.getTextAnalysis(id);
     }
 
+    /** 선택한 텍스트 원문을 한 번에 다시 분석한다(최대 200건, 분석 중인 것은 건너뛴다). */
+    @PostMapping("/reanalyze")
+    public com.sjinc.trendanalysis.dto.analysis.ReanalyzeResult reanalyzeAll(@RequestBody List<Long> ids) {
+        return documentService.reanalyzeTexts(ids);
+    }
+
     @PostMapping("/{id}/reanalyze")
     public void reanalyze(@PathVariable Long id) {
         documentService.reanalyzeText(id);

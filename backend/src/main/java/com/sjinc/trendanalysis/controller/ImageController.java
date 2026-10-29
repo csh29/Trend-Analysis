@@ -69,6 +69,12 @@ public class ImageController {
         return documentService.getImageAnalysis(id);
     }
 
+    /** 선택한 이미지를 한 번에 다시 분석한다(최대 200건, 분석 중인 것은 건너뛴다). */
+    @PostMapping("/reanalyze")
+    public com.sjinc.trendanalysis.dto.analysis.ReanalyzeResult reanalyzeAll(@RequestBody List<Long> ids) {
+        return documentService.reanalyzeImages(ids);
+    }
+
     /** 실패했거나 결과가 마음에 들지 않을 때 다시 분석한다(대기열에 넣고 바로 돌아간다). */
     @PostMapping("/{id}/reanalyze")
     public void reanalyze(@PathVariable Long id) {

@@ -66,6 +66,7 @@ java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar --spring.profiles.active=loca
 | 이미지 업로드 | `program/img-upload.html` | `/api/images` |
 | 텍스트 등록 | `program/text-upload.html` | `/api/texts` (본문 + 첨부 이미지 최대 5장) |
 | 트렌드 분석 | `program/trend-analysis.html` | `/api/trends` |
+| 분석 결과 조회 | `program/analysis-result.html` | `/api/analysis-results` (조회 조건 카테고리·종류, 사진은 행을 눌러 팝업에서만) |
 
 이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
 파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
@@ -112,7 +113,7 @@ Chroma는 내장형(`ai/chroma_data/`)이다. 서버형 전환 기준·방법은
 
 ### RAG 검색 (P-06)
 
-홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 **트렌드 챗봇**(대화형)으로 되어 있다. 작은 모델이 질문을 해석해(패션 질문인지·유행 질문인지·범위·기간, 앞 질문에 이어 묻기) 유행 질문은 원문 수·매체 수를 세서, 그 밖의 질문은 비슷한 원문을 찾아 Claude가 답하고 출처(매체·날짜·원문 링크 또는 사진)를 붙인다. API는 `/api/rag`(로그인만 필요).
+홈 대시보드(`home.html`)는 트렌드 집계·분석 현황 카드와 그 아래 **트렌드 챗봇**(대화형)으로 되어 있다. 작은 모델이 질문을 해석해(패션 질문인지·유행 질문인지·범위·기간, 앞 질문에 이어 묻기) 유행 질문은 Claude가 집계 도구로 원문 수·매체 수를 세어, 그 밖의 질문은 비슷한 원문을 찾아 Claude가 답하고 출처(매체·날짜·원문 링크 또는 사진)를 붙인다. API는 `/api/rag`(로그인만 필요).
 패션·트렌드 질문이 아니면 답하지 않고, 근거가 기준 유사도에 못 미치면 Claude를 부르지 않고 "근거 자료 없음"으로 답한다. 자세한 규칙은 [`docs/llm/features/rag-search.md`](../docs/llm/features/rag-search.md).
 
 | 키 | 용도 |

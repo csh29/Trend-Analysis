@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>분석 결과 조회 · 패션 트렌드 분석</title>
+    <link rel="stylesheet" href="/css/common-ui.css">
+    <link rel="stylesheet" href="/css/grid.css">
+    <style>
+        /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css가 담당한다. 여기는 행 팝업만.
+           사진은 그리드에 두지 않고 팝업을 열 때만 받는다 — 목록에서 한꺼번에 받으면 느리다(2026-10-29 사용자 요청). */
+        .result-count{ font-size:12px; color:var(--text-sub); font-weight:normal; margin-left:6px; }
+        .preview-modal{ max-width:900px; max-height:90vh; overflow:auto; }
+        .preview-image{ text-align:center; }
+        .preview-image img{ max-width:100%; max-height:60vh; object-fit:contain; border-radius:6px; }
+        .preview-image .no-image{ padding:40px 0; color:var(--text-sub); font-size:12.5px; }
+        .preview-modal .detail-list{ margin-top:12px; }
+    </style>
+</head>
+<body>
+<div class="app-shell" th:classappend="${param.embed} ? 'app-shell--embedded'">
+    <div th:replace="~{fragments/sidebar :: sidebar}"></div>
+    <div th:replace="~{fragments/topbar :: topbar}"></div>
+    <div th:replace="~{fragments/loading-overlay :: overlay}"></div>
+
+    <main class="area-main">
+        <section th:replace="~{fragments/page-toolbar :: toolbar}"></section>
+
+        <section class="search-row" id="searchArea"></section>
+
+        <section class="panel-head">
+            <div class="panel-title">분석 결과<span class="result-count" id="resultCount"></span></div>
+        </section>
+
+        <section>
+            <table class="grid">
+                <thead id="resultGridHead"></thead>
+                <tbody id="resultGridBody"></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+
+<!-- 행을 누르면 그 원문의 사진과 분석 값 -->
+<div class="modal-backdrop" id="previewBackdrop">
+    <div class="modal preview-modal">
+        <h3 id="previewTitle">분석 결과</h3>
+        <div class="preview-image" id="previewImage"></div>
+        <dl class="detail-list" id="previewDetail"></dl>
+        <div class="modal-actions">
+            <button type="button" class="btn" id="previewClose">닫기</button>
+        </div>
+    </div>
+</div>
+
+<script src="/js/grid.js"></script>
+<script src="/js/com-cd.js"></script>
+<script src="/js/search-form.js"></script>
+<script>
+    (function () {
+        const API_URL = '/api/analysis-results';
+        const gridBody = document.getElementById('resultGridBody');
+
+        const COLUMNS = [
+            { id: 'categoryText', label: '카테고리', width: 130, align: 'center', title: true },
+            { id: 'keywordText', label: '키워드', title: true },
+            { id: 'colorText', label: '컬러', width: 160, title: true },
+            { id: 'patternText', label: '패턴', width: 140, title: true },
+            { id: 'silhouetteText', label: '실루엣', width: 160, title: true }
+        ];
+
+        Grid.renderHeader(document.getElementById('resultGridHead'), COLUMNS, { sortable: true });
+
+        const search = SearchForm.render(document.getElementById('searchArea'), [
+            { id: 'category', label: '카테고리', type: 'select', optionsQuery: 'TREND_CATEGORY', withAll: true, width: 130, onChange: searchResults },
+            { id: 'itemType', label: '종류', type: 'select', optionsQuery: 'TREND_ITEM', withAll: true, width: 200, onChange: searchResults }
+        ], { onSearch: searchResults });
+
+        function joined(values) {
+            return (values || []).join(', ');
+        }
+
+        function renderRows(results) {
+            const rows = (results || []).map(function (r) {
+                return Object.assign({}, r, {
+                    categoryText: joined(r.categories),
+                    itemTypeText: joined(r.itemTypes),
+                    keywordText: joined(r.keywords),
+                    colorText: joined(r.colors),
+                    patternText: joined(r.patterns),
+                    silhouetteText: joined(r.silhouettes)
+                });
+            });
+            document.getElementById('resultCount').textContent = '(' + rows.length + '건)';
+            Grid.render(gridBody, COLUMNS, rows, {
+                emptyMessage: '조건에 맞는 분석 결과가 없습니다.',
+                onRowClick: function (tr, row) { openPreview(row); }
+            });
+        }
+
+        function searchResults() {
+            const values = search.values();
+            const params = new URLSearchParams();
+            if (values.category) params.set('category', values.category);
+            if (values.itemType) params.set('itemType', values.itemType);
+            fetch(API_URL + (params.toString() ? '?' + params.toString() : ''))
+                .then(function (res) {
+                    if (!res.ok) throw new Error('조회에 실패했습니다.');
+                    return res.json();
+                })
+                .then(renderRows)
+                .catch(function (err) { alert(err.message); });
+        }
+
+        // ── 행 팝업: 사진 + 분석 값 ─────────────────────────────────
+        const previewBackdrop = document.getElementById('previewBackdrop');
+
+        function addRow(dl, label, value) {
+            const dt = document.createElement('dt');
+            dt.textContent = label;
+            const dd = document.createElement('dd');
+            dd.textContent = value || '-';
+            dl.append(dt, dd);
+        }
+
+        function openPreview(row) {
+            document.getElementById('previewTitle').textContent = row.title || row.docId;
+            const imageBox = document.getElementById('previewImage');
+            imageBox.replaceChildren();
+            if (row.imageUrl) {
+                const img = document.createElement('img');
+                img.src = row.imageUrl;
+                img.alt = row.title || row.docId;
+                imageBox.appendChild(img);
+            } else {
+                const none = document.createElement('div');
+                none.className = 'no-image';
+                none.textContent = '사진이 없는 원문입니다.';
+                imageBox.appendChild(none);
+            }
+            const dl = document.getElementById('previewDetail');
+            dl.replaceChildren();
+            addRow(dl, '문서 ID', row.docId);
+            addRow(dl, '출처', [row.media, row.date].filter(Boolean).join(' · '));
+            addRow(dl, '카테고리', row.categoryText);
+            addRow(dl, '종류', row.itemTypeText);
+            addRow(dl, '키워드', row.keywordText);
+            addRow(dl, '컬러', row.colorText);
+            addRow(dl, '패턴', row.patternText);
+            addRow(dl, '실루엣', row.silhouetteText);
+            previewBackdrop.classList.add('open');
+        }
+
+        function closePreview() {
+            previewBackdrop.classList.remove('open');
+            document.getElementById('previewImage').replaceChildren();
+        }
+
+        document.getElementById('previewClose').addEventListener('click', closePreview);
+        previewBackdrop.addEventListener('click', function (e) {
+            if (e.target === previewBackdrop) closePreview();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && previewBackdrop.classList.contains('open')) closePreview();
+        });
+
+        PageButtons.bind({
+            btnSearch: searchResults,
+            btnReset: function () {
+                search.reset();
+                searchResults();
+            }
+        });
+
+        search.ready.then(searchResults);
+    })();
+</script>
+</body>
+</html>

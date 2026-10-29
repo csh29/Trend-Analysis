@@ -7,6 +7,7 @@ import com.sjinc.trendanalysis.domain.UploadedImage;
 import com.sjinc.trendanalysis.repository.UploadedImageRepository;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisSummary;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisView;
+import com.sjinc.trendanalysis.dto.analysis.ReanalyzeResult;
 import com.sjinc.trendanalysis.dto.analysis.TextDocumentRequest;
 import com.sjinc.trendanalysis.dto.analysis.TextDocumentView;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
@@ -155,6 +156,48 @@ public class DocumentService {
         reanalyze(textDocument(documentId));
     }
 
+    /** 한 번에 다시 분석할 수 있는 원문 수 — 실수로 전체를 눌러 Claude 비용이 크게 나가지 않게. */
+    public static final int MAX_BULK_REANALYZE = 200;
+
+    /** 선택한 이미지들을 한 번에 다시 분석한다. 이미 대기·분석 중인 원문은 건너뛴다. */
+    public ReanalyzeResult reanalyzeImages(List<Long> imageIds) {
+        return reanalyzeAll(sourceDocumentRepository.findByImageIdIn(checkedIds(imageIds)));
+    }
+
+    /** 선택한 텍스트 원문들을 한 번에 다시 분석한다. */
+    public ReanalyzeResult reanalyzeTexts(List<Long> documentIds) {
+        return reanalyzeAll(sourceDocumentRepository.findAllById(checkedIds(documentIds)).stream()
+                .filter(doc -> SourceDocument.TYPE_TEXT.equals(doc.getDocType())).toList());
+    }
+
+    private static List<Long> checkedIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("다시 분석할 원문을 선택하세요.");
+        }
+        if (ids.size() > MAX_BULK_REANALYZE) {
+            throw new IllegalArgumentException("한 번에 " + MAX_BULK_REANALYZE + "건까지 다시 분석할 수 있습니다.");
+        }
+        return ids;
+    }
+
+    /** 대기열에 한 번에 넣는다 — 분석 스레드가 순서대로 처리하고, 첫 건이 캐시를 데우면 나머지는 캐시를 읽는다(CacheWarmGate). */
+    private ReanalyzeResult reanalyzeAll(List<SourceDocument> docs) {
+        List<String> skipped = new java.util.ArrayList<>();
+        List<Long> queued = new java.util.ArrayList<>();
+        for (SourceDocument doc : docs) {
+            if (SourceDocument.PROCESSING.equals(doc.getStatus()) || SourceDocument.PENDING.equals(doc.getStatus())) {
+                skipped.add(doc.getDocId());
+                continue;
+            }
+            doc.markPending();
+            sourceDocumentRepository.save(doc);
+            queued.add(doc.getId());
+        }
+        requestAnalysis(queued);
+        log.info("일괄 재분석 {}건 요청, 분석 중이라 건너뜀 {}건", queued.size(), skipped.size());
+        return new ReanalyzeResult(queued.size(), skipped);
+    }
+
     /** 이미지 삭제에 딸린 문서·트렌드 항목·색인을 지운다(ImageService.delete가 부른다). */
     public void deleteByImageIds(List<Long> imageIds) {
         delete(sourceDocumentRepository.findByImageIdIn(imageIds));
@@ -246,7 +289,10 @@ public class DocumentService {
                     codesOf(codes, TrendCodes.SEASON, item.valuesOf(TrendItemValue.SEASON)),
                     item.getSummary(), item.getResultJson());
         }).orElse(null);
-        List<AnalysisView.Image> images = doc.isImage() ? List.of()
+        // 이미지 원문은 그 사진(이미지 업로드 화면 권한으로 연다), 텍스트 원문은 첨부 사진
+        List<AnalysisView.Image> images = doc.isImage()
+                ? (doc.getImageId() == null ? List.of() : List.of(new AnalysisView.Image(doc.getImageId(), doc.getTitle(),
+                        "/api/images/" + doc.getImageId() + "/file")))
                 : uploadedImageRepository.findByDocumentIdOrderBySortOrderAscIdAsc(doc.getId()).stream()
                 .map(image -> new AnalysisView.Image(image.getId(), image.getOriginalName(),
                         "/api/texts/" + doc.getId() + "/images/" + image.getId() + "/file"))

@@ -29,15 +29,18 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * P-06 도구 경로(혼합형 2단계, 2026-10-28 사용자 결정) — 비교·추이처럼 한 번 세어서는 답할 수 없는 질문을 Claude가 집계 도구를
- * 여러 번 불러 답한다. Claude는 무엇을 셀지 고르고, 숫자는 늘 같은 집계 코드(TrendFactsService)가 센다.
+ * P-06 도구 경로 — 유행 질문은 모두 Claude가 집계 도구를 골라 불러 답한다(2026-10-29 사용자 결정: 질문 유형마다 칸·규칙을 두지 않는다).
+ * Claude는 무엇을 셀지 고르고, 숫자는 늘 같은 집계 코드(TrendFactsService)가 센다.
  *
  * <ul>
  *   <li>반복은 여기서 한다 — AI 서비스 /agent/step은 Claude를 한 번 부르고 응답 블록을 돌려줄 뿐이다. 도구 결과는 다음 단계 messages로 넘긴다.</li>
- *   <li>도구: count_trend(범위·기간 집계 + 예시 원문), trend_series(주별 원문 수), final_answer(답 — 형식은 /answer와 같다).</li>
+ *   <li>해석 범위의 집계는 여기서 미리 세어 첫 메시지에 넣는다 — 순위·제외·특징 질문은 Claude 호출 한 번으로 끝나고, 비교·추이만 도구를 더 부른다
+ *       (2026-10-29: Claude가 첫 count_trend를 부르느라 한 단계·입력 약 8,000토큰을 더 썼다).</li>
+ *   <li>둘째 단계부터 규칙·도구 정의를 캐시한다 — 같은 질문의 단계는 몇 초 간격이라 셋째 단계부터 싸게 읽는다. 첫 단계는 대개 마지막이라 캐시를 만들지 않는다.</li>
+ *   <li>도구: count_trend(범위·기간 집계, 축별 상위 top개 + 예시 원문), trend_series(주별 원문 수), final_answer(답 — 형식은 /answer와 같다).</li>
  *   <li>도구 호출 상한 {@code rag.agent.max-tool-calls}(기본 6번, 사용자 결정). 넘으면 지금까지 결과로 답하라고 알린다. 전체 90초 안.</li>
  *   <li>근거 번호 [n]은 도구 결과의 예시 원문에 여기서 붙인다 — 답은 그 번호만 인용할 수 있고, 출처는 그 번호의 원문이다.</li>
- *   <li>실패하면(도구 없이 끝남·시간 초과·AI 오류) empty — RagService가 지금 경로(집계)로 답한다.</li>
+ *   <li>실패하면(도구 없이 끝남·시간 초과·AI 오류) empty — RagService가 고정 경로(집계 한 번 + 답변)로 답한다.</li>
  * </ul>
  */
 @Slf4j
@@ -46,7 +49,8 @@ public class AgentService {
 
     static final int MAX_STEPS = 8;              // Claude 호출 상한(도구 6번 + 답 + 여유)
     static final long TIME_LIMIT_MS = 90_000;
-    static final int EXAMPLES_PER_CALL = 4;      // count_trend 결과에 싣는 예시 원문
+    static final int EXAMPLES_PER_CALL = 6;      // count_trend 결과에 싣는 예시 원문
+    static final int DEFAULT_TOP = 10;           // count_trend 축별 상위 개수 기본값 — 제외·다음 순위 질문도 다시 부르지 않고 답하게
     static final int SUMMARY_CHARS = 160;
     static final int MAX_SERIES_WEEKS = 12;
     private static final DateTimeFormatter MD = DateTimeFormatter.ofPattern("MM/dd");
@@ -87,26 +91,33 @@ public class AgentService {
         int toolCalls;
     }
 
-    public Optional<Result> run(String question, LocalDate today, String apiKey) {
+    /**
+     * @param scope 질문 해석 범위 — 이 범위를 미리 세어(축별 상위 DEFAULT_TOP개) 첫 메시지에 넣는다. null이면 넣지 않는다.
+     */
+    public Optional<Result> run(String question, QuestionInterpreter.Interpretation scope, LocalDate today, String apiKey) {
         long started = System.currentTimeMillis();
         Codes codes = codes();
         Run run = new Run();
         List<Map<String, Object>> messages = new ArrayList<>();
-        messages.add(Map.of("role", "user", "content",
-                aiClient.agentTask(today.toString()) + "\n\n<question>\n" + question + "\n</question>"));
         try {
+            String first = aiClient.agentTask(today.toString()) + "\n\n<question>\n" + question + "\n</question>";
+            if (scope != null) {
+                first += "\n\n<prefetched>\n질문 해석 범위로 미리 센 집계(count_trend와 같다 — 이것으로 답할 수 있으면 도구를 더 부르지 않는다):\n"
+                        + countText(scope, today, DEFAULT_TOP, run) + "\n</prefetched>";
+            }
+            messages.add(Map.of("role", "user", "content", first));
             for (int step = 0; step < MAX_STEPS; step++) {
                 if (System.currentTimeMillis() - started > TIME_LIMIT_MS) {
-                    log.warn("도구 경로 시간 초과({}초) — 지금 경로로 답한다. 조회 {}", TIME_LIMIT_MS / 1000, run.calls);
+                    log.warn("도구 경로 시간 초과({}초) — 고정 경로로 답한다. 조회 {}", TIME_LIMIT_MS / 1000, run.calls);
                     return Optional.empty();
                 }
-                AiClient.AgentStepResponse response = aiClient.agentStep(codes.request(model, today, messages), apiKey);
+                AiClient.AgentStepResponse response = aiClient.agentStep(codes.request(model, today, messages, step > 0), apiKey);
                 run.usage = run.usage.plus(TokenUsage.of(response.usage()));
                 List<Map<String, Object>> content = response.content() == null ? List.of() : response.content();
                 messages.add(Map.of("role", "assistant", "content", content));
                 List<Map<String, Object>> uses = content.stream().filter(b -> "tool_use".equals(b.get("type"))).toList();
                 if (uses.isEmpty()) {
-                    log.warn("도구 경로가 final_answer 없이 끝났다(stop={}) — 지금 경로로 답한다", response.stopReason());
+                    log.warn("도구 경로가 final_answer 없이 끝났다(stop={}) — 고정 경로로 답한다", response.stopReason());
                     return Optional.empty();
                 }
                 List<Map<String, Object>> results = new ArrayList<>();
@@ -123,9 +134,11 @@ public class AgentService {
                 }
                 messages.add(Map.of("role", "user", "content", results));
             }
-            log.warn("도구 경로가 {}단계 안에 답하지 못했다 — 지금 경로로 답한다. 조회 {}", MAX_STEPS, run.calls);
+            log.warn("도구 경로가 {}단계 안에 답하지 못했다 — 고정 경로로 답한다. 조회 {}", MAX_STEPS, run.calls);
         } catch (AiCallException e) {
-            log.warn("도구 경로 AI 호출 실패 — 지금 경로로 답한다: {}", e.getMessage());
+            log.warn("도구 경로 AI 호출 실패 — 고정 경로로 답한다: {}", e.getMessage());
+        } catch (RuntimeException e) { // 응답 모양이 어긋나도 답은 멈추지 않는다
+            log.warn("도구 경로 처리 오류 — 고정 경로로 답한다", e);
         }
         return Optional.empty();
     }
@@ -154,8 +167,12 @@ public class AgentService {
     }
 
     private String countTrend(Map<String, Object> input, LocalDate today, Codes codes, Run run) {
-        QuestionInterpreter.Interpretation scope = codes.scope(input, today, true);
-        TrendFactsService.Facts facts = trendFactsService.count(scope, today);
+        return countText(codes.scope(input, today, true), today, input.get("top") instanceof Number n ? n.intValue() : DEFAULT_TOP, run);
+    }
+
+    /** 범위를 세어 Claude가 읽는 글로 — 집계 줄 + 예시 원문([n]). 첫 집계는 판단 근거 상자가 된다. */
+    private String countText(QuestionInterpreter.Interpretation scope, LocalDate today, int top, Run run) {
+        TrendFactsService.Facts facts = trendFactsService.count(scope, today, top);
         if (run.firstFacts == null) run.firstFacts = facts;
         QuestionInterpreter.Period p = facts.period();
         run.calls.add("집계 " + facts.scopeLabel() + " · " + p.label());
@@ -232,7 +249,7 @@ public class AgentService {
                 points.add(new AiClient.AnswerPoint(text, sources));
             }
         }
-        String body = text(input.get("body"));
+        String body = RagService.blankBody(text(input.get("body")));
         java.util.Set<Integer> cited = new java.util.LinkedHashSet<>();
         points.forEach(p -> cited.addAll(p.sources()));
         if (body != null) {
@@ -275,10 +292,10 @@ public class AgentService {
                     .map(c -> new AiClient.CodeHint(c.getCodeValue(), c.getCodeName(), Objects.toString(c.getAttr1(), ""))).toList();
         }
 
-        AiClient.AgentStepRequest request(String model, LocalDate today, List<Map<String, Object>> messages) {
+        AiClient.AgentStepRequest request(String model, LocalDate today, List<Map<String, Object>> messages, boolean cache) {
             return new AiClient.AgentStepRequest(model, today.toString(), messages, hints(TrendCodes.CATEGORY), hints(TrendCodes.ITEM_TYPE),
                     hints(TrendCodes.SEASON), hints(TrendCodes.MATERIAL), hints(TrendCodes.COLOR), hints(TrendCodes.SILHOUETTE),
-                    hints(TrendCodes.GENDER), hints(TrendCodes.PATTERN), hints(TrendCodes.DETAIL));
+                    hints(TrendCodes.GENDER), hints(TrendCodes.PATTERN), hints(TrendCodes.DETAIL), cache);
         }
 
         private static String group(String axis) {

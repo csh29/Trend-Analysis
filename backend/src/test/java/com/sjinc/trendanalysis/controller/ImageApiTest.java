@@ -87,6 +87,12 @@ class ImageApiTest {
                 .andExpect(header().string("Content-Type", "image/png"))
                 .andExpect(content().bytes(PNG));
 
+        // 결과 팝업은 분석한 그 사진을 보인다
+        mockMvc.perform(get("/api/images/" + pngId + "/analysis"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.images.length()").value(1))
+                .andExpect(jsonPath("$.images[0].url").value("/api/images/" + pngId + "/file"));
+
         mockMvc.perform(delete("/api/images").with(csrf())
                         .contentType(MediaType.APPLICATION_JSON).content("[" + pngId + "," + jpgId + "]"))
                 .andExpect(status().isOk());

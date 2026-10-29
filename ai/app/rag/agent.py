@@ -1,4 +1,4 @@
-"""P-06 도구 경로(혼합형 2단계, 2026-10-28 사용자 결정) — Claude 한 단계 호출만 한다.
+"""P-06 도구 경로(유행 질문 전부, 2026-10-29 사용자 결정) — Claude 한 단계 호출만 한다.
 
 반복(도구 실행·상한 6번·실패 시 되돌리기)은 Spring(AgentService)이 한다 — 집계 데이터가 Spring DB에 있어서, 도구는 Spring이
 실행하고 결과를 다음 단계 messages로 넘긴다. 여기서는 system(도구 규칙 + 답변 규칙 + 허용 코드)·도구 정의를 붙여 한 번 부르고
@@ -34,14 +34,15 @@ _SCOPE = {
 }
 TOOLS = [
     {"name": "count_trend",
-     "description": "범위의 원문을 세어 축별 상위 값(원문 수·매체 수·직전 기간 대비 증감률·유행점수)과 예시 원문을 돌려준다. "
-                    "period가 없으면 최근 4주, seasons를 주면 그 시즌 원문만. focus를 주면 그 축이 첫 축이다.",
+     "description": "범위의 원문을 세어 축별 상위 값(유행점수 순 — 원문 수·매체 수·직전 기간 대비 증감률·유행점수)과 예시 원문을 돌려준다. "
+                    "period가 없으면 최근 4주, seasons를 주면 그 시즌 원문만. focus를 주면 그 축이 첫 축이다. top은 축마다 받을 값 개수(기본 10).",
      "input_schema": {"type": "object", "properties": {
          **_SCOPE,
          "focus": {"type": "string", "enum": interpret.FOCUS, "description": "주로 볼 축"},
          "seasons": _CODES,
          "period": _PERIOD,
          "change": {"type": "string", "enum": interpret.CHANGE, "description": "증감 순으로 볼 때"},
+         "top": {"type": "integer", "minimum": 1, "maximum": 15},
      }}},
     {"name": "trend_series",
      "description": "범위 안에서 값 하나(axis + value, 없으면 범위 전체)의 주별 원문 수를 최근 weeks주 동안 센다.",
@@ -63,13 +64,17 @@ class AgentStepInput:
     today: date
     messages: list[dict]
     hints: interpret.InterpretInput = None  # 허용 코드 목록(카테고리·종류·속성 코드와 이름)
+    cache: bool = False  # 규칙·도구 정의를 캐시(같은 질문의 둘째 단계부터 — 셋째 단계부터 캐시를 읽는다)
 
 
-def system_prompt(data: AgentStepInput) -> str:
+def system_prompt(data: AgentStepInput) -> list[dict]:
     parts = [PROMPT["system"], rag.PROMPT["system"], rag.PROMPT["system_trend"]]
     if data.hints is not None:
         parts.append(interpret.allowed_values_text(data.hints))
-    return "\n\n".join(parts)
+    block = {"type": "text", "text": "\n\n".join(parts)}
+    if data.cache:  # 캐시 순서는 tools → system이라 이 표시 하나로 도구 정의까지 캐시된다
+        block["cache_control"] = {"type": "ephemeral"}
+    return [block]
 
 
 def task_text(today: date) -> str:
@@ -79,11 +84,13 @@ def task_text(today: date) -> str:
 def step(data: AgentStepInput, api_key: str, client: anthropic.Anthropic | None = None) -> dict:
     """{stop_reason, content(응답 블록 — text·tool_use), usage}. 도구 실행은 호출한 쪽(Spring)이 한다."""
     started = time.monotonic()
+    # effort medium — 지정하지 않으면 기본(high)으로 길게 생각해 답 한 단계가 40초를 넘었다(2026-10-29)
     response = create_message(client, api_key, model=data.model, max_tokens=MAX_TOKENS, system=system_prompt(data),
-                              messages=data.messages, tools=TOOLS)
+                              messages=data.messages, tools=TOOLS, output_config={"effort": "medium"})
     usage = usage_of(response, time.monotonic() - started)
     content = [block.model_dump(exclude_none=True) for block in response.content]
     calls = [b.get("name") for b in content if b.get("type") == "tool_use"]
-    log.info("도구 경로 한 단계 model=%s stop=%s 소요=%.1fs 도구=%s 토큰 in=%d out=%d", data.model, response.stop_reason,
-             usage["elapsed_ms"] / 1000, calls or "-", usage["input_tokens"], usage["output_tokens"])
+    log.info("도구 경로 한 단계 model=%s stop=%s 소요=%.1fs 도구=%s 토큰 in=%d out=%d 캐시 생성=%d 읽기=%d", data.model, response.stop_reason,
+             usage["elapsed_ms"] / 1000, calls or "-", usage["input_tokens"], usage["output_tokens"],
+             usage["cache_creation_input_tokens"], usage["cache_read_input_tokens"])
     return {"stop_reason": response.stop_reason, "content": content, "usage": usage}

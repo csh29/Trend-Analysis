@@ -40,6 +40,7 @@ public class DataInitializer implements CommandLineRunner {
     private static final String INITIAL_PASSWORD_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
     private static final int INITIAL_PASSWORD_LENGTH = 20;
     private static final String RETIRED_RAG_PROGRAM = "rag-search";
+    private static final String REANALYZE_LABEL = "재분석";
 
     private final UserRepository userRepository;
     private final ProgramRepository programRepository;
@@ -59,6 +60,7 @@ public class DataInitializer implements CommandLineRunner {
         seedTrendCodesIfAbsent();
         List<Program> added = seedManagementProgramsIfAbsent();
         seedTrendProgramsIfAbsent(added);
+        addReanalyzeButtons();
         if (seedAdminIfAbsent()) return; // 새 관리자는 이미 모든 프로그램 권한을 받았다
         // 기존 DB에 새로 등록한 프로그램은 관리자에게 바로 권한을 준다(사용자별 권한관리에서 조정).
         userRepository.findByUsername("admin").ifPresent(admin ->
@@ -108,7 +110,9 @@ public class DataInitializer implements CommandLineRunner {
     private static final java.util.Map<String, List<String>> RETIRED_CODES = java.util.Map.of(
             TrendCodes.VALUE_TYPE, List.of(TrendItemValue.ITEM),
             // 2026-10-28 사용자 결정: 데님 워싱은 블루·네이비·블랙으로 센다 — 잠깐 넣었던 컬러 데님을 지운다
-            TrendCodes.COLOR, List.of("DENIM"));
+            TrendCodes.COLOR, List.of("DENIM"),
+            // 2026-10-29 사용자 요청: 카테고리는 의류만 — 예전 초안의 신발·가방·액세서리를 지운다(분석은 이미 기타로 옮긴다)
+            TrendCodes.CATEGORY, List.of("SHOES", "BAG", "ACC"));
 
     private void deleteRetiredCodes(String group) {
         List<String> retired = RETIRED_CODES.getOrDefault(group, List.of());
@@ -240,7 +244,7 @@ public class DataInitializer implements CommandLineRunner {
             added.add(programRepository.save(Program.builder()
                     .programId("img-upload").programNm("이미지 업로드").url("/program/img-upload").sortOrder(1).useYn("Y")
                     .menuGroup(Program.GROUP_TREND).icon("🖼")
-                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("Y").resetYn("Y").etc1Nm("업로드")
+                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("Y").resetYn("Y").etc1Nm("업로드").etc2Nm(REANALYZE_LABEL)
                     .build()));
             log.info("프로그램 img-upload(이미지 업로드)를 등록했습니다.");
         }
@@ -261,12 +265,35 @@ public class DataInitializer implements CommandLineRunner {
                     .build()));
             log.info("프로그램 trend-analysis(트렌드 분석)를 등록했습니다.");
         }
+        // 분석 결과 조회(2026-10-29 사용자 요청) — 분석이 끝난 원문의 사진·카테고리·키워드·컬러·패턴·실루엣, 행을 누르면 사진 팝업
+        if (!programRepository.existsById("analysis-result")) {
+            added.add(programRepository.save(Program.builder()
+                    .programId("analysis-result").programNm("분석 결과 조회").url("/program/analysis-result").sortOrder(4).useYn("Y")
+                    .menuGroup(Program.GROUP_TREND).icon("🔍")
+                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("N").resetYn("Y")
+                    .build()));
+            log.info("프로그램 analysis-result(분석 결과 조회)를 등록했습니다.");
+        }
         // RAG 검색은 별도 화면 대신 홈 질문창으로 옮겼다(2026-10-21). 잠깐 등록됐던 프로그램이 남아 있으면 지운다 —
         // 메뉴에 남으면 없는 화면(program-not-found)이 열린다.
         if (programRepository.existsById(RETIRED_RAG_PROGRAM)) {
             userProgramPermissionRepository.deleteByProgramId(RETIRED_RAG_PROGRAM);
             programRepository.deleteById(RETIRED_RAG_PROGRAM);
             log.info("프로그램 {}(RAG 검색)를 지웠습니다 — 홈 질문창으로 옮겼습니다.", RETIRED_RAG_PROGRAM);
+        }
+    }
+
+    /**
+     * 일괄 재분석 버튼(2026-10-29 사용자 요청) — 이미지 업로드는 기타2, 텍스트 등록은 기타1. 기존 DB는 그 칸이 비어 있을 때만 이름을 넣는다
+     * (사람이 프로그램 관리에서 바꾼 이름은 두지 않는다). admin은 등록 때 모든 버튼 권한을 받았고, 다른 사용자는 사용자별 권한관리에서 준다.
+     */
+    private void addReanalyzeButtons() {
+        int img = jdbcTemplate.update("UPDATE programs SET etc2_nm = ? WHERE program_id = ? AND (etc2_nm IS NULL OR TRIM(etc2_nm) = '')",
+                REANALYZE_LABEL, "img-upload");
+        int text = jdbcTemplate.update("UPDATE programs SET etc1_nm = ? WHERE program_id = ? AND (etc1_nm IS NULL OR TRIM(etc1_nm) = '')",
+                REANALYZE_LABEL, "text-upload");
+        if (img + text > 0) {
+            log.info("일괄 재분석 버튼을 붙였습니다(이미지 업로드 {}·텍스트 등록 {}).", img, text);
         }
     }
 

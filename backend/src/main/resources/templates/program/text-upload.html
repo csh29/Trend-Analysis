@@ -340,10 +340,41 @@
                 });
         }
 
+
+        /** 선택한 원문을 한 번에 다시 분석한다 — Claude를 다시 부르므로 건수와 대략의 비용을 묻는다. */
+        function reanalyzeSelected() {
+            const ids = Grid.getRows(gridBody)
+                .filter(function (row) { return row._selected; })
+                .map(function (row) { return row.id; });
+            if (ids.length === 0) {
+                alert('다시 분석할 원문을 목록에서 선택하세요. 헤더의 체크박스로 모두 고를 수 있습니다.');
+                return;
+            }
+            if (!confirm('선택한 ' + ids.length + '건을 다시 분석하시겠습니까?\nClaude API를 다시 호출합니다(건당 약 10원). 분석 중인 건은 건너뜁니다.')) {
+                return;
+            }
+            fetch(API_URL + '/reanalyze', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ids)
+            })
+                .then(function (res) {
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '재분석 요청에 실패했습니다.'); });
+                    return res.json();
+                })
+                .then(function (result) {
+                    alert(result.requested + '건을 다시 분석합니다. 목록의 분석 칸에 진행 상황이 표시됩니다.'
+                        + (result.skipped.length ? '\n이미 분석 중이라 건너뜀 ' + result.skipped.length + '건' : ''));
+                    searchTexts();
+                })
+                .catch(function (err) { alert(err.message); });
+        }
+
         PageButtons.bind({
             btnSearch: searchTexts,
             btnAdd: openForm,
             btnDelete: deleteSelected,
+            btnEtc1: reanalyzeSelected,
             btnReset: function () {
                 search.reset();
                 searchTexts();

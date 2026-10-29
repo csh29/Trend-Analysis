@@ -301,7 +301,13 @@ class RagApiTest(unittest.TestCase):
         self.assertEqual("count_trend", res.json()["content"][0]["name"])
         kwargs = call.call_args.kwargs
         self.assertEqual(["count_trend", "trend_series", "final_answer"], [t["name"] for t in kwargs["tools"]])
-        self.assertIn("OUTER=아우터", kwargs["system"])
+        self.assertIn("OUTER=아우터", kwargs["system"][0]["text"])
+        self.assertNotIn("cache_control", kwargs["system"][0])  # 첫 단계는 캐시를 만들지 않는다
+        self.assertEqual("medium", kwargs["output_config"]["effort"])
+        with mock.patch.object(agent, "create_message", return_value=reply) as call:
+            self.client.post("/agent/step", headers={"X-Claude-Api-Key": "secret"},
+                             json={"model": "m", "messages": [{"role": "user", "content": "q"}], "cache": True})
+        self.assertEqual({"type": "ephemeral"}, call.call_args.kwargs["system"][0]["cache_control"])
         self.assertIn("2026-10-28", self.client.get("/agent/task", params={"today": "2026-10-28"}).json()["text"])
 
     def test_answer_passes_key(self):
@@ -345,6 +351,9 @@ class InterpretTest(unittest.TestCase):
         system = self.interpret.system_prompt(self.data)
         self.assertIn("OUTER=아우터(재킷,점퍼)", system[1]["text"])  # 허용 코드 목록은 system 캐시 구간
         self.assertNotIn("cache_control", system[1])  # 캐시는 걸지 않는다(사용자 결정)
+        self.assertNotIn("이어 묻기(<previous>", system[0]["text"])  # 앞 대화가 없으면 이어 묻기 규칙을 보내지 않는다
+        with_history = self.interpret.InterpretInput(**{**self.data.__dict__, "history": [self.interpret.Turn("요즘 유행하는 아우터는?", True, "OUTER")]})
+        self.assertIn("이어 묻기(<previous>", self.interpret.system_prompt(with_history)[0]["text"])
         content = self.interpret.build_content(self.data)
         self.assertNotIn("OUTER=아우터", content)
         self.assertIn("오늘: 2026-10-22 (목요일)", content)
@@ -400,16 +409,6 @@ class InterpretTest(unittest.TestCase):
         self.assertIsNone(n({**base, "focus": ""}, self.data)["focus"])
         self.assertIsNone(n({**base, "focus": "KEYWORD"}, self.data)["focus"])
         self.assertEqual([""] + self.interpret.FOCUS, self.interpret.build_schema(self.data)["properties"]["focus"]["enum"])
-
-    def test_complex_is_limited_to_types(self):
-        # 복합 질문 유형 — 정해진 값만, 패션 질문이 아니면 None(1단계는 로그만, 동작은 그대로)
-        n = self.interpret.normalize
-        base = {"trend": True, "category": "", "item_type": "", "has_period": False}
-        self.assertEqual("COMPARE", n({**base, "complex": "COMPARE"}, self.data)["complex"])
-        self.assertEqual("SERIES", n({**base, "trend": False, "complex": "SERIES"}, self.data)["complex"])
-        self.assertIsNone(n({**base, "complex": "AGENT"}, self.data)["complex"])
-        self.assertIsNone(n({**base, "fashion": False, "complex": "COMPARE"}, self.data)["complex"])
-        self.assertIn("complex", self.interpret.build_schema(self.data)["required"])
 
     def test_change_is_only_for_trend_questions(self):
         # 증감을 묻는지 — 정해진 값만, 유행 질문이 아니면 None

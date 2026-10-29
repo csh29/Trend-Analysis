@@ -2,7 +2,7 @@
  * 공통 그리드 렌더러. 헤더와 행을 columns 정의로 그리며, 공통 CSS는 /css/grid.css를 <link>로 싣는다.
  *
  * 사용법:
- *   Grid.renderHeader(thead, columns, { initialMessage });
+ *   Grid.renderHeader(thead, columns, { initialMessage, sortable });
  *   Grid.render(tbody, columns, rows, options);
  *   Grid.getRows(tbody)            // 모든 행 데이터
  *   Grid.getRow(tbody, rowIndex)   // rowIndex(0부터, 안내 행 제외) 번째 행 데이터. 없으면 null
@@ -44,6 +44,11 @@
  *   - buildRow(tr, row) : tr 생성 직후(셀 채우기 전) 호출 — dataset/class 지정용.
  *   - onRowClick(tr, row) : 행 클릭 콜백(row는 행 데이터). 클릭한 행에는 'current' 강조가 자동으로 붙는다.
  *   - virtual : true면 100행 이상일 때 보이는 행만 붙인다. 행 높이가 일정하고 부모가 세로 스크롤 영역일 때만 켠다.
+ *
+ * renderHeader options:
+ *   - sortable : true면 헤더를 눌러 그 컬럼으로 정렬한다(오름 → 내림 → 원래 순서). id가 있는 컬럼만, 값은 row[col.id]
+ *                (숫자는 숫자로, 글자는 한국어 순서, 빈 값은 늘 뒤). 화면에서만 정렬하고 서버를 다시 부르지 않는다.
+ *                다시 조회하면(Grid.render) 정렬이 풀린다. col.sortable === false면 그 컬럼만 뺀다.
  *
  * 모든 그리드 공통:
  *   - 현재 셀에 'cell-current' 테두리를 표시한다.
@@ -234,6 +239,11 @@
                 bindCheckCell(th, selectAll, false);
             }
             th.draggable = true;
+            if (options.sortable && col.id && col.type !== 'row-select' && col.sortable !== false) {
+                th.classList.add('grid-sortable');
+                th.title = '눌러서 정렬';
+                th.addEventListener('click', function () { sortBy(thead, col); });
+            }
             th.appendChild(createResizer(thead, th, col));
             tr.appendChild(th);
         });
@@ -253,6 +263,41 @@
             clearAndAppendMessage(tbody, columns.length, options.initialMessage || DEFAULT_INITIAL_MESSAGE);
         }
         scheduleFitScrollHeights();
+    }
+
+    // ── 헤더 클릭 정렬 ─────────────────────────────────────────────────────
+
+    function compareValues(a, b) {
+        const emptyA = a === null || a === undefined || a === '';
+        const emptyB = b === null || b === undefined || b === '';
+        if (emptyA || emptyB) return emptyA === emptyB ? 0 : (emptyA ? 1 : -1);
+        if (typeof a === 'number' && typeof b === 'number') return a - b;
+        return String(a).localeCompare(String(b), 'ko', { numeric: true });
+    }
+
+    /** 같은 컬럼을 누를 때마다 오름 → 내림 → 원래 순서. 마지막으로 그린 행(tbody._gridRowsData)을 다시 그린다. */
+    function sortBy(thead, col) {
+        const table = thead.closest('table');
+        const tbody = table && table.tBodies[0];
+        if (!tbody || !tbody._gridRowsData) return;
+        const state = tbody._gridSort && tbody._gridSort.col === col ? tbody._gridSort : { col: col, dir: 0 };
+        state.dir = state.dir === 0 ? 1 : state.dir === 1 ? -1 : 0;
+        const original = tbody._gridOriginalRows || tbody._gridRowsData;
+        const rows = state.dir === 0 ? original.slice() : original.slice().sort(function (a, b) {
+            const c = compareValues(a[col.id], b[col.id]);
+            return c === 0 ? 0 : (compareValues(a[col.id], '') === 0 || compareValues(b[col.id], '') === 0 ? c : c * state.dir);
+        });
+        render(tbody, tbody._gridColumns, rows, Object.assign({}, tbody._gridRenderOptions, { _keepSort: true }));
+        tbody._gridOriginalRows = original;
+        tbody._gridSort = state.dir === 0 ? null : state;
+        Array.from(thead.querySelectorAll('th.grid-sortable')).forEach(function (th, i) {
+            th.classList.remove('sort-asc', 'sort-desc');
+        });
+        if (state.dir !== 0) {
+            const index = tbody._gridColumns.indexOf(col);
+            const th = thead.rows[0] && thead.rows[0].cells[index];
+            if (th) th.classList.add(state.dir === 1 ? 'sort-asc' : 'sort-desc');
+        }
     }
 
     // ── 컬럼 폭 조절 ───────────────────────────────────────────────────────
@@ -1098,6 +1143,15 @@
         // Grid.addRow가 같은 컬럼·같은 buildRow 콜백으로 신규 행을 만들 수 있게 기억해 둔다.
         tbody._gridColumns = columns;
         tbody._gridBuildRow = options.buildRow;
+        // 헤더 클릭 정렬(sortBy)이 같은 옵션으로 다시 그린다. 새로 조회하면 정렬 상태를 지운다
+        tbody._gridRowsData = rows;
+        tbody._gridRenderOptions = options;
+        if (!options._keepSort) {
+            tbody._gridOriginalRows = null;
+            tbody._gridSort = null;
+            const thead = tbody.closest('table') && tbody.closest('table').tHead;
+            if (thead) thead.querySelectorAll('th.sort-asc, th.sort-desc').forEach(function (th) { th.classList.remove('sort-asc', 'sort-desc'); });
+        }
         if (!tbody._gridClickBound) {
             bindRowClickHighlight(tbody);
         }

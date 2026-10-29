@@ -98,15 +98,15 @@ class RagTrendApiTest {
                 new AiClient.AnswerPeriod(TODAY.minusDays(27).toString(), TODAY.toString(), "최근 4주", false, false));
     }
 
-    private static AiClient.InterpretResponse complex(String type) {
-        return new AiClient.InterpretResponse(true, "OUTER", null, null, null, true, null, null, null, null, null, null, null, null,
-                null, null, null, type);
+    /** 아우터 유행 질문 해석 — 유행 질문은 모두 도구 경로로 간다. */
+    private static AiClient.InterpretResponse trendOuter() {
+        return new AiClient.InterpretResponse(true, "OUTER", null, null, null, true, null);
     }
 
     @Test
     @WithMockUser(username = "admin")
-    void 비교_질문은_도구로_집계를_불러_인용한_원문으로_답한다() throws Exception {
-        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(complex("COMPARE"));
+    void 유행_질문은_도구로_집계를_불러_인용한_원문으로_답한다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
         when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
                 new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t1", "name", "count_trend",
@@ -129,13 +129,17 @@ class RagTrendApiTest {
         // 둘째 단계 messages의 마지막은 도구 결과 — 집계 줄과 [1] 예시 원문이 실린다
         String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
         assertThat(toolResult).contains("[아이템 종류]").contains("[1] RT-");
+        // 첫 메시지에 해석 범위로 미리 센 집계가 실린다 — 순위 질문은 도구를 더 부르지 않고 답할 수 있다
+        assertThat(String.valueOf(steps.getAllValues().get(0).messages().get(0))).contains("<prefetched>").contains("[1] RT-");
+        assertThat(steps.getAllValues().get(0).cache()).isFalse(); // 캐시는 둘째 단계부터
+        assertThat(steps.getAllValues().get(1).cache()).isTrue();
         verify(aiClient, org.mockito.Mockito.never()).answer(any(), any()); // 지금 경로는 부르지 않는다
     }
 
     @Test
     @WithMockUser(username = "admin")
     void 도구_경로가_실패하면_지금_경로로_답한다() throws Exception {
-        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(complex("SERIES"));
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
         when(aiClient.agentStep(any(), any())).thenThrow(new AiCallException("AI 서비스 오류", true));
         when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
@@ -145,25 +149,6 @@ class RagTrendApiTest {
                 .andExpect(jsonPath("$.grounded").value(true))
                 .andExpect(jsonPath("$.interpretation.by").value("AI"));
         verify(aiClient).answer(any(), eq("test-key"));
-    }
-
-    @Test
-    @WithMockUser(username = "admin")
-    void 기획_브리프는_해석이_유행_질문이_아니라고_해도_집계로_답한다() throws Exception {
-        // 원문 한 건에서 나온 값으로 경향을 말하지 않는다 — 복합 질문은 검색이 아니라 집계 경로(브리프 형식 줄을 붙인다)
-        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(new AiClient.InterpretResponse(false, "OUTER", null, null, null,
-                true, null, null, null, null, null, null, null, null, null, null, null, "BRIEF"));
-        when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
-
-        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 기획 브리프 만들어줘")))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.interpretation.trend").value(true))
-                .andExpect(jsonPath("$.facts.docCount").value(4));
-
-        ArgumentCaptor<AiClient.AnswerRequest> sent = ArgumentCaptor.forClass(AiClient.AnswerRequest.class);
-        verify(aiClient).answer(sent.capture(), eq("test-key"));
-        assertThat(sent.getValue().mode()).isEqualTo(AiClient.AnswerRequest.TREND);
-        assertThat(sent.getValue().trendFacts().get(0)).startsWith("[형식] 기획 브리프");
     }
 
     @Test

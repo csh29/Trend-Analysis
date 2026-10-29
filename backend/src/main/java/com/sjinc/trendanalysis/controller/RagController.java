@@ -37,13 +37,6 @@ public class RagController {
     }
 
     /** 이미지 출처 보기(홈 오른쪽 슬라이드 패널). 분석이 끝난 이미지 원문만 열린다. */
-    /** 판단 근거의 "N건"을 이루는 원문 목록(집계와 같은 규칙) — 사용자가 숫자를 직접 검증한다. 로그인만 요구한다(질문과 같다). */
-    @PostMapping("/facts/docs")
-    public java.util.List<com.sjinc.trendanalysis.service.rag.TrendFactsService.DocRow> factDocs(
-            @RequestBody com.sjinc.trendanalysis.dto.rag.RagQuestionRequest.FactDocs request) {
-        return ragService.factDocs(request);
-    }
-
     @GetMapping("/sources/{docId}/image")
     public ResponseEntity<Resource> sourceImage(@PathVariable String docId) {
         ImageService.ImageFile file = ragService.sourceImage(docId);

@@ -98,8 +98,9 @@
         addRow(dl, '상태', status);
         if (view.failReason) addRow(dl, '실패 사유', view.failReason);
         addRow(dl, '출처', [view.media, view.publishedAt].filter(Boolean).join(' · '));
-        // 텍스트 원문에 첨부한 이미지 — 본문과 함께 분석했다. 누르면 원본을 새 창으로
+        // 원문의 사진 — 이미지 원문은 분석한 그 사진(크게), 텍스트 원문은 본문과 함께 분석한 첨부 이미지. 누르면 원본을 새 창으로
         if (view.images && view.images.length) {
+            const single = view.docType === 'IMAGE';
             const thumbs = document.createElement('div');
             thumbs.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;';
             view.images.forEach(function (image) {
@@ -111,11 +112,13 @@
                 const img = document.createElement('img');
                 img.src = image.url;
                 img.alt = image.name;
-                img.style.cssText = 'width:72px;height:72px;object-fit:cover;border:1px solid var(--line);border-radius:6px;display:block;';
+                img.style.cssText = single
+                    ? 'max-width:100%;max-height:280px;object-fit:contain;border:1px solid var(--line);border-radius:6px;display:block;'
+                    : 'width:72px;height:72px;object-fit:cover;border:1px solid var(--line);border-radius:6px;display:block;';
                 a.appendChild(img);
                 thumbs.appendChild(a);
             });
-            addRow(dl, '첨부 이미지 ' + view.images.length + '장', thumbs);
+            addRow(dl, single ? '이미지' : '첨부 이미지 ' + view.images.length + '장', thumbs);
         }
 
         const r = view.result;
