@@ -26,10 +26,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * P-06 RAG 검색·답변. 질문을 해석해(작은 모델, 실패하면 규칙) 두 갈래로 보낸다.
@@ -103,10 +105,40 @@ public class RagService {
     }
 
     /**
+     * 답과 그 답에 쓴 Claude 토큰(해석 + 도구 경로 또는 답변) — 질문 로그(RagLogService)에 남긴다.
+     * toolResults는 도구 경로에서 Claude가 읽은 집계 글(평가 채점용, 다른 경로는 빈 목록).
+     */
+    public record Answered(RagAnswerView view, TokenUsage usage, List<String> toolResults) {
+    }
+
+    /** 한 질문에 쓴 토큰을 모은다. */
+    private static final class Meter {
+        TokenUsage total = TokenUsage.ZERO;
+        List<String> toolResults = List.of();
+
+        void add(Map<String, Object> usage) {
+            add(TokenUsage.of(usage));
+        }
+
+        void add(TokenUsage usage) {
+            total = total.plus(usage);
+        }
+    }
+
+    public RagAnswerView ask(String question, List<RagQuestionRequest.Turn> history) {
+        return answer(question, history).view();
+    }
+
+    /**
      * @param history 챗봇의 앞 질문·해석(오래된 것 → 최근 순). 이어 묻기("그럼 하의는?")를 알아듣는 데만 쓰고, 검색·답변은
      *                해석이 앞 대화로 채워 다시 쓴 질문으로 한다. 화면이 보낸 값이라 건수·길이·코드를 여기서 거른다.
      */
-    public RagAnswerView ask(String question, List<RagQuestionRequest.Turn> history) {
+    public Answered answer(String question, List<RagQuestionRequest.Turn> history) {
+        Meter meter = new Meter();
+        return new Answered(ask(question, history, meter), meter.total, meter.toolResults);
+    }
+
+    private RagAnswerView ask(String question, List<RagQuestionRequest.Turn> history, Meter meter) {
         String text = question == null ? "" : question.trim();
         if (text.isEmpty()) {
             throw new IllegalArgumentException("질문을 입력하세요.");
@@ -118,29 +150,36 @@ public class RagService {
             throw new AiCallException("claude.api.key가 설정되지 않았습니다. application.properties에 키를 넣으세요.", false);
         }
         LocalDate today = LocalDate.now();
-        Interpreted interpreted = interpret(text, today, history);
+        Interpreted interpreted = interpret(text, today, history, meter);
         if (!interpreted.fashion()) {
             log.info("RAG 질문 {}자 — 패션 질문이 아니라 답하지 않음", text.length());
             return new RagAnswerView(text, false, OFF_TOPIC_ANSWER, List.of(), "OFF_TOPIC", List.of(), null, minScore,
                     null, interpreted.view(), null);
         }
         if (agentEnabled && interpreted.question().trend()) {
-            Optional<AgentService.Result> result = agentService.run(interpreted.query(), interpreted.question(), today, apiKey);
-            if (result.isPresent()) {
-                return agentView(text, interpreted, result.get());
+            AgentService.Attempt attempt = agentService.run(interpreted.query(), interpreted.question(), today, apiKey);
+            meter.add(attempt.usage()); // 실패한 도구 경로의 토큰도 과금된다 — 고정 경로 토큰과 합쳐 남긴다
+            if (attempt.result() != null) {
+                meter.toolResults = attempt.result().toolResults();
+                return agentView(text, interpreted, attempt.result());
             }
         }
-        return interpreted.question().trend() ? askTrend(text, interpreted, today) : askSearch(text, interpreted, today);
+        return interpreted.question().trend() ? askTrend(text, interpreted, today, meter) : askSearch(text, interpreted, today, meter);
     }
 
-    /** 도구 경로 답 — 판단 근거 상자는 첫 집계(count_trend) 결과. 인용·출처 정리는 고정 경로와 같다(view). */
+    /**
+     * 도구 경로 답 — 판단 근거 상자는 답이 인용한 집계(AgentService.usedFacts, 첫 것이 주 상자·기간). 인용·출처 정리는 고정 경로와 같다(view).
+     * 답의 수치는 Claude가 읽은 집계 글 전부(toolResults)와 대조한다.
+     */
     private RagAnswerView agentView(String text, Interpreted interpreted, AgentService.Result result) {
-        TrendFactsService.Facts facts = result.facts();
+        List<TrendFactsService.Facts> used = result.facts() == null ? List.of() : result.facts();
+        TrendFactsService.Facts facts = used.isEmpty() ? null : used.get(0);
         RagAnswerView.Period period = facts == null ? null : new RagAnswerView.Period(facts.period().from(), facts.period().to(),
                 facts.period().label(), facts.period().explicit(), facts.stale());
         Interpreted byAgent = new Interpreted(interpreted.question(), interpreted.fashion(), "AGENT", interpreted.original(),
                 interpreted.query());
-        return view(text, result.response(), period, byAgent, facts == null ? null : factsView(facts));
+        return view(text, result.response(), period, byAgent, facts == null ? null : factsView(facts),
+                used.stream().skip(1).map(RagService::factsView).toList(), result.toolResults());
     }
 
     /**
@@ -161,7 +200,7 @@ public class RagService {
      * 질문 해석 — 작은 모델(claude.interpret-model)에게 맡기고(2026-10-22 사용자 결정 A), 호출이 실패하면 규칙(QuestionInterpreter)으로
      * 대신한다. 답변이 멈추지 않게 하는 것이 먼저다. 결과 중 공통코드에 없는 값(카테고리·종류)만 버리고 나머지 해석은 쓴다.
      */
-    private Interpreted interpret(String text, LocalDate today, List<RagQuestionRequest.Turn> history) {
+    private Interpreted interpret(String text, LocalDate today, List<RagQuestionRequest.Turn> history, Meter meter) {
         List<ComCd> categories = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.CATEGORY, "Y");
         List<ComCd> itemTypes = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.ITEM_TYPE, "Y");
         List<ComCd> seasons = comCdRepository.findByCodeGroupAndUseYnOrderBySortOrderAsc(TrendCodes.SEASON, "Y");
@@ -206,6 +245,7 @@ public class RagService {
             log.info("질문 해석(AI) 앞 대화 {}건 다시 씀={} 패션={} 유행={} 카테고리={} 종류={} 속성={} 축={} 증감={} 단어={} 시즌={} 기간={} 토큰 {}",
                     turns.size(), !query.equals(text), !r.offTopic(), r.trend(), category, itemType, filters, focus, change, terms, pickedSeasons,
                     period == null ? "-" : period.label(), TokenUsage.of(r.usage()));
+            meter.add(r.usage());
             return new Interpreted(new QuestionInterpreter.Interpretation(r.trend(), category, name(categories, category),
                     itemType, name(itemTypes, itemType), period, terms, pickedSeasons, focus, filters, change), !r.offTopic(), "AI", text, query);
         } catch (RuntimeException e) {
@@ -266,7 +306,7 @@ public class RagService {
     }
 
     /** 유행 질문 고정 경로(도구 경로가 꺼졌거나 실패) — 범위 원문을 한 번 세서 그 집계와 예시 원문으로 답한다. 원문이 없으면 AI를 부르지 않는다. */
-    private RagAnswerView askTrend(String text, Interpreted interpreted, LocalDate today) {
+    private RagAnswerView askTrend(String text, Interpreted interpreted, LocalDate today, Meter meter) {
         TrendFactsService.Facts facts = trendFactsService.count(interpreted.question(), today);
         QuestionInterpreter.Period p = facts.period();
         RagAnswerView.Period period = new RagAnswerView.Period(p.from(), p.to(), p.label(), p.explicit(), facts.stale());
@@ -280,17 +320,18 @@ public class RagService {
                 today.toString(), AiClient.AnswerRequest.TREND, interpreted.question().category(),
                 new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), p.explicit(), facts.stale()),
                 facts.lines(), facts.evidenceDocIds()), apiKey);
-        log.info("RAG 유행 질문 {}자 범위={} 기간={}~{} 원문 {}건 매체 {}곳 근거={} 출처 {}건 토큰 {}", text.length(), facts.scopeLabel(),
+        log.info("RAG 유행 질문 {}자 범위={} 기간={}~{} 원문 {}건 출처 {}곳 근거={} 인용 {}건 토큰 {}", text.length(), facts.scopeLabel(),
                 p.from(), p.to(), facts.docCount(), facts.mediaCount(), response.grounded(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
-        return view(text, response, period, interpreted, factsView);
+        meter.add(response.usage());
+        return view(text, response, period, interpreted, factsView, List.of(), facts.lines());
     }
 
     /**
      * 그 밖의 질문 — 문장 유사도 검색(카테고리·기간으로 거름). 근거 원문만 준다. 집계 수치는 붙이지 않는다 — 질문 대상과
      * 상관없는 수치를 대상의 수치처럼 섞어 썼다. 수치가 필요한 질문은 유행 집계로 간다.
      */
-    private RagAnswerView askSearch(String text, Interpreted interpreted, LocalDate today) {
+    private RagAnswerView askSearch(String text, Interpreted interpreted, LocalDate today, Meter meter) {
         QuestionInterpreter.Period p = interpreted.question().period();
         AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
                 today.toString(), AiClient.AnswerRequest.SEARCH,
@@ -303,11 +344,17 @@ public class RagService {
         log.info("RAG 질문 {}자 카테고리={} 근거={} 사유={} 최고 유사도={} 출처 {}건 토큰 {}", text.length(),
                 interpreted.question().category(), response.grounded(), response.reason(), response.bestScore(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
-        return view(text, response, period, interpreted, null);
+        meter.add(response.usage());
+        return view(text, response, period, interpreted, null, List.of(), List.of()); // 검색 답은 집계 수치를 쓰지 않아 대조하지 않는다
     }
 
+    /**
+     * @param moreFacts 주 판단 근거(facts) 말고 답이 인용한 다른 집계(비교 질문의 둘째 대상 등)
+     * @param evidence  답의 수치를 대조할 근거 글(집계 줄·도구 결과). 비었으면 대조하지 않는다
+     */
     private RagAnswerView view(String text, AiClient.AnswerResponse response, RagAnswerView.Period period,
-                               Interpreted interpreted, RagAnswerView.Facts facts) {
+                               Interpreted interpreted, RagAnswerView.Facts facts, List<RagAnswerView.Facts> moreFacts,
+                               List<String> evidence) {
         if (!response.grounded()) {
             return new RagAnswerView(text, false, noEvidenceMessage(response, period), List.of(), response.reason(), List.of(),
                     response.bestScore(), minScore, period, interpreted.view(), facts);
@@ -317,21 +364,41 @@ public class RagService {
             return new RagAnswerView(text, false, "근거 자료 없음 — 근거 문서가 삭제되었거나 다시 분석 중입니다.",
                     List.of(), "SOURCE_MISSING", List.of(), response.bestScore(), minScore, period, interpreted.view(), facts);
         }
-        return new RagAnswerView(text, true, response.answer(), points(response.points(), sources), null, sources,
-                response.bestScore(), minScore, period, interpreted.view(), facts, body(response.body(), sources));
+        List<RagAnswerView.Point> points = points(response.points(), sources);
+        String body = body(response.body(), sources);
+        List<String> unverified = evidence.isEmpty() ? List.of() : AnswerNumbers.unverified(Stream.concat(
+                Stream.of(response.answer(), body), points.stream().map(RagAnswerView.Point::text))
+                .filter(Objects::nonNull).collect(Collectors.joining("\n")), evidence);
+        if (!unverified.isEmpty()) {
+            log.warn("답의 수치 중 집계에 없는 것: {} (질문 {}자)", unverified, text.length());
+        }
+        return new RagAnswerView(text, true, response.answer(), points, null, sources, response.bestScore(), minScore, period,
+                interpreted.view(), facts, body, moreFacts, unverified);
     }
 
-    private static RagAnswerView.Facts factsView(TrendFactsService.Facts facts) {
+    /** 기획 브리프 범위 — 질문을 해석해(AI, 실패하면 규칙) 묻는 축·증감은 비운다(모든 축을 센다). 토큰은 meter에 더한다. */
+    QuestionInterpreter.Interpretation briefScope(String question, LocalDate today, Answered[] usageOut) {
+        Meter meter = new Meter();
+        QuestionInterpreter.Interpretation q = interpret(question, today, List.of(), meter).question();
+        usageOut[0] = new Answered(null, meter.total, List.of());
+        return new QuestionInterpreter.Interpretation(true, q.category(), q.categoryName(), q.itemType(), q.itemTypeName(), q.period(),
+                q.terms(), q.seasons(), null, q.filters(), null);
+    }
+
+    static RagAnswerView.Facts factsView(TrendFactsService.Facts facts) {
         return new RagAnswerView.Facts(facts.scopeLabel(), facts.docCount(), facts.mediaCount(), facts.prevDocCount(), facts.change(),
                 facts.dimensions().stream().filter(d -> !d.rows().isEmpty())
-                        .map(d -> new RagAnswerView.Dimension(d.label(), d.rows().stream().limit(TrendFactsService.TOP) // 도구 경로는 10개까지 센다 — 막대는 5개
+                        .map(d -> new RagAnswerView.Dimension(d.label(), d.rows().stream() // 도구 경로는 10개까지 센다 — 화면 막대는 5개, 브리프 엑셀은 전부
                                 .map(r -> new RagAnswerView.FactRow(r.label(), r.count(), r.mediaCount(), r.prevCount(),
                                         TrendFactsService.rate(r.count(), r.prevCount()),
                                         r.names().stream().map(n -> n.name() + " " + n.count() + "건").toList(),
-                                        r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList(), r.score())).toList()))
+                                        r.items().stream().map(n -> n.name() + " " + n.count() + "건").toList(), r.score(),
+                                        r.share(), r.prevShare(), r.shareDelta())).toList()))
                         .toList(),
                 facts.terms().stream().map(t -> new RagAnswerView.TermFact(t.term(), t.count(), t.mediaCount(), t.prevCount(),
-                        t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList(), termDetails(t))).toList());
+                        t.expressions().stream().map(n -> n.name() + " " + n.count() + "건").toList(), termDetails(t))).toList(),
+                new RagAnswerView.Period(facts.period().from(), facts.period().to(), facts.period().label(), facts.period().explicit(),
+                        facts.stale()), facts.volumeNote());
     }
 
     /** 질문 단어 대상 옷의 포인트 줄 — 축마다 한 줄, 함께 나온 옷·키워드 한 줄씩. */
@@ -358,17 +425,35 @@ public class RagService {
                 .findFirst().orElse(value);
     }
 
+    /** 본문의 근거 번호 [n] — 숫자가 너무 긴 것은 번호로 보지 않는다(정수 변환 실패 방지). */
+    private static final Pattern CITE = Pattern.compile("\\[(\\d{1,6})]");
+
+    /** 글에 나온 근거 번호(나온 순서, 중복 포함). */
+    static List<Integer> citations(String text) {
+        List<Integer> found = new ArrayList<>();
+        Matcher m = CITE.matcher(text);
+        while (m.find()) found.add(Integer.parseInt(m.group(1)));
+        return found;
+    }
+
     /**
-     * 답의 줄과 그 줄의 출처 번호(화면에 보이는 출처만). 인용한 출처가 모두 빠진 줄(삭제·재분석 중인 문서만 인용)은 뺀다 —
-     * 확인할 수 없는 문장이 출처 없이 남았다(2026-10-23 평가: 색인에만 남은 지워진 문서로 쓴 줄). 처음부터 인용이 없는 줄(한계·주의 문장)은 둔다.
+     * 자유 형식 본문 — 화면에 없는 출처(지어낸 번호·삭제·재분석 중인 문서)의 [n]은 지우고, 인용한 번호가 모두 그런 줄(문단·목록 줄·표 행)은
+     * 줄째 뺀다 — 번호만 지우면 근거 없는 문장이 출처 없이 남았다(2026-10-29 진단 F2). 처음부터 번호가 없는 줄(표 머리·한계 문장)은 둔다. 없으면 null.
      */
-    /** 자유 형식 본문 — 삭제·재분석 중이라 빠진 출처의 [n]은 지운다(줄의 근거 번호 정리와 같다). 없으면 null. */
     static String body(String body, List<RagAnswerView.Source> sources) {
         body = blankBody(body);
         if (body == null) return null;
         Set<Integer> shown = sources.stream().map(RagAnswerView.Source::n).collect(Collectors.toSet());
-        return java.util.regex.Pattern.compile("\\[(\\d+)]").matcher(body.strip())
-                .replaceAll(m -> shown.contains(Integer.parseInt(m.group(1))) ? java.util.regex.Matcher.quoteReplacement(m.group()) : "");
+        List<String> kept = new ArrayList<>();
+        for (String line : body.strip().split("\\R", -1)) {
+            List<Integer> cited = citations(line);
+            if (!cited.isEmpty() && cited.stream().noneMatch(shown::contains)) {
+                log.info("출처가 모두 빠진 본문 줄을 뺍니다(인용 {}): {}", cited, line);
+                continue;
+            }
+            kept.add(CITE.matcher(line).replaceAll(m -> shown.contains(Integer.parseInt(m.group(1))) ? Matcher.quoteReplacement(m.group()) : ""));
+        }
+        return blankBody(String.join("\n", kept));
     }
 
     /** 빈 본문 — 모델이 빈 값 대신 따옴표만(`""`) 넣기도 한다(2026-10-29 화면에 ""가 보였다). 비었으면 null. */
@@ -376,6 +461,11 @@ public class RagService {
         return body == null || body.replaceAll("[\"'`\\s]", "").isEmpty() ? null : body;
     }
 
+    /**
+     * 답의 줄과 그 줄의 출처 번호(화면에 보이는 출처만). 인용한 출처가 모두 빠진 줄(지어낸 번호·삭제·재분석 중인 문서만 인용)은 뺀다 —
+     * 확인할 수 없는 문장이 출처 없이 남았다(2026-10-23 평가: 색인에만 남은 지워진 문서로 쓴 줄). 처음부터 인용이 없는 줄(한계·주의 문장)은 둔다.
+     * 그래서 앞 단계(AI 서비스·AgentService)는 번호를 지우지 않고 넘긴다.
+     */
     private static List<RagAnswerView.Point> points(List<AiClient.AnswerPoint> points, List<RagAnswerView.Source> sources) {
         if (points == null) {
             return List.of();

@@ -83,12 +83,18 @@ class AnalysisResultApiTest {
     void 분석이_끝난_원문을_최근_것부터_보인다() throws Exception {
         mockMvc.perform(get("/api/analysis-results"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(2)))
-                .andExpect(jsonPath("$[0].docId").value("AR-2"))
-                .andExpect(jsonPath("$[1].docId").value("AR-1"))
-                .andExpect(jsonPath("$[1].categories", hasSize(2)))
-                .andExpect(jsonPath("$[1].keywords[0]").value("올블랙"))
-                .andExpect(jsonPath("$[1].imageUrl").doesNotExist()); // 사진 없는 텍스트 원문
+                .andExpect(jsonPath("$.rows", hasSize(2)))
+                .andExpect(jsonPath("$.rows[0].docId").value("AR-2"))
+                .andExpect(jsonPath("$.rows[1].docId").value("AR-1"))
+                .andExpect(jsonPath("$.rows[1].categories", hasSize(2)))
+                .andExpect(jsonPath("$.rows[1].keywords[0]").value("올블랙"))
+                .andExpect(jsonPath("$.rows[1].imageUrl").doesNotExist()) // 사진 없는 텍스트 원문
+                .andExpect(jsonPath("$.total").value(2));
+        // 페이지는 DB가 나눈다 — 한 건씩이면 둘째 페이지가 AR-1
+        mockMvc.perform(get("/api/analysis-results").param("size", "1").param("page", "1"))
+                .andExpect(jsonPath("$.rows", hasSize(1)))
+                .andExpect(jsonPath("$.rows[0].docId").value("AR-1"))
+                .andExpect(jsonPath("$.total").value(2));
     }
 
     @Test
@@ -96,16 +102,16 @@ class AnalysisResultApiTest {
     void 조회_조건에_맞는_아이템의_값만_보인다() throws Exception {
         mockMvc.perform(get("/api/analysis-results").param("category", "BOTTOM"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].docId").value("AR-1"))
-                .andExpect(jsonPath("$[0].categories[0]").value("하의"))
-                .andExpect(jsonPath("$[0].colors", hasSize(1)))
-                .andExpect(jsonPath("$[0].colors[0]").value("블루"))
-                .andExpect(jsonPath("$[0].patterns[0]").value("스트라이프(줄무늬)"))
-                .andExpect(jsonPath("$[0].silhouettes[0]").value("와이드"));
+                .andExpect(jsonPath("$.rows", hasSize(1)))
+                .andExpect(jsonPath("$.rows[0].docId").value("AR-1"))
+                .andExpect(jsonPath("$.rows[0].categories[0]").value("하의"))
+                .andExpect(jsonPath("$.rows[0].colors", hasSize(1)))
+                .andExpect(jsonPath("$.rows[0].colors[0]").value("블루"))
+                .andExpect(jsonPath("$.rows[0].patterns[0]").value("스트라이프(줄무늬)"))
+                .andExpect(jsonPath("$.rows[0].silhouettes[0]").value("와이드"));
         mockMvc.perform(get("/api/analysis-results").param("itemType", "OUTER_COAT"))
-                .andExpect(jsonPath("$", hasSize(1)))
-                .andExpect(jsonPath("$[0].docId").value("AR-2"));
+                .andExpect(jsonPath("$.rows", hasSize(1)))
+                .andExpect(jsonPath("$.rows[0].docId").value("AR-2"));
     }
 
     @Test

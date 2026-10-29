@@ -19,6 +19,7 @@ from app.indexing import indexer
 from app.rag import answer as rag
 from app.rag import interpret as interpreter
 from app.rag import agent
+from app.rag import brief as briefing
 from app.indexing import vector_store
 from app.core.config import settings
 from app.core.claude import AiServiceError
@@ -121,6 +122,23 @@ class TurnModel(BaseModel):
     period_label: str | None = None  # 기간을 콕 집은 질문만
     period_from: str | None = None
     period_to: str | None = None
+
+
+class BriefSource(BaseModel):
+    n: int
+    title: str | None = None
+    media: str | None = None
+    date: str | None = None
+    summary: str | None = None
+
+
+class BriefRequest(BaseModel):
+    """기획 브리프 — data는 Spring이 센 집계 줄, sources는 예시 원문(요약). Claude는 서술만 쓴다."""
+    question: str = Field(min_length=1, max_length=MAX_QUESTION_LENGTH)
+    model: str
+    today: date | None = None
+    data: list[str] = Field(min_length=1)
+    sources: list[BriefSource] = []
 
 
 class InterpretRequest(BaseModel):
@@ -303,6 +321,22 @@ def answer_question(req: AnswerRequest, x_claude_api_key: str | None = Header(de
         return rag.answer(vector_store.get_collection(), data, x_claude_api_key)
     except AiServiceError as e:
         log.warning("RAG 답변 실패: %s", e)
+        detail = {"message": str(e), "retryable": e.retryable}
+        if e.usage:
+            detail["usage"] = e.usage
+        raise HTTPException(status_code=e.status_code, detail=detail)
+
+
+@app.post("/brief")
+def write_brief(req: BriefRequest, x_claude_api_key: str | None = Header(default=None)):
+    """기획 브리프 8개 구성의 서술(JSON). 차트·건수는 Spring 집계를 화면이 그린다."""
+    if not x_claude_api_key:
+        raise HTTPException(status_code=401, detail={"message": "Claude API 키가 없습니다(claude.api.key).", "retryable": False})
+    try:
+        return briefing.write(briefing.BriefInput(question=req.question, model=req.model, today=req.today or date.today(),
+                                                  data=req.data, sources=[s.model_dump() for s in req.sources]), x_claude_api_key)
+    except AiServiceError as e:
+        log.warning("기획 브리프 실패: %s", e)
         detail = {"message": str(e), "retryable": e.retryable}
         if e.usage:
             detail["usage"] = e.usage

@@ -7,7 +7,8 @@ Claude에게 보내는 판단 문구는 `ai/prompts/structure/*.md`에만 둔다
 ## 결정 사항 (사용자)
 
 - AI 처리는 Python **FastAPI 서버**로 띄우고 Spring이 호출한다.
-- LLM은 `claude-sonnet-5`(`claude.model`). 키는 Spring `claude.api.key` **한 곳**에만 둔다.
+- 정형화 LLM은 `claude-sonnet-5-5`(설정 `claude.structure-model`, 챗봇 답변의 `claude.model`과 따로 — 2026-10-29 사용자 결정: 정형화만 먼저 바꾼다). Sonnet 5와 가격·토크나이저가 같고, 정답셋 2장 비교에서 종류 판별이 더 나았다(73장 비교는 아직). 키는 Spring `claude.api.key` **한 곳**에만 둔다.
+  - 정형화 모델을 바꾸면 프롬프트 캐시가 새로 시작되고(모델별), 바꾸기 전 결과와 섞여 집계된다(재분석은 필요 없다). 비교는 `ai/evals/structure_eval.py`(모델은 파일의 `MODEL`).
 - 표준 코드(카테고리·소재·컬러·실루엣)는 일반 분류 **초안**이다. 확정 체계는 미정(정의서 미결 4번).
 - **정형 결과는 의류 아이템 배열**(`items: [{category, item, type, materials, colors, silhouettes, genders}]`)이다. 정의서 10번 형식(문서당 category 1개)에서 벗어난다 — 코디 사진은 아이템이 여럿이라 한 묶음으로 받으면 속성이 섞인다.
 - **아이템 종류(`type`, 공통코드 `TREND_ITEM`)**를 아이템마다 고른다. 아이템명(Claude 자유 문장)은 같은 옷도 "데님 트러커 재킷"·"트러커 재킷"으로 갈라져 셀 수 없으므로, 정한 목록(카테고리마다 기타 포함)에서 고르게 한다. 코드값은 `카테고리_종류`(OUTER_PADDING)이고, 아이템 카테고리와 어긋나면 검증이 **종류의 카테고리로 맞춘다**(재시도하지 않는다). 종류가 없는 이전 결과는 재분석해야 집계된다(챗봇 유행 집계도 같다).
@@ -34,7 +35,7 @@ Claude에게 보내는 판단 문구는 `ai/prompts/structure/*.md`에만 둔다
 
 - **검증을 통과한 결과만 저장한다**(정의서 P-03). Structured Output이 형식을 맞춰 줘도 `TrendResultValidator`를 생략하지 않는다.
 - **표준 코드 값만 저장한다.** 분석할 때마다 사용중 공통코드를 읽어 Claude 스키마 enum으로 넘긴다. 코드 이름의 괄호("레더(가죽)")는 다른 표기를 그 코드로 옮기는 힌트다.
-- **분석 모델·감성(긍정·중립·부정)은 뽑지도 저장하지도 않는다**(사용자 결정 — 트렌드 판단에 쓰지 않는다). 쓰는 모델은 설정 `claude.model`과 로그로 안다. 이전 DB의 `trend_items.model`·`sentiment` 컬럼은 기동 때 `DataInitializer.dropRetiredColumns`가 지운다(NOT NULL로 남으면 저장이 깨진다). 엔티티에서 컬럼을 빼면 여기에 같이 넣는다.
+- **분석 모델·감성(긍정·중립·부정)은 뽑지도 저장하지도 않는다**(사용자 결정 — 트렌드 판단에 쓰지 않는다). 쓰는 모델은 설정 `claude.structure-model`과 로그로 안다. 이전 DB의 `trend_items.model`·`sentiment` 컬럼은 기동 때 `DataInitializer.dropRetiredColumns`가 지운다(NOT NULL로 남으면 저장이 깨진다). 엔티티에서 컬럼을 빼면 여기에 같이 넣는다.
 - **출처는 LLM이 만들지 않는다.** Spring이 원문 문서 값을 정형 JSON에 붙인다(정의서 10번 슬라이드 형식).
 - **결과 형식·분류 축을 바꾸면 같이 고친다:** `ai/prompts/structure/*.md`(판단 규칙 — 공통·실루엣·이미지·텍스트·본문+이미지), `structurer.build_schema`, `TrendResultValidator`, `AnalysisService`(저장·정형 JSON), `indexer.summary_chunk`, `TrendItem.garments`, 집계(`TrendAggregationService.mentions`)와 근거 원문(`TrendQueryService.mentions`), 챗봇 유행 집계(`TrendFactsService`), 결과 모달(`trend-analysis.js`). 한 곳만 고치면 검증에서 전부 실패하거나 집계가 조용히 틀린다. **AI 서비스도 재기동**한다 — 옛 스키마로 떠 있으면 새 검증이 모든 결과를 거부한다.
 - 아이템 수 상한(5)은 스키마로 걸 수 없다(구조화 출력은 배열 길이 제약 미지원). 프롬프트로 지시하고 검증에서 앞 5개만 남긴다.
@@ -47,7 +48,7 @@ Claude에게 보내는 판단 문구는 `ai/prompts/structure/*.md`에만 둔다
   - 소재 정답은 사진 질감 기준이다(사용자 결정). 엑셀 소재는 상품 페이지의 섬유 성분(청바지 = 면)이라, 변환할 때 종류·아이템 이름에서 질감 소재(데님·플리스·니트·레더·스웨이드·시어링·코듀로이)를 더한다(`gold_from_excel.py`). 채점은 이미지 허용 소재(속성 IMAGE)만 본다.
   - 대상 정답은 상품 라인(엑셀 그대로)이다.
   - 점수는 실행마다 흔들린다 — 규칙을 비교할 때는 같은 규칙을 2~3번 돌려 평균으로 본다.
-- **분석 결과 조회 화면**(`analysis-result`, 사용자 요청): 분석이 끝난 원문을 최근 것부터 한 줄씩 — 카테고리·키워드·컬러·패턴·실루엣(코드 대신 이름). 헤더를 누르면 정렬한다. **사진은 그리드에 두지 않고 행을 눌러 팝업을 열 때만 받는다**(사용자 결정 — 목록에서 한꺼번에 받으면 느리다). 조회 조건은 카테고리·종류(`TREND_CATEGORY`·`TREND_ITEM`)이고, 조건에 맞는 의류 아이템이 있는 원문만, 값은 그 아이템들의 값만 보인다(키워드는 원문 단위). **행을 누르면 팝업에 사진을 크게**(사진 없는 텍스트 원문은 안내 문구)와 출처·종류·값을 보인다. 사진은 이미지 원문의 사진, 텍스트 원문은 첫 첨부 사진 — 이미지 업로드 권한 없이 보이도록 `GET /api/analysis-results/{docId}/image`로 따로 연다(분석 완료 원문만). 최근 1,000건까지(`AnalysisResultService.MAX_ROWS`) — 데이터가 많아지면 페이지 나누기를 붙인다. 테스트 `AnalysisResultApiTest`.
+- **분석 결과 조회 화면**(`analysis-result`, 사용자 요청): 분석이 끝난 원문을 최근 것부터 한 줄씩 — 카테고리·키워드·컬러·패턴·실루엣(코드 대신 이름). 헤더를 누르면 정렬한다. **사진은 그리드에 두지 않고 행을 눌러 팝업을 열 때만 받는다**(사용자 결정 — 목록에서 한꺼번에 받으면 느리다). 조회 조건은 카테고리·종류(`TREND_CATEGORY`·`TREND_ITEM`)이고, 조건에 맞는 의류 아이템이 있는 원문만, 값은 그 아이템들의 값만 보인다(키워드는 원문 단위). **행을 누르면 팝업에 사진을 크게**(사진 없는 텍스트 원문은 안내 문구)와 출처·종류·값을 보인다. 사진은 이미지 원문의 사진, 텍스트 원문은 첫 첨부 사진 — 이미지 업로드 권한 없이 보이도록 `GET /api/analysis-results/{docId}/image`로 따로 연다(분석 완료 원문만). 거르기·최근 게시일 순·페이지(100건씩, 최대 500)는 DB가 한다(`SourceDocumentRepository.findAnalyzed`) — 헤더 정렬은 지금 페이지 안에서만이다. 테스트 `AnalysisResultApiTest`.
 - **업로드 화면 결과 팝업에도 원문의 사진을 보인다**: 이미지 원문은 분석한 그 사진을 크게, 텍스트 원문은 첨부 이미지를 작게(`AnalysisView.images`). 누르면 원본을 새 창으로 연다.
 - 결과 팝업의 의류 아이템 표에는 **아이템명을 보이지 않는다**(사용자 결정 — 종류와 뜻이 겹쳐 헷갈린다). 아이템명은 데이터로만 남아 색인 요약 청크와 챗봇 유행 집계(기타 값의 아이템명 상위·질문 단어·대상 옷 포인트 — [`rag-search.md`](rag-search.md))에 쓰고, 정형 JSON 보기에는 원본 그대로 있다. 주간 집계(P-05)는 세지 않는다.
 - 저장: 아이템 단위 값(아이템명 `ITEM`·소재·컬러·실루엣)은 `trend_item_values`의 `garment_no`·`category`로 묶는다. `trend_items.category`는 대표(첫) 아이템이다 — NOT NULL 컬럼이라 엔티티에서 빼면 `ddl-auto=update`가 컬럼을 지우지 않아 저장이 깨진다.

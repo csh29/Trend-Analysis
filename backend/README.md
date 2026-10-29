@@ -66,7 +66,7 @@ java -jar target/trend-analysis-0.0.1-SNAPSHOT.jar --spring.profiles.active=loca
 | 이미지 업로드 | `program/img-upload.html` | `/api/images` |
 | 텍스트 등록 | `program/text-upload.html` | `/api/texts` (본문 + 첨부 이미지 최대 5장) |
 | 트렌드 분석 | `program/trend-analysis.html` | `/api/trends` |
-| 분석 결과 조회 | `program/analysis-result.html` | `/api/analysis-results` (조회 조건 카테고리·종류, 사진은 행을 눌러 팝업에서만) |
+| 분석 결과 조회 | `program/analysis-result.html` | `/api/analysis-results` (조회 조건 카테고리·종류, 100건씩 페이지, 사진은 행을 눌러 팝업에서만) |
 
 이미지는 여러 장을 한 번에 올린다(끌어다 놓기 또는 선택, 한 장 20MB·한 번에 50장·합계 200MB).
 파일은 `backend/uploads/images/`(설정 `image.upload.dir`)에 저장되며 git에 올리지 않는다.
@@ -83,7 +83,8 @@ AI 처리는 Python 서비스(`../ai`, FastAPI)가 하고 Spring이 호출한다
 | 키 | 용도 |
 | --- | --- |
 | `claude.api.key` | Claude API 키(이 파일은 커밋하지 않는다) |
-| `claude.model` | 기본 `claude-sonnet-5` |
+| `claude.model` | 챗봇 답변·도구 경로 모델, 기본 `claude-sonnet-5` |
+| `claude.structure-model` | 원문 분석(정형화) 모델, 기본 `claude-sonnet-5-5` |
 | `claude.interpret-model` | 홈 질문 해석용 작은 모델, 기본 `claude-haiku-5-5` |
 | `ai.server.url` | AI 서비스 주소, 기본 `http://127.0.0.1:8001` |
 | `ai.analysis.max-attempts` | 정형화 재시도 상한, 기본 3 |
@@ -132,6 +133,7 @@ Chroma는 내장형(`ai/chroma_data/`)이다. 서버형 전환 기준·방법은
 | 사용자별 권한관리 | `program/user-permission-mng.html` | `/api/permissions/{userId}` |
 | 공통코드마스터 관리 | `program/com-cd-master-mng.html` | `/api/com-cd-groups` |
 | 공통코드 관리 | `program/com-cd-mng.html` | `/api/com-cds` |
+| 챗봇 질문 로그 | `program/rag-log.html` | `/api/rag-logs` (질문·답·경로·토큰·👍👎, 보관 180일) |
 
 초기 관리자(`admin`)의 비밀번호는 최초 기동 때 무작위로 만들어 서버 로그에 한 번만 찍는다. 잃어버렸을 때는 [`docs/llm/features/admin-screens.md`](../docs/llm/features/admin-screens.md).
 

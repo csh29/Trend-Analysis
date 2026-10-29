@@ -12,4 +12,12 @@ public record RagQuestionRequest(String question, List<Turn> history) {
     public record Turn(String question, boolean trend, String category, String itemType, String periodLabel,
                        String periodFrom, String periodTo) {
     }
+
+    /** 답 아래 👍👎 — logId는 답의 logId, value는 UP·DOWN(없으면 지운다). */
+    public record Feedback(Long logId, String value) {
+    }
+
+    /** 기획 브리프 요청 — 질문(이어 묻기면 해석이 다시 쓴 질문). */
+    public record Brief(String question) {
+    }
 }

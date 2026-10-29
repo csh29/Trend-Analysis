@@ -63,6 +63,6 @@ class TrendFactsEtcTest {
         assertThat(types.rows().get(1).names()).isEmpty(); // 기타가 아닌 종류는 아이템명을 붙이지 않는다
 
         List<String> lines = facts.lines();
-        assertThat(lines).anyMatch(l -> l.contains("기타 아우터 유행점수 2.5 · 4건 · 매체 1곳 · 직전 0건(신규) (아이템명: 퀼팅 재킷 2건, 사파리 재킷 1건, 케이프 1건)"));
+        assertThat(lines).anyMatch(l -> l.contains("기타 아우터 유행점수 2.5 · 4건 · 출처 1곳 · 직전 0건(신규) · 비중 80%(직전 0%, +80%p) (아이템명: 퀼팅 재킷 2건, 사파리 재킷 1건, 케이프 1건)"));
     }
 }

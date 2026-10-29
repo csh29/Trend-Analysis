@@ -10,6 +10,8 @@
         /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css가 담당한다. 여기는 행 팝업만.
            사진은 그리드에 두지 않고 팝업을 열 때만 받는다 — 목록에서 한꺼번에 받으면 느리다(2026-10-29 사용자 요청). */
         .result-count{ font-size:12px; color:var(--text-sub); font-weight:normal; margin-left:6px; }
+        .pager{ display:flex; align-items:center; justify-content:center; gap:8px; margin-top:10px; font-size:12px; color:var(--text-sub); }
+        .pager .btn{ padding:3px 10px; font-size:12px; }
         .preview-modal{ max-width:900px; max-height:90vh; overflow:auto; }
         .preview-image{ text-align:center; }
         .preview-image img{ max-width:100%; max-height:60vh; object-fit:contain; border-radius:6px; }
@@ -37,6 +39,12 @@
                 <thead id="resultGridHead"></thead>
                 <tbody id="resultGridBody"></tbody>
             </table>
+            <!-- 페이지는 서버가 나눈다(최근 게시일부터 100건씩). 헤더 정렬은 지금 페이지 안에서만 -->
+            <div class="pager">
+                <button type="button" class="btn" id="pagePrev">이전</button>
+                <span id="pageInfo"></span>
+                <button type="button" class="btn" id="pageNext">다음</button>
+            </div>
         </section>
     </main>
 </div>
@@ -80,8 +88,16 @@
             return (values || []).join(', ');
         }
 
-        function renderRows(results) {
-            const rows = (results || []).map(function (r) {
+        const PAGE_SIZE = 100;
+        let page = 0;
+        let totalPages = 0;
+
+        function renderRows(result) {
+            totalPages = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+            document.getElementById('pageInfo').textContent = (result.page + 1) + ' / ' + totalPages + ' 페이지';
+            document.getElementById('pagePrev').disabled = result.page <= 0;
+            document.getElementById('pageNext').disabled = result.page + 1 >= totalPages;
+            const rows = (result.rows || []).map(function (r) {
                 return Object.assign({}, r, {
                     categoryText: joined(r.categories),
                     itemTypeText: joined(r.itemTypes),
@@ -91,19 +107,25 @@
                     silhouetteText: joined(r.silhouettes)
                 });
             });
-            document.getElementById('resultCount').textContent = '(' + rows.length + '건)';
+            document.getElementById('resultCount').textContent = '(전체 ' + result.total.toLocaleString() + '건)';
             Grid.render(gridBody, COLUMNS, rows, {
                 emptyMessage: '조건에 맞는 분석 결과가 없습니다.',
                 onRowClick: function (tr, row) { openPreview(row); }
             });
         }
 
+        /** 조건을 바꾸거나 조회를 누르면 첫 페이지부터. */
         function searchResults() {
+            page = 0;
+            loadPage();
+        }
+
+        function loadPage() {
             const values = search.values();
-            const params = new URLSearchParams();
+            const params = new URLSearchParams({ page: String(page), size: String(PAGE_SIZE) });
             if (values.category) params.set('category', values.category);
             if (values.itemType) params.set('itemType', values.itemType);
-            fetch(API_URL + (params.toString() ? '?' + params.toString() : ''))
+            fetch(API_URL + '?' + params.toString())
                 .then(function (res) {
                     if (!res.ok) throw new Error('조회에 실패했습니다.');
                     return res.json();
@@ -162,6 +184,13 @@
         });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape' && previewBackdrop.classList.contains('open')) closePreview();
+        });
+
+        document.getElementById('pagePrev').addEventListener('click', function () {
+            if (page > 0) { page--; loadPage(); }
+        });
+        document.getElementById('pageNext').addEventListener('click', function () {
+            if (page + 1 < totalPages) { page++; loadPage(); }
         });
 
         PageButtons.bind({

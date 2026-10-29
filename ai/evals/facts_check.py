@@ -1,11 +1,12 @@
 """챗봇 유행 집계 검증 — FactsCheckRunner가 뽑은 판단 근거(results/facts-check.json)를 H2 파일 DB를 SQL로 직접 센 값과 맞댄다.
 
 집계는 계산이라 하나라도 다르면 버그다. 이 스크립트는 Spring 코드를 거치지 않고 정의(rag-search.md "유행 집계")대로 다시 센다:
-- 원문 = 분석 완료(DONE), 날짜 = 게시일(없으면 업로드일). 기간 안 원문 수 / 서로 다른 매체 수 / 직전 같은 길이 기간 원문 수.
+- 원문 = 분석 완료(DONE), 날짜 = 게시일(없으면 업로드일). 기간 안 원문 수 / 서로 다른 출처 수(아래 출처 기준) / 직전 같은 길이 기간 원문 수.
 - 범위: 카테고리·종류·속성 조건(종류 안 OR, 종류끼리 AND)이 맞는 의류 아이템이 하나라도 있는 원문. 시즌은 원문 단위.
-- 값마다: 범위에 맞는 아이템 중 그 값을 가진 것이 있는 원문 수. 상위 5개(유행점수 → 원문 수 → 매체 수 → 코드값 순).
+- 값마다: 범위에 맞는 아이템 중 그 값을 가진 것이 있는 원문 수. 상위 5개(유행점수 → 원문 수 → 출처 수 → 코드값 순).
   유행점수 = 출처 수 + 0.5 × (원문 수 − 출처 수). 출처는 매체명, 직접 업로드·직접 등록·매체 없음은 원문마다 다른 출처.
-  증감 조건(change)이 있으면 UP은 늘어난 값만, DOWN은 줄어든 값만(이번 0건 포함), BOTH는 달라진 값 — 증감 폭 순, 같으면 위 순서.
+  증감 조건(change)이 있으면 UP은 비중이 늘어난 값만, DOWN은 줄어든 값만(이번 0건 포함), BOTH는 달라진 값 — 비중 변화(%p) 폭 순,
+  같으면 위 순서. 비중 = 값 원문 수 ÷ 그 기간 범위 원문 수. 직전 범위 원문이 없으면 원문 수 차이로 본다.
 - 질문 단어: 낱말이 모두 들어간 키워드·아이템명이 있는 원문(범위 무관, 시즌은 따름). 포인트는 아이템명에 그 말이 든 옷의 값.
 
 사용(Spring 앱을 내린 상태 — H2 파일 잠금):
@@ -88,17 +89,22 @@ def compact(s: str) -> str:
     return "".join(s.split()).lower()
 
 
-def rank(tallies: dict, change: str | None) -> list:
-    """TrendFactsService.rank와 같은 순서의 상위 값 [(값, tally)]."""
+def rank(tallies: dict, change: str | None, total: int = 0, prev_total: int = 0) -> list:
+    """TrendFactsService.rank와 같은 순서의 상위 값 [(값, tally)]. 증감은 비중 변화(%p) 순, 직전 범위 원문이 없으면 원문 수 차이 순."""
     def by_score(e):
         t = e[1]
         n, src = len(t["now"]), len(t["src"])
-        return (-(src + 0.5 * (n - src)), -n, -len(t["media"]), e[0])
+        return (-(src + 0.5 * (n - src)), -n, -src, e[0])
 
     if not change:
         return sorted(((v, t) for v, t in tallies.items() if t["now"]), key=by_score)[:TOP]
 
+    def share(n, all_):
+        return n * 100.0 / all_ if all_ else 0.0
+
     def delta(e):
+        if prev_total:
+            return share(len(e[1]["now"]), total) - share(len(e[1]["prev"]), prev_total)
         return len(e[1]["now"]) - len(e[1]["prev"])
 
     keep = {"UP": lambda d: d > 0, "DOWN": lambda d: d < 0}.get(change, lambda d: d != 0)
@@ -129,7 +135,7 @@ def count(case: dict, spring: dict, docs: dict, names: dict, show_docs: bool = F
                 and all(set(g[t]) & set(vals) for t, vals in filters.items()))
 
     scope_now, scope_media, scope_prev = set(), set(), set()
-    tally = defaultdict(lambda: defaultdict(lambda: {"now": set(), "media": set(), "src": set(), "prev": set()}))
+    tally = defaultdict(lambda: defaultdict(lambda: {"now": set(), "src": set(), "prev": set()}))
     for doc_id, d in docs.items():
         if not (prev_from <= d["date"] <= to) or (seasons and not seasons & set(d["season"])):
             continue
@@ -139,14 +145,13 @@ def count(case: dict, spring: dict, docs: dict, names: dict, show_docs: bool = F
         cur = d["date"] >= frm
         (scope_now if cur else scope_prev).add(doc_id)
         if cur:
-            scope_media.add(d["media"])
+            scope_media.add(d["source"])  # 출처 수 = 유행점수의 출처 기준(TrendFactsService.sourceKey)
         for dim in spring["dimensions"]:
             vt = dim["valueType"]
             for v in {v for g in gs for v in g[vt]}:
                 t = tally[vt][v]
                 if cur:
                     t["now"].add(doc_id)
-                    t["media"].add(d["media"])
                     t["src"].add(d["source"])
                 else:
                     t["prev"].add(doc_id)
@@ -155,8 +160,8 @@ def count(case: dict, spring: dict, docs: dict, names: dict, show_docs: bool = F
             diffs.append(f"{key} 챗봇 {spring[key]} / SQL {mine}")
     for dim in spring["dimensions"]:
         vt = dim["valueType"]
-        ranked = rank(tally[vt], case.get("change"))
-        mine = [(v, len(t["now"]), len(t["media"]), len(t["prev"])) for v, t in ranked]
+        ranked = rank(tally[vt], case.get("change"), len(scope_now), len(scope_prev))
+        mine = [(v, len(t["now"]), len(t["src"]), len(t["prev"])) for v, t in ranked]
         theirs = [(r["value"], r["count"], r["mediaCount"], r["prevCount"]) for r in dim["rows"]]
         if mine != theirs:
             diffs.append(f"[{dim['label']}] 챗봇 {theirs} / SQL {mine}")
@@ -185,7 +190,7 @@ def count(case: dict, spring: dict, docs: dict, names: dict, show_docs: bool = F
             cur = d["date"] >= frm
             (now if cur else prev).add(doc_id)
             if cur:
-                media.add(d["media"])
+                media.add(d["source"])
             for g in d["g"].values():
                 if g["ITEM"] and hit(g["ITEM"][0]):
                     for a in pts:

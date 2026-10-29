@@ -18,7 +18,7 @@
 | 화면 | Thymeleaf 서버 렌더링 + 바닐라 JS 공통 모듈 |
 | 정형 DB | H2 파일 DB `backend/data/trendAnalysis`, `ddl-auto=update` |
 | 벡터 DB | Chroma 내장형(`ai/chroma_data/`). 서버형 전환 기준·방법은 [`features/analysis-pipeline.md`](features/analysis-pipeline.md) |
-| LLM | Claude `claude-sonnet-5`(정형화·답변, 설정 `claude.model`), `claude-haiku-5-5`(질문 해석, 설정 `claude.interpret-model`), 키는 Spring `claude.api.key` |
+| LLM | Claude `claude-sonnet-5-5`(정형화, 설정 `claude.structure-model`), `claude-sonnet-5`(챗봇 답변·도구 경로, 설정 `claude.model`), `claude-haiku-5-5`(질문 해석, 설정 `claude.interpret-model`), 키는 Spring `claude.api.key` |
 | 임베딩 | `Qwen/Qwen3-VL-Embedding-2B`(sentence-transformers, 2048차원, 설정 `EMBEDDING_MODEL`) |
 | 인증 | Spring Security 폼 로그인 + 프로그램(화면) 단위 권한 |
 
@@ -30,7 +30,7 @@
 | P-03 AI 정형화 · P-04 저장·색인 | 구현 | [`features/analysis-pipeline.md`](features/analysis-pipeline.md) |
 | P-05 트렌드 집계 | 구현(주간 언급량·전주/전월 대비·급상승, 트렌드 분석 화면) | [`features/trend-aggregation.md`](features/trend-aggregation.md) |
 | P-06 RAG 검색 | 구현(홈 트렌드 챗봇 — AI 질문 해석·이어 묻기, 유행 질문은 Claude가 집계 도구를 불러 답하고(실패하면 집계 한 번), 그 밖은 근거 검색. 근거 없으면 차단. 만족도 평가는 P-08에서) | [`features/rag-search.md`](features/rag-search.md) |
-| P-07 브리핑 · P-08 로그·KPI | 없음 | — |
+| P-07 브리핑 · P-08 로그·KPI | 챗봇 질문 로그·👍👎만(챗봇 질문 로그 화면). 브리핑·KPI는 없음 | [`features/rag-search.md`](features/rag-search.md) |
 | 화면 프레임워크 · 홈 대시보드 | 구현(탭 셸, 트렌드 집계·분석 현황 카드 + 트렌드 챗봇, `HomeService`) | [`features/screen-framework.md`](features/screen-framework.md) |
 | 로그인·권한 | 구현 | [`features/auth-permission.md`](features/auth-permission.md) |
 | 관리 화면 5종 | 구현 | [`features/admin-screens.md`](features/admin-screens.md) |

@@ -69,7 +69,7 @@ class TrendFactsTermTest {
                 .containsExactly("무스탕", "무스탕 재킷", "무스탕 칼라");
         // 질문 단어가 나온 최근 원문이 예시 원문 앞에 온다
         assertThat(facts.evidenceDocIds()).startsWith("TM-1", "TM-2");
-        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] 무스탕 3건 · 매체 2곳 · 직전 1건(+200%) (나온 표현: "));
+        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] 무스탕 3건 · 출처 2곳 · 직전 1건(+200%) (나온 표현: "));
     }
 
     /** 옷 여러 벌짜리 원문 — garments는 {카테고리, 종류, 이름, 컬러, 실루엣} (컬러·실루엣은 빈 문자열이면 없음). */

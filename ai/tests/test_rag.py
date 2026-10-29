@@ -118,6 +118,20 @@ class RagTest(unittest.TestCase):
         self.assertNotIn("[9]", result["body"])
         self.assertIn("body", rag.build_schema()["required"])
 
+    def test_lines_citing_only_unknown_numbers_are_dropped(self):
+        # 없는 번호만 인용한 줄은 번호만 지우면 "인용 없는 한계 문장"으로 남는다 — 줄째 뺀다(2026-10-29 진단 F2)
+        groups = [{"n": 1, "doc_id": "A", "score": 0.7, "chunks": ["a"]}]
+        result = rag._answer_from({"summary": "요약", "grounded": True, "points": [
+            {"text": "패딩: 블랙이 많다", "sources": [1]},
+            {"text": "레더 재킷: 지어낸 줄", "sources": [9]},
+            {"text": "자료가 적어 참고로만 본다.", "sources": []}],
+            "body": "| 아이템 | 근거 |\n|---|---|\n| 패딩 | [1] |\n| 지어낸 행 | [7] |\n한계 문장."}, groups)
+        self.assertEqual(["패딩: 블랙이 많다", "자료가 적어 참고로만 본다."], [p["text"] for p in result["points"]])
+        self.assertIn("| 패딩 | [1] |", result["body"])
+        self.assertNotIn("지어낸 행", result["body"])
+        self.assertIn("| 아이템 | 근거 |", result["body"])
+        self.assertIn("한계 문장.", result["body"])
+
     def test_only_passed_sources_go_to_claude_and_cited_ones_come_back(self):
         body = json.dumps({"summary": "와이드 팬츠가 많이 보인다.", "grounded": True, "points": [
             {"text": "트랙 팬츠: 블랙 와이드가 반복된다.", "sources": [2, 2, 9]},
@@ -285,6 +299,22 @@ class RagApiTest(unittest.TestCase):
                                json={"question": "  ", "model": "m", "min_score": 0.6})
         self.assertEqual(400, res.status_code)
 
+    def test_brief_writes_sections_and_needs_key(self):
+        # 기획 브리프 — 집계 줄·예시 원문을 받아 8개 구성 JSON. 숫자는 Spring 집계가 그리므로 스키마는 문장 칸뿐이다
+        from app.rag import brief
+        required = brief.SCHEMA["required"]
+        for key in ("summary", "items", "colors", "fit", "materials", "evidence", "proposals", "actions"):
+            self.assertIn(key, required)
+        self.assertFalse(brief.SCHEMA["additionalProperties"])
+        body = {"question": "26FW 기획 브리프", "model": "m", "data": ["[컬러] 블랙 10건"], "sources": [{"n": 1, "title": "t"}]}
+        self.assertEqual(401, self.client.post("/brief", json=body).status_code)
+        with mock.patch.object(main.briefing, "write", return_value={"brief": {"title": "t"}, "usage": {}}) as w:
+            res = self.client.post("/brief", headers={"X-Claude-Api-Key": "secret"}, json=body)
+        self.assertEqual(200, res.status_code)
+        self.assertEqual("t", res.json()["brief"]["title"])
+        self.assertEqual(["[컬러] 블랙 10건"], w.call_args.args[0].data)
+        self.assertIn("[컬러] 블랙 10건", brief.build_content(w.call_args.args[0]))
+
     def test_agent_step_returns_blocks_and_needs_key(self):
         # 도구 경로 한 단계 — Claude 응답 블록을 그대로 돌려준다(도구 실행·반복은 Spring). 도구 3개와 허용 코드가 붙는다
         res = self.client.post("/agent/step", json={"model": "m", "messages": [{"role": "user", "content": "q"}]})
@@ -346,31 +376,70 @@ class InterpretTest(unittest.TestCase):
 
     def test_schema_limits_codes_and_prompt_lists_hints(self):
         schema = self.interpret.build_schema(self.data)
-        self.assertEqual(["", "OUTER", "BOTTOM"], schema["properties"]["category"]["enum"])
-        self.assertNotIn("enum", schema["properties"]["item_type"])  # 종류 코드는 스키마에 다시 싣지 않는다(목록 밖 값은 normalize가 버린다)
+        # enum 없이 이름으로 받는다(2026-10-29 — enum은 값마다 토큰이 든다). 목록 밖 값은 normalize가 버린다
+        self.assertNotIn("enum", schema["properties"]["category"])
+        self.assertNotIn("enum", schema["properties"]["item_type"])
+        self.assertNotIn("question", schema["properties"])  # 앞 대화가 없으면 다시 쓴 질문을 받지 않는다
         system = self.interpret.system_prompt(self.data)
-        self.assertIn("OUTER=아우터(재킷,점퍼)", system[1]["text"])  # 허용 코드 목록은 system 캐시 구간
+        self.assertIn("- category: 아우터(재킷,점퍼), 하의(바지)", system[1]["text"])  # 허용 값은 이름만(영문 코드값 없음)
+        self.assertNotIn("OUTER", system[1]["text"])
         self.assertNotIn("cache_control", system[1])  # 캐시는 걸지 않는다(사용자 결정)
         self.assertNotIn("이어 묻기(<previous>", system[0]["text"])  # 앞 대화가 없으면 이어 묻기 규칙을 보내지 않는다
         with_history = self.interpret.InterpretInput(**{**self.data.__dict__, "history": [self.interpret.Turn("요즘 유행하는 아우터는?", True, "OUTER")]})
         self.assertIn("이어 묻기(<previous>", self.interpret.system_prompt(with_history)[0]["text"])
         content = self.interpret.build_content(self.data)
-        self.assertNotIn("OUTER=아우터", content)
+        self.assertNotIn("아우터(재킷", content)
         self.assertIn("오늘: 2026-10-22 (목요일)", content)
         r = self.interpret.normalize({"trend": True, "category": "", "item_type": "SHOES_SNEAKER", "has_period": False}, self.data)
         self.assertIsNone(r["item_type"])
 
     def test_normalize_item_type_wins_and_bad_periods_are_dropped(self):
         n = self.interpret.normalize
-        r = n({"trend": True, "category": "BOTTOM", "item_type": "OUTER_PADDING", "has_period": True,
-               "period_from": "2026-09-01", "period_to": "2026-09-30", "period_label": "지난달(9월)"}, self.data)
+        data = self.interpret.InterpretInput(**{**self.data.__dict__, "question": "9월에 유행한 패딩은?"})  # 표준 표현이 없으면 모델 기간
+        r = n({"trend": True, "category": "하의", "item_type": "패딩", "period": "2026-09-01~2026-09-30 지난달(9월)"}, data)
         self.assertEqual(("OUTER", "OUTER_PADDING"), (r["category"], r["item_type"]))
         self.assertEqual({"from": "2026-09-01", "to": "2026-09-30", "label": "지난달(9월)", "explicit": True}, r["period"])
-        for bad in (("2026-09-30", "2026-09-01"), ("2026-10-01", "2026-12-31"), ("어제", "오늘")):
-            r = n({"trend": False, "category": "", "item_type": "", "has_period": True,
-                   "period_from": bad[0], "period_to": bad[1], "period_label": "x"}, self.data)
+        for bad in ("2026-09-30~2026-09-01 x", "2026-10-01~2026-12-31 x", "어제~오늘", "2026-09-31~2026-10-01"):
+            r = n({"trend": False, "category": "", "item_type": "", "period": bad}, data)
             self.assertIsNone(r["period"], bad)
             self.assertIsNone(r["category"])
+
+    def test_standard_period_is_computed_by_code(self):
+        # 표준 기간 표현은 코드가 계산한다 — 비교 기준("대비·보다")은 기간이 아니고, 두 해·해+시즌은 모델에 맡긴다
+        p = self.interpret.standard_period
+        self.assertEqual("COMPARE", p("지난달 대비 급상승한 아이템은?", TODAY))
+        self.assertEqual("COMPARE", p("작년보다 늘어난 컬러", TODAY))
+        self.assertEqual(("2026-09-01", "2026-09-30"), (p("지난달은?", TODAY)["from"], p("지난달은?", TODAY)["to"]))
+        self.assertEqual(("2026-10-12", "2026-10-18"), (p("지난주 인기 아이템", TODAY)["from"], p("지난주 인기 아이템", TODAY)["to"]))
+        self.assertEqual("2026-09-23", p("최근 30일 컬러", TODAY)["from"])
+        season = p("26FW 니트 특징은?", TODAY)
+        self.assertEqual(("2026-04-23", "2026-10-22", "최근 6개월(시즌 표현)"), (season["from"], season["to"], season["label"]))
+        self.assertIsNone(p("요즘 유행하는 아우터는?", TODAY))
+        self.assertIsNone(p("올해 F/W랑 작년 F/W 컬러 비교", TODAY))
+        self.assertIsNone(p("작년 F/W 컬러", TODAY))
+        # 비교 기준만 있으면 모델이 기간을 줘도 쓰지 않는다
+        data = self.interpret.InterpretInput(**{**self.data.__dict__, "question": "지난달 대비 급상승한 아이템은?"})
+        r = self.interpret.normalize({"trend": True, "period": "2026-09-01~2026-09-30 지난달", "change": "UP"}, data)
+        self.assertIsNone(r["period"])
+        self.assertEqual("UP", r["change"])
+
+    def test_code_rules_moved_out_of_prompt(self):
+        # 판단이 필요 없는 규칙은 코드가 보장한다(2026-10-29 입력 토큰 최적화)
+        I = self.interpret
+        data = I.InterpretInput(**{**self.data.__dict__, "question": "데님 팬츠 컬러",
+                                   "materials": [I.CodeHint("DENIM", "데님"), I.CodeHint("LEATHER", "레더")],
+                                   "colors": [I.CodeHint("BLACK", "블랙")]})
+        # 패션 외 질문 — 나머지 칸은 비운다
+        r = I.normalize({"fashion": False, "trend": True, "category": "OUTER", "terms": ["밈"], "focus": "COLOR"}, data)
+        self.assertEqual((False, False, None, [], None), (r["fashion"], r["trend"], r["category"], r["terms"], r["focus"]))
+        # 묻는 축의 값·종류 이름에 든 소재는 뺀다
+        r = I.normalize({"trend": True, "item_type": "데님 팬츠", "attributes": ["데님", "레더", "블랙"], "focus": "COLOR"}, data)
+        self.assertEqual(["LEATHER"], r["materials"])
+        self.assertEqual([], r["colors"])
+        # 앞 대화가 없으면 질문 그대로, terms의 축 이름·일반어·카테고리 말은 거른다(대상 이름은 남는다)
+        r = I.normalize({"trend": True, "question": "다르게 쓴 질문", "terms": ["컬러", "유행", "아우터", "재킷", "무스탕", "레더 재킷"]}, data)
+        self.assertEqual("데님 팬츠 컬러", r["question"])
+        self.assertEqual(["무스탕", "레더 재킷"], r["terms"])
 
     def test_seasons_are_optional_and_limited_to_codes(self):
         # 시즌 코드를 받으면 스키마·프롬프트에 넣고 허용 코드만 남긴다. 예전 Spring(시즌 안 보냄)이면 칸이 없다
@@ -379,27 +448,57 @@ class InterpretTest(unittest.TestCase):
             question="26FW 핵심 컬러는?", model="m", today=TODAY, categories=self.data.categories, item_types=self.data.item_types,
             seasons=[self.interpret.CodeHint("SPRING", "봄"), self.interpret.CodeHint("FALL", "가을"), self.interpret.CodeHint("WINTER", "겨울")])
         schema = self.interpret.build_schema(data)
-        self.assertEqual(["SPRING", "FALL", "WINTER"], schema["properties"]["seasons"]["items"]["enum"])
+        self.assertEqual({"type": "array", "items": {"type": "string"}}, schema["properties"]["seasons"])
         self.assertIn("seasons", schema["required"])
-        self.assertIn("- seasons: SPRING=봄, FALL=가을, WINTER=겨울", self.interpret.allowed_values_text(data))
-        r = self.interpret.normalize({"trend": True, "category": "", "item_type": "", "has_period": False,
-                                      "seasons": ["WINTER", "SUMMER", "FALL", "WINTER"]}, data)
+        self.assertIn("- seasons: 봄, 가을, 겨울", self.interpret.allowed_values_text(data))
+        r = self.interpret.normalize({"trend": True, "category": "", "item_type": "",
+                                      "seasons": ["겨울", "여름", "가을", "WINTER"]}, data)
         self.assertEqual(["FALL", "WINTER"], r["seasons"])
+        # 시즌 약어는 코드가 채운다 — "26FW"에 모델이 겨울만 골라도 가을·겨울(목록에 없는 SUMMER는 빠진다)
+        self.assertEqual(["FALL", "WINTER"], self.interpret.normalize({"trend": True, "seasons": ["겨울"]}, data)["seasons"])
+        self.assertEqual(["SPRING"], self.interpret.normalize(
+            {"trend": True, "seasons": []}, self.interpret.InterpretInput(**{**data.__dict__, "question": "27SS 컬러"}))["seasons"])
 
     def test_attribute_filters_are_optional_and_limited_to_codes(self):
         # 대상을 좁히는 속성 값 — 코드를 받으면 칸이 생기고 허용 코드만 남는다. 예전 Spring(안 보냄)이면 칸이 없다
-        self.assertNotIn("silhouettes", self.interpret.build_schema(self.data)["properties"])
+        self.assertNotIn("attributes", self.interpret.build_schema(self.data)["properties"])
         data = self.interpret.InterpretInput(
             question="와이드 팬츠 유행해?", model="m", today=TODAY, categories=self.data.categories, item_types=self.data.item_types,
             silhouettes=[self.interpret.CodeHint("WIDE", "와이드"), self.interpret.CodeHint("CROPPED", "크롭")],
             colors=[self.interpret.CodeHint("BLACK", "블랙")])
         schema = self.interpret.build_schema(data)
-        self.assertEqual({"type": "array", "items": {"type": "string"}}, schema["properties"]["silhouettes"])  # enum 없이 — normalize가 거른다
-        self.assertNotIn("materials", schema["properties"])  # 후보가 없는 칸은 만들지 않는다
-        self.assertIn("- silhouettes: WIDE=와이드, CROPPED=크롭", self.interpret.allowed_values_text(data))
-        r = self.interpret.normalize({"trend": True, "category": "BOTTOM", "item_type": "", "has_period": False,
-                                      "silhouettes": ["SLIM", "WIDE", "WIDE"], "colors": []}, data)
+        # 속성 값은 attributes 한 칸에 이름으로 — normalize가 칸별 코드로 나눈다. 후보가 없는 칸은 목록에 싣지 않는다
+        self.assertEqual({"type": "array", "items": {"type": "string"}}, schema["properties"]["attributes"])
+        text = self.interpret.allowed_values_text(data)
+        self.assertIn("- attributes(실루엣): 와이드, 크롭", text)
+        self.assertNotIn("attributes(소재)", text)
+        r = self.interpret.normalize({"trend": True, "category": "하의", "item_type": "",
+                                      "attributes": ["슬림", "와이드", "WIDE"]}, data)
         self.assertEqual((["WIDE"], [], []), (r["silhouettes"], r["colors"], r["materials"]))
+
+    def test_names_map_to_codes_and_details_list_is_sent_only_when_asked(self):
+        # 이름·괄호 안 같은 뜻 말·코드값 모두 코드값으로. 디테일 목록은 질문에 디테일 말이 있을 때만(종류 이름 속 말은 빼고 본다)
+        I = self.interpret
+        details = [I.CodeHint("NECK_HALF", "하프넥(하이넥·모크넥)"), I.CodeHint("DECO_POCKET", "포켓 강조(카고·패치)"),
+                   I.CodeHint("NECK_HOOD", "후드")]
+        items = self.data.item_types + [I.CodeHint("BOTTOM_CARGO", "카고 팬츠"), I.CodeHint("TOP_HOODIE", "후드티")]
+
+        def data(q):
+            return I.InterpretInput(question=q, model="m", today=TODAY, categories=self.data.categories, item_types=items,
+                                    colors=[I.CodeHint("BLACK", "블랙")], patterns=[I.CodeHint("CHECK", "체크(깅엄·타탄)")],
+                                    details=details)
+        self.assertEqual(["colors", "patterns"], I._attribute_groups(data("요즘 유행하는 아우터는?")))
+        self.assertEqual(["colors", "patterns"], I._attribute_groups(data("카고 팬츠 유행해?")))  # "카고"는 종류 이름 속 말
+        self.assertEqual(["colors", "patterns"], I._attribute_groups(data("후드티 인기야?")))
+        self.assertIn("details", I._attribute_groups(data("모크넥 니트 유행해?")))
+        self.assertIn("details", I._attribute_groups(data("요즘 디테일 트렌드는?")))
+        self.assertNotIn("attributes(디테일)", I.allowed_values_text(data("요즘 유행하는 아우터는?")))
+        r = I.normalize({"trend": True, "category": "바지", "item_type": "숏패딩", "attributes": ["깅엄", "BLACK", "하이넥"]},
+                        data("깅엄 숏패딩"))
+        self.assertEqual(("OUTER", "OUTER_PADDING", ["CHECK"], ["BLACK"]), (r["category"], r["item_type"], r["patterns"], r["colors"]))
+        self.assertEqual([], r["details"])  # 디테일 목록을 안 보냈으면 디테일 값도 받지 않는다
+        r = I.normalize({"trend": True, "category": "바지", "item_type": "", "attributes": ["모크넥"]}, data("모크넥 바지"))
+        self.assertEqual(("BOTTOM", ["NECK_HALF"]), (r["category"], r["details"]))
 
     def test_focus_is_limited_to_axes(self):
         # 묻는 축 — 정해진 값만, 아니면 None
@@ -408,7 +507,7 @@ class InterpretTest(unittest.TestCase):
         self.assertEqual("SILHOUETTE", n({**base, "focus": "SILHOUETTE"}, self.data)["focus"])
         self.assertIsNone(n({**base, "focus": ""}, self.data)["focus"])
         self.assertIsNone(n({**base, "focus": "KEYWORD"}, self.data)["focus"])
-        self.assertEqual([""] + self.interpret.FOCUS, self.interpret.build_schema(self.data)["properties"]["focus"]["enum"])
+        self.assertNotIn("enum", self.interpret.build_schema(self.data)["properties"]["focus"])  # 값 검사는 normalize
 
     def test_change_is_only_for_trend_questions(self):
         # 증감을 묻는지 — 정해진 값만, 유행 질문이 아니면 None
@@ -438,7 +537,7 @@ class InterpretTest(unittest.TestCase):
         content = self.interpret.build_content(data)
         self.assertIn("<previous>", content)
         self.assertLess(content.index("요즘 유행하는 아우터는?"), content.index("지난달 유행한 패딩은?"))  # 마지막이 바로 앞
-        self.assertIn("item_type=OUTER_PADDING, 기간=지난달(9월)(2026-09-01~2026-09-30)", content)
+        self.assertIn("category=아우터, item_type=패딩, 기간=지난달(9월)(2026-09-01~2026-09-30)", content)  # 코드값은 이름으로
         self.assertLess(content.index("</previous>"), content.index("<question>"))
         self.assertNotIn("<previous>", self.interpret.build_content(self.data))  # 앞 대화가 없으면 없다
         self.assertIn("question", self.interpret.build_schema(data)["required"])
@@ -473,14 +572,16 @@ class InterpretTest(unittest.TestCase):
         self.assertTrue(n({"trend": True}, self.data)["fashion"])
 
     def test_interpret_calls_small_model_with_low_effort(self):
-        body = json.dumps({"trend": True, "category": "OUTER", "item_type": "", "has_period": False,
-                           "period_from": "", "period_to": "", "period_label": ""})
+        body = json.dumps({"fashion": True, "trend": True, "category": "아우터", "item_type": "", "period": "", "terms": [],
+                           "focus": "", "change": ""})
         messages = FakeMessages(fake_response(body))
         result = self.interpret.interpret(self.data, "k", client=SimpleNamespace(messages=messages))
         self.assertEqual("claude-haiku-5-5", messages.calls[0]["model"])
         self.assertEqual("low", messages.calls[0]["output_config"]["effort"])
         self.assertTrue(result["trend"])
-        self.assertIsNone(result["period"])
+        self.assertEqual("OUTER", result["category"])  # 이름 → 코드값
+        # 질문의 "지난달"은 모델이 has_period=false로 줘도 코드가 계산한다(표준 기간 표현 — 2026-10-29)
+        self.assertEqual({"from": "2026-09-01", "to": "2026-09-30", "label": "지난달(9월)", "explicit": True}, result["period"])
         self.assertIn("usage", result)
 
     def test_api_requires_key(self):

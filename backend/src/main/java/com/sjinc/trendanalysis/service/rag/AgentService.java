@@ -20,11 +20,12 @@ import org.springframework.stereotype.Service;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -40,7 +41,7 @@ import java.util.stream.Collectors;
  *   <li>도구: count_trend(범위·기간 집계, 축별 상위 top개 + 예시 원문), trend_series(주별 원문 수), final_answer(답 — 형식은 /answer와 같다).</li>
  *   <li>도구 호출 상한 {@code rag.agent.max-tool-calls}(기본 6번, 사용자 결정). 넘으면 지금까지 결과로 답하라고 알린다. 전체 90초 안.</li>
  *   <li>근거 번호 [n]은 도구 결과의 예시 원문에 여기서 붙인다 — 답은 그 번호만 인용할 수 있고, 출처는 그 번호의 원문이다.</li>
- *   <li>실패하면(도구 없이 끝남·시간 초과·AI 오류) empty — RagService가 고정 경로(집계 한 번 + 답변)로 답한다.</li>
+ *   <li>실패하면(도구 없이 끝남·시간 초과·AI 오류) 답 없이 쓴 토큰만 돌려준다 — RagService가 고정 경로(집계 한 번 + 답변)로 답한다.</li>
  * </ul>
  */
 @Slf4j
@@ -53,6 +54,7 @@ public class AgentService {
     static final int DEFAULT_TOP = 10;           // count_trend 축별 상위 개수 기본값 — 제외·다음 순위 질문도 다시 부르지 않고 답하게
     static final int SUMMARY_CHARS = 160;
     static final int MAX_SERIES_WEEKS = 12;
+    static final int MAX_FACT_BOXES = 3;         // 판단 근거 상자 최대 개수(비교 질문은 대상·기간마다 하나)
     private static final DateTimeFormatter MD = DateTimeFormatter.ofPattern("MM/dd");
 
     private final AiClient aiClient;
@@ -76,8 +78,19 @@ public class AgentService {
         this.maxToolCalls = Math.max(1, maxToolCalls);
     }
 
-    /** 도구 경로의 답. facts·period는 첫 count_trend 결과(판단 근거 상자용) — 없으면 null. calls는 조회 기록(로그·화면용). */
-    public record Result(AiClient.AnswerResponse response, TrendFactsService.Facts facts, List<String> calls) {
+    /**
+     * 도구 경로의 답. facts는 판단 근거 상자에 그릴 집계(답이 인용한 원문이 나온 count_trend 결과, 없으면 미리 센 집계) — 없으면 빈 목록.
+     * calls는 조회 기록(로그·화면용). toolResults는 Claude가 읽은 집계 글 전부(미리 센 집계 + 도구 결과) — 답의 수치를 이것과 대조한다.
+     */
+    public record Result(AiClient.AnswerResponse response, List<TrendFactsService.Facts> facts, List<String> calls, List<String> toolResults) {
+    }
+
+    /** 한 번의 실행 — 답(result, 실패면 null)과 쓴 토큰. 실패해도 토큰은 과금되므로 질문 로그에 더한다(2026-10-29 진단). */
+    public record Attempt(Result result, TokenUsage usage) {
+    }
+
+    /** count_trend 한 번(미리 센 집계 포함)의 집계와 그 결과에 실린 예시 원문 번호 — 답이 인용한 집계를 고를 때 쓴다. */
+    private record Counted(TrendFactsService.Facts facts, Set<Integer> ns, boolean prefetched) {
     }
 
     /** 한 번의 실행 상태 — 근거 번호와 원문, 조회 기록. */
@@ -86,7 +99,8 @@ public class AgentService {
         final Map<String, Integer> nByDocId = new LinkedHashMap<>();
         final Map<Integer, String> summaryByN = new LinkedHashMap<>();
         final List<String> calls = new ArrayList<>();
-        TrendFactsService.Facts firstFacts;
+        final List<String> toolResults = new ArrayList<>();
+        final List<Counted> counts = new ArrayList<>();
         TokenUsage usage = TokenUsage.ZERO;
         int toolCalls;
     }
@@ -94,22 +108,26 @@ public class AgentService {
     /**
      * @param scope 질문 해석 범위 — 이 범위를 미리 세어(축별 상위 DEFAULT_TOP개) 첫 메시지에 넣는다. null이면 넣지 않는다.
      */
-    public Optional<Result> run(String question, QuestionInterpreter.Interpretation scope, LocalDate today, String apiKey) {
+    public Attempt run(String question, QuestionInterpreter.Interpretation scope, LocalDate today, String apiKey) {
+        Run run = new Run();
+        return new Attempt(answerWithTools(question, scope, today, apiKey, run), run.usage);
+    }
+
+    private Result answerWithTools(String question, QuestionInterpreter.Interpretation scope, LocalDate today, String apiKey, Run run) {
         long started = System.currentTimeMillis();
         Codes codes = codes();
-        Run run = new Run();
         List<Map<String, Object>> messages = new ArrayList<>();
         try {
             String first = aiClient.agentTask(today.toString()) + "\n\n<question>\n" + question + "\n</question>";
             if (scope != null) {
                 first += "\n\n<prefetched>\n질문 해석 범위로 미리 센 집계(count_trend와 같다 — 이것으로 답할 수 있으면 도구를 더 부르지 않는다):\n"
-                        + countText(scope, today, DEFAULT_TOP, run) + "\n</prefetched>";
+                        + countText(scope, today, DEFAULT_TOP, run, true) + "\n</prefetched>";
             }
             messages.add(Map.of("role", "user", "content", first));
             for (int step = 0; step < MAX_STEPS; step++) {
                 if (System.currentTimeMillis() - started > TIME_LIMIT_MS) {
                     log.warn("도구 경로 시간 초과({}초) — 고정 경로로 답한다. 조회 {}", TIME_LIMIT_MS / 1000, run.calls);
-                    return Optional.empty();
+                    return null;
                 }
                 AiClient.AgentStepResponse response = aiClient.agentStep(codes.request(model, today, messages, step > 0), apiKey);
                 run.usage = run.usage.plus(TokenUsage.of(response.usage()));
@@ -118,7 +136,7 @@ public class AgentService {
                 List<Map<String, Object>> uses = content.stream().filter(b -> "tool_use".equals(b.get("type"))).toList();
                 if (uses.isEmpty()) {
                     log.warn("도구 경로가 final_answer 없이 끝났다(stop={}) — 고정 경로로 답한다", response.stopReason());
-                    return Optional.empty();
+                    return null;
                 }
                 List<Map<String, Object>> results = new ArrayList<>();
                 for (Map<String, Object> use : uses) {
@@ -127,7 +145,8 @@ public class AgentService {
                     if ("final_answer".equals(name)) {
                         log.info("도구 경로 답 — 조회 {}번 {} 근거 원문 {}건 토큰 {} 소요 {}ms", run.toolCalls, run.calls,
                                 run.docIdByN.size(), run.usage, System.currentTimeMillis() - started);
-                        return Optional.of(new Result(answer(input, run), run.firstFacts, List.copyOf(run.calls)));
+                        AiClient.AnswerResponse answer = answer(input, run);
+                        return new Result(answer, usedFacts(run, answer), List.copyOf(run.calls), List.copyOf(run.toolResults));
                     }
                     results.add(Map.of("type", "tool_result", "tool_use_id", String.valueOf(use.get("id")),
                             "content", execute(name, input, today, codes, run)));
@@ -140,7 +159,28 @@ public class AgentService {
         } catch (RuntimeException e) { // 응답 모양이 어긋나도 답은 멈추지 않는다
             log.warn("도구 경로 처리 오류 — 고정 경로로 답한다", e);
         }
-        return Optional.empty();
+        return null;
+    }
+
+    /**
+     * 판단 근거 상자에 그릴 집계 — Claude가 직접 부른 count_trend 중 답이 인용한 원문이 나온 것(부른 순서, 같은 범위·기간은 한 번, 최대
+     * MAX_FACT_BOXES개). 없으면(미리 센 집계로만 답함) 첫 집계. 첫 집계만 그리면 비교·다른 기간 답 아래에 해석 범위("전체") 막대가 나와
+     * 답과 어긋났다(2026-10-29 진단 B1).
+     */
+    private static List<TrendFactsService.Facts> usedFacts(Run run, AiClient.AnswerResponse answer) {
+        Set<Integer> cited = answer.sources() == null ? Set.of()
+                : answer.sources().stream().map(AiClient.AnswerSource::n).collect(Collectors.toSet());
+        List<TrendFactsService.Facts> used = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (Counted c : run.counts) {
+            if (c.prefetched() || c.ns().stream().noneMatch(cited::contains)) continue;
+            TrendFactsService.Facts f = c.facts();
+            if (seen.add(f.scopeLabel() + "|" + f.period().from() + "|" + f.period().to() + "|" + f.change()) && used.size() < MAX_FACT_BOXES) {
+                used.add(f);
+            }
+        }
+        if (used.isEmpty() && !run.counts.isEmpty()) used.add(run.counts.get(0).facts());
+        return used;
     }
 
     @SuppressWarnings("unchecked")
@@ -167,13 +207,14 @@ public class AgentService {
     }
 
     private String countTrend(Map<String, Object> input, LocalDate today, Codes codes, Run run) {
-        return countText(codes.scope(input, today, true), today, input.get("top") instanceof Number n ? n.intValue() : DEFAULT_TOP, run);
+        return countText(codes.scope(input, today, true), today, input.get("top") instanceof Number n ? n.intValue() : DEFAULT_TOP, run, false);
     }
 
-    /** 범위를 세어 Claude가 읽는 글로 — 집계 줄 + 예시 원문([n]). 첫 집계는 판단 근거 상자가 된다. */
-    private String countText(QuestionInterpreter.Interpretation scope, LocalDate today, int top, Run run) {
+    /** 범위를 세어 Claude가 읽는 글로 — 집계 줄 + 예시 원문([n]). 집계와 그 예시 번호는 판단 근거 상자를 고를 때 쓴다(usedFacts). */
+    private String countText(QuestionInterpreter.Interpretation scope, LocalDate today, int top, Run run, boolean prefetched) {
         TrendFactsService.Facts facts = trendFactsService.count(scope, today, top);
-        if (run.firstFacts == null) run.firstFacts = facts;
+        Set<Integer> ns = new HashSet<>();
+        run.counts.add(new Counted(facts, ns, prefetched));
         QuestionInterpreter.Period p = facts.period();
         run.calls.add("집계 " + facts.scopeLabel() + " · " + p.label());
         StringBuilder out = new StringBuilder("집계 기간: " + p.label() + " (" + p.from() + " ~ " + p.to() + ")"
@@ -182,8 +223,9 @@ public class AgentService {
         List<String> examples = facts.evidenceDocIds().stream().limit(EXAMPLES_PER_CALL).toList();
         if (!examples.isEmpty()) {
             out.append("예시 원문(인용할 때 [n]):\n");
-            examples(examples, run).forEach(line -> out.append(line).append('\n'));
+            examples(examples, run, ns).forEach(line -> out.append(line).append('\n'));
         }
+        run.toolResults.add(out.toString().strip());
         return out.toString().strip();
     }
 
@@ -205,13 +247,16 @@ public class AgentService {
         String label = (scope.itemTypeName() != null ? scope.itemTypeName() : scope.categoryName() != null ? scope.categoryName() : "전체")
                 + (value == null ? "" : " · " + codes.name(axis, value));
         run.calls.add("추이 " + label + " " + weeks + "주");
-        return "주별 원문 수(" + label + ", 주는 월요일 시작): " + series.stream()
-                .map(w -> w.weekStart().format(MD) + " 주 " + w.count() + "건" + (w.current() ? "(이번 주, 진행 중)" : ""))
+        // 주마다 전체 원문 수(수집량)를 같이 준다 — 수집량이 늘어난 주는 건수만 보면 모든 값이 늘어난 것처럼 보였다(2026-10-29 진단 C2)
+        String text = "주별 원문 수(" + label + " 건수 / 그 주 전체 분석 원문, 주는 월요일 시작): " + series.stream()
+                .map(w -> w.weekStart().format(MD) + " 주 " + w.count() + "건/전체 " + w.total() + "건" + (w.current() ? "(이번 주, 진행 중)" : ""))
                 .collect(Collectors.joining(" · "));
+        run.toolResults.add(text);
+        return text;
     }
 
-    /** 예시 원문에 근거 번호를 붙인다 — 같은 원문은 같은 번호. "[n] 문서ID · 제목 · 매체 · 날짜 — 요약". */
-    private List<String> examples(List<String> docIds, Run run) {
+    /** 예시 원문에 근거 번호를 붙인다 — 같은 원문은 같은 번호. "[n] 문서ID · 제목 · 매체 · 날짜 — 요약". 붙인 번호는 ns에 모은다. */
+    private List<String> examples(List<String> docIds, Run run, Set<Integer> ns) {
         Map<String, SourceDocument> docs = sourceDocumentRepository.findByDocIdIn(docIds).stream()
                 .collect(Collectors.toMap(SourceDocument::getDocId, Function.identity()));
         Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(docs.values().stream().map(SourceDocument::getId).toList())
@@ -225,6 +270,7 @@ public class AgentService {
                 run.docIdByN.put(next, id);
                 return next;
             });
+            ns.add(n);
             TrendItem item = items.get(doc.getId());
             String summary = item == null || item.getSummary() == null ? "" : item.getSummary();
             if (summary.length() > SUMMARY_CHARS) summary = summary.substring(0, SUMMARY_CHARS) + "…";
@@ -235,7 +281,10 @@ public class AgentService {
         return lines;
     }
 
-    /** final_answer 입력 → /answer 응답과 같은 형식. 인용 번호는 도구 결과에 붙인 번호만 남긴다(나머지는 RagService가 정리). */
+    /**
+     * final_answer 입력 → /answer 응답과 같은 형식. 출처는 도구 결과에 붙인 번호만이다. 줄·본문의 번호는 지우지 않고 그대로 넘긴다 —
+     * 여기서 지우면 지어낸 번호만 단 줄이 "처음부터 인용 없는 줄"이 되어 RagService가 남겼다(2026-10-29 진단 F2). 정리는 RagService가 한다.
+     */
     private AiClient.AnswerResponse answer(Map<String, Object> input, Run run) {
         List<AiClient.AnswerPoint> points = new ArrayList<>();
         if (input.get("points") instanceof List<?> list) {
@@ -244,20 +293,16 @@ public class AgentService {
                 String text = text(p.get("text"));
                 if (text == null) continue;
                 List<Integer> sources = p.get("sources") instanceof List<?> s
-                        ? s.stream().filter(Number.class::isInstance).map(x -> ((Number) x).intValue()).filter(run.docIdByN::containsKey).distinct().toList()
+                        ? s.stream().filter(Number.class::isInstance).map(x -> ((Number) x).intValue()).distinct().toList()
                         : List.of();
                 points.add(new AiClient.AnswerPoint(text, sources));
             }
         }
         String body = RagService.blankBody(text(input.get("body")));
-        java.util.Set<Integer> cited = new java.util.LinkedHashSet<>();
-        points.forEach(p -> cited.addAll(p.sources()));
+        Set<Integer> cited = new java.util.LinkedHashSet<>();
+        points.forEach(p -> p.sources().stream().filter(run.docIdByN::containsKey).forEach(cited::add));
         if (body != null) {
-            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\[(\\d+)]").matcher(body);
-            while (m.find()) {
-                int n = Integer.parseInt(m.group(1));
-                if (run.docIdByN.containsKey(n)) cited.add(n);
-            }
+            RagService.citations(body).stream().filter(run.docIdByN::containsKey).forEach(cited::add);
         }
         List<AiClient.AnswerSource> sources = cited.stream()
                 .map(n -> new AiClient.AnswerSource(n, run.docIdByN.get(n), null, run.summaryByN.getOrDefault(n, ""))).toList();

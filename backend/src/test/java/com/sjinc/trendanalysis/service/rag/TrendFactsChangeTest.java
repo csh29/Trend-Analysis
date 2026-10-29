@@ -104,15 +104,15 @@ class TrendFactsChangeTest {
     void 급상승_질문은_늘어난_값만_증가_폭_순이다() {
         TrendFactsService.Facts facts = count("UP");
         assertThat(facts.dimensions().get(0).rows()).extracting(TrendFactsService.Row::value).containsExactly("OUTER_LEATHER_JACKET");
-        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[정렬] 직전 대비 늘어난 값만"))
-                .anyMatch(l -> l.contains("3건 · 매체 3곳 · 직전 1건(+200%)"));
+        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[정렬] 직전 대비 비중이 늘어난 값만"))
+                .anyMatch(l -> l.contains("3건 · 출처 3곳 · 직전 1건(+200%)"));
     }
 
     @Test
     void 감소_질문은_이번_기간에_사라진_값도_넣는다() {
         TrendFactsService.Facts facts = count("DOWN");
         assertThat(facts.dimensions().get(0).rows()).extracting(TrendFactsService.Row::value).containsExactly("OUTER_TRENCH");
-        assertThat(facts.lines()).anyMatch(l -> l.contains("0건 · 매체 0곳 · 직전 2건(-100%)"));
+        assertThat(facts.lines()).anyMatch(l -> l.contains("0건 · 출처 0곳 · 직전 2건(-100%)"));
         assertThat(facts.evidenceDocIds()).isNotEmpty(); // 상위 값에 이번 기간 원문이 없어도 범위의 최근 원문을 근거로 준다
     }
 }

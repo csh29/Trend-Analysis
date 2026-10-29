@@ -20,7 +20,8 @@ import java.time.LocalDateTime;
  * 출처(media·publishedAt)는 필수다 — 비면 정형화 결과를 저장하지 않는다(RAG 답변의 근거 표시가 이 값을 쓴다).
  */
 @Entity
-@Table(name = "source_documents")
+// 챗봇 집계는 상태·게시일 기간으로, 분석 결과 조회는 상태·게시일 순으로 읽는다
+@Table(name = "source_documents", indexes = @jakarta.persistence.Index(columnList = "status, published_at"))
 @Getter
 @NoArgsConstructor
 @AllArgsConstructor

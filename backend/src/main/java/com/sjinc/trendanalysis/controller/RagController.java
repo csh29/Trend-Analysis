@@ -29,11 +29,28 @@ import java.nio.charset.StandardCharsets;
 public class RagController {
 
     private final RagService ragService;
+    private final com.sjinc.trendanalysis.service.rag.RagLogService ragLogService;
+    private final com.sjinc.trendanalysis.service.rag.BriefService briefService;
 
     /** 질문 한 건에 답한다(요청 시 실시간 — 검색·Claude 답변까지 수 초~수십 초). 앞 대화는 이어 묻기 해석에만 쓴다. */
     @PostMapping("/ask")
-    public RagAnswerView ask(@RequestBody RagQuestionRequest request) {
-        return ragService.ask(request.question(), request.history());
+    public com.sjinc.trendanalysis.dto.rag.RagAskResponse ask(@RequestBody RagQuestionRequest request, java.security.Principal principal) {
+        long started = System.currentTimeMillis();
+        com.sjinc.trendanalysis.service.rag.RagService.Answered answered = ragService.answer(request.question(), request.history());
+        Long logId = ragLogService.record(principal.getName(), answered.view(), answered.usage(), System.currentTimeMillis() - started);
+        return new com.sjinc.trendanalysis.dto.rag.RagAskResponse(answered.view(), logId);
+    }
+
+    /** 기획 브리프(PPT용) — 질문 범위를 여러 갈래로 세고 Claude가 8개 구성의 서술을 쓴다(수십 초, Claude 비용이 든다). */
+    @PostMapping("/brief")
+    public com.sjinc.trendanalysis.dto.rag.BriefView brief(@RequestBody RagQuestionRequest.Brief request) {
+        return briefService.build(request.question());
+    }
+
+    /** 답 아래 👍👎 — 질문한 사람만. value는 UP·DOWN, 없으면 지운다. */
+    @PostMapping("/feedback")
+    public void feedback(@RequestBody RagQuestionRequest.Feedback request, java.security.Principal principal) {
+        ragLogService.feedback(request.logId(), request.value(), principal.getName());
     }
 
     /** 이미지 출처 보기(홈 오른쪽 슬라이드 패널). 분석이 끝난 이미지 원문만 열린다. */

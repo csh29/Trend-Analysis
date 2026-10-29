@@ -305,6 +305,8 @@ public class DataInitializer implements CommandLineRunner {
         addIfAbsent(added, "user-permission-mng", "사용자별 권한관리", "🔑", 3, "Y", "N", "Y", "N", "Y");
         addIfAbsent(added, "com-cd-master-mng", "공통코드마스터 관리", "▦", 4, "Y", "Y", "Y", "Y", "Y");
         addIfAbsent(added, "com-cd-mng", "공통코드 관리", "☰", 5, "Y", "Y", "Y", "Y", "Y");
+        // 챗봇 질문 로그(2026-10-29 사용자 요청) — 조회만
+        addIfAbsent(added, "rag-log", "챗봇 질문 로그", "💬", 6, "Y", "N", "N", "N", "Y");
         if (!added.isEmpty()) {
             log.info("관리 프로그램 {}개를 등록했습니다: {}", added.size(), added.stream().map(Program::getProgramId).toList());
         }

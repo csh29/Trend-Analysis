@@ -28,11 +28,13 @@ public class AnalysisResultController {
 
     private final AnalysisResultService analysisResultService;
 
-    /** 조회 조건: 카테고리·아이템 종류 코드(없으면 전체). */
+    /** 조회 조건: 카테고리·아이템 종류 코드(없으면 전체). page는 0부터, size는 기본 100·최대 500. */
     @GetMapping
-    public List<AnalysisResultRow> search(@RequestParam(required = false) String category,
-                                          @RequestParam(required = false) String itemType) {
-        return analysisResultService.search(category, itemType);
+    public com.sjinc.trendanalysis.dto.analysis.AnalysisResultPage search(@RequestParam(required = false) String category,
+                                                                         @RequestParam(required = false) String itemType,
+                                                                         @RequestParam(defaultValue = "0") int page,
+                                                                         @RequestParam(defaultValue = "100") int size) {
+        return analysisResultService.search(category, itemType, page, size);
     }
 
     /** 행의 사진 — 이미지 업로드 권한 없이도 이 화면에서 보이게 따로 연다(분석이 끝난 원문만). */

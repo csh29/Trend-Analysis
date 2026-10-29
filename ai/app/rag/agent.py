@@ -34,7 +34,7 @@ _SCOPE = {
 }
 TOOLS = [
     {"name": "count_trend",
-     "description": "범위의 원문을 세어 축별 상위 값(유행점수 순 — 원문 수·매체 수·직전 기간 대비 증감률·유행점수)과 예시 원문을 돌려준다. "
+     "description": "범위의 원문을 세어 축별 상위 값(유행점수 순 — 원문 수·출처 수·직전 기간 대비 증감률·유행점수)과 예시 원문을 돌려준다. "
                     "period가 없으면 최근 4주, seasons를 주면 그 시즌 원문만. focus를 주면 그 축이 첫 축이다. top은 축마다 받을 값 개수(기본 10).",
      "input_schema": {"type": "object", "properties": {
          **_SCOPE,
@@ -45,7 +45,8 @@ TOOLS = [
          "top": {"type": "integer", "minimum": 1, "maximum": 15},
      }}},
     {"name": "trend_series",
-     "description": "범위 안에서 값 하나(axis + value, 없으면 범위 전체)의 주별 원문 수를 최근 weeks주 동안 센다.",
+     "description": "범위 안에서 값 하나(axis + value, 없으면 범위 전체)의 주별 원문 수를 최근 weeks주 동안 센다. "
+                    "주마다 그 주 전체 분석 원문 수도 준다 — 수집량이 다른 주끼리는 건수가 아니라 전체 대비 비율로 비교한다.",
      "input_schema": {"type": "object", "properties": {
          **_SCOPE,
          "axis": {"type": "string", "enum": interpret.FOCUS, "description": "센 값의 축(value와 함께)"},
@@ -70,7 +71,7 @@ class AgentStepInput:
 def system_prompt(data: AgentStepInput) -> list[dict]:
     parts = [PROMPT["system"], rag.PROMPT["system"], rag.PROMPT["system_trend"]]
     if data.hints is not None:
-        parts.append(interpret.allowed_values_text(data.hints))
+        parts.append(interpret.code_values_text(data.hints))
     block = {"type": "text", "text": "\n\n".join(parts)}
     if data.cache:  # 캐시 순서는 tools → system이라 이 표시 하나로 도구 정의까지 캐시된다
         block["cache_control"] = {"type": "ephemeral"}

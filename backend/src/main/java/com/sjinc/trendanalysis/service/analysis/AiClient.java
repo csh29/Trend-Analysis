@@ -177,6 +177,26 @@ public class AiClient {
     }
 
     /** P-06 질문 해석(작은 모델). 실패하면 RagService가 규칙으로 대신한다. */
+    /** 기획 브리프 서술 — data는 집계 줄, sources는 예시 원문 요약. */
+    public record BriefRequest(String question, String model, String today, List<String> data, List<BriefSource> sources) {
+    }
+
+    public record BriefSource(int n, String title, String media, String date, String summary) {
+    }
+
+    /** brief는 8개 구성 JSON(title·season·summary·items·colors·fit·materials·evidence·proposals·actions). */
+    public record BriefResponse(Map<String, Object> brief, Map<String, Object> usage) {
+    }
+
+    public BriefResponse brief(BriefRequest request, String apiKey) {
+        return call(() -> restClient.post().uri("/brief")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Claude-Api-Key", apiKey)
+                .body(request)
+                .retrieve()
+                .body(BriefResponse.class));
+    }
+
     public InterpretResponse interpret(InterpretRequest request, String apiKey) {
         return call(() -> restClient.post().uri("/interpret")
                 .contentType(MediaType.APPLICATION_JSON)

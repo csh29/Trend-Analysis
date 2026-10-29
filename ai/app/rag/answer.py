@@ -2,7 +2,7 @@
 
 두 갈래(mode):
 - TREND(유행 질문): 유행 = 많이 입어 대중화된 것(2026-10-22 사용자 정의)이라 문장 유사도로 고르지 않는다. Spring이 센 집계
-  (아이템 종류·소재·컬러·실루엣별 원문 수·매체 수·직전 기간 대비)와, 집계 상위 값이 나온 예시 원문(doc_id)을 받아 답한다.
+  (아이템 종류·소재·컬러·실루엣별 원문 수·출처 수·직전 기간 대비)와, 집계 상위 값이 나온 예시 원문(doc_id)을 받아 답한다.
   예시 원문은 Chroma에서 doc_id로 꺼낸다.
 - SEARCH(그 밖의 질문): 질문을 임베딩해 비슷한 청크를 찾는다. 유사도 = 1 - 코사인 거리.
   - 기준 유사도(min_score) 이상인 근거가 없으면 Claude를 부르지 않고 "근거 없음"(정의서 P-06 규칙).
@@ -125,7 +125,7 @@ class AnswerInput:
     evidence_doc_ids: list[str] = field(default_factory=list)  # TREND: 집계 상위 값이 나온 예시 원문
 
 
-CITE = re.compile(r"\[(\d+)\]")
+CITE = re.compile(r"\[(\d{1,6})\]")
 
 
 def build_schema() -> dict:
@@ -238,17 +238,34 @@ def _call_claude(data: AnswerInput, content: str, api_key: str, client, groups: 
     return parse_json(response, usage), usage
 
 
+def _clean_body(body: str, by_n: dict) -> str:
+    """본문의 없는 [n]을 지우고, 인용한 번호가 모두 없는 번호인 줄은 줄째 뺀다 — 번호만 지우면 지어낸 인용으로 쓴 문장이
+    근거 없이 남았다(2026-10-29 진단 F2). 처음부터 번호가 없는 줄(표 머리·한계 문장)은 둔다."""
+    kept = []
+    for line in body.splitlines():
+        cited = [int(n) for n in CITE.findall(line)]
+        if cited and not any(n in by_n for n in cited):
+            log.info("인용 번호가 모두 없는 번호라 본문 줄을 뺍니다(인용 %s)", cited)
+            continue
+        kept.append(CITE.sub(lambda m: m.group(0) if int(m.group(1)) in by_n else "", line))
+    return "\n".join(kept).strip()
+
+
 def _answer_from(result: dict, groups: list[dict]) -> dict:
-    """줄마다 근거 번호를 정리한다(없는 번호·중복 제거). 출처 목록은 줄들이 인용한 번호를 처음 나온 순서로."""
+    """줄마다 근거 번호를 정리한다(없는 번호·중복 제거). 출처 목록은 줄들이 인용한 번호를 처음 나온 순서로.
+    인용한 번호가 모두 없는 번호인 줄은 뺀다 — 번호만 지우면 Spring이 "처음부터 인용 없는 한계 문장"으로 보고 남겼다(2026-10-29 진단 F2)."""
     by_n = {g["n"]: g for g in groups}
     points = []
     for point in result.get("points") or []:
         text = (point.get("text") or "").strip()
+        cited = list(dict.fromkeys(point.get("sources") or []))
+        valid = [n for n in cited if n in by_n]
+        if cited and not valid:
+            log.info("인용 번호가 모두 없는 번호라 줄을 뺍니다(인용 %s): %s", cited, text)
+            continue
         if text:
-            points.append({"text": text, "sources": [n for n in dict.fromkeys(point.get("sources") or []) if n in by_n]})
-    # 본문의 [n] — 없는 번호는 지운다(지어낸 인용이 화면에 남지 않게)
-    body = (result.get("body") or "").strip()
-    body = CITE.sub(lambda m: m.group(0) if int(m.group(1)) in by_n else "", body)
+            points.append({"text": text, "sources": valid})
+    body = _clean_body((result.get("body") or "").strip(), by_n)
     body_cites = [int(n) for n in CITE.findall(body)]
     cited = [by_n[n] for n in dict.fromkeys([n for p in points for n in p["sources"]] + body_cites)]
     grounded = bool(result.get("grounded")) and bool(cited)

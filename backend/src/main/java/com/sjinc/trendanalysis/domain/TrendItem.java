@@ -60,6 +60,8 @@ public class TrendItem {
     @Builder.Default
     @OneToMany(mappedBy = "trendItem", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("valueType asc, sortOrder asc")
+    // 원문 여러 건의 값을 읽을 때(챗봇 집계·분석 결과 조회) 원문마다 한 번씩 조회하지 않고 100건씩 묶어 읽는다
+    @org.hibernate.annotations.BatchSize(size = 100)
     private List<TrendItemValue> values = new ArrayList<>();
 
     /** 문서 단위 값(키워드). */

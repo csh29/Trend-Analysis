@@ -131,6 +131,11 @@
             border-radius:4px 16px 16px 16px; padding:14px 18px; display:flex; flex-direction:column; gap:12px; }
         .msg.bot.is-error .bubble{ border-color:#f6c6d2; background:#fff7f9; }
         .bubble-head{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+        .brief-btn{ margin-top:8px; border:1px solid var(--line); background:var(--card, #fff); border-radius:6px; padding:3px 10px; cursor:pointer; font-size:12px; }
+        .brief-btn:hover{ border-color:var(--accent); }
+        .feedback{ display:flex; align-items:center; gap:4px; margin-top:8px; font-size:11.5px; color:var(--text-sub); }
+        .feedback button{ border:1px solid var(--line); background:var(--card, #fff); border-radius:12px; padding:1px 8px; cursor:pointer; font-size:12px; }
+        .feedback button.on{ border-color:var(--accent); background:#fff0f4; }
         .bubble-head .interp{ font-size:11.5px; color:var(--text-sub); }
         /* 이어 묻기를 앞 대화로 채워 다시 쓴 질문 — 무엇으로 찾았는지 보이게 */
         .resolved{ font-size:12px; color:var(--text-sub); margin-top:-4px; }
@@ -244,6 +249,7 @@
         .facts-box .delta.down{ color:var(--text-sub); }
         .facts-box .delta.new{ padding:0 5px; border-radius:4px; background:var(--accent-soft); color:var(--accent); font-size:10px; }
         .facts-box .one-media{ color:#b8860b; font-size:11px; }
+        .facts-box .facts-note{ font-size:11px; color:#b8860b; margin:2px 0 4px; }
         .facts-box .bar-sub{ font-size:11px; color:var(--text-sub); margin:-2px 0 2px 12px; }
         /* 대상별 포인트 묶음 — 같은 대상 이름으로 시작하는 줄들의 소제목 */
         .point-group{ font-size:13.5px; font-weight:800; color:var(--navy); margin-bottom:-4px; }
@@ -377,7 +383,7 @@
                     <div class="chat-welcome" id="chatWelcome">
                         <span class="avatar">AI</span>
                         <div class="hello">무엇이 유행하는지 물어보세요</div>
-                        <div class="desc">유행 질문은 원문 수·매체 수를 세서, 코디·특징 질문은 비슷한 자료를 찾아 답하고 출처를 붙입니다.</div>
+                        <div class="desc">유행 질문은 원문 수·출처 수를 세서, 코디·특징 질문은 비슷한 자료를 찾아 답하고 출처를 붙입니다.</div>
                         <div class="suggests">
                             <button type="button" class="suggest">요즘 유행하는 아우터는?</button>
                             <button type="button" class="suggest">요즘 많이 보이는 컬러는?</button>
@@ -415,6 +421,7 @@
     </div>
 </aside>
 
+<script src="/js/pptx-writer.js"></script>
 <script src="/js/tabs.js"></script>
 <script>
     // 카드의 "… ›" 버튼 — 같은 화면의 사이드바 메뉴를 대신 눌러 탭 동작(tabs.js)을 그대로 쓴다.
@@ -1019,12 +1026,22 @@
         }
 
         /**
-         * 막대 오른쪽 수치 — "9건 ▲6"처럼 건수와 직전 대비 증감만(직전 0건이면 NEW), 매체가 한 곳이면 "1개 매체" 경고.
-         * "9건 · 매체 4곳 · 직전 3건"을 다 쓰면 두 줄로 꺾여 읽기 어려웠다 — 전체 수치는 막대에 마우스를 올리면 보인다(2026-10-26 사용자 결정).
+         * 막대 오른쪽 수치 — "9건 ▲6"처럼 건수와 직전 대비 증감만(직전 0건이면 NEW), 출처가 한 곳이면 "1개 출처" 경고.
+         * 출처 수(mediaCount)는 유행점수와 같은 기준이다 — 직접 업로드는 원문마다 다른 출처.
+         * "9건 · 출처 4곳 · 직전 3건"을 다 쓰면 두 줄로 꺾여 읽기 어려웠다 — 전체 수치는 막대에 마우스를 올리면 보인다(2026-10-26 사용자 결정).
          */
-        function factsNum(r, change) {
+        function factsNum(r, facts) {
             const diff = r.count - r.prevCount;
-            if (change) { // 증감 질문은 증감률(서버가 계산한 값)을 앞에, 건수는 뒤에 작게
+            if (facts.change && facts.prevDocCount > 0) {
+                // 증감 질문은 비중 변화(%p)를 앞에 — 서버가 비중 변화 순으로 골랐다. 건수 증감률은 수집량 변화가 섞인다(2026-10-29 진단 C2)
+                const num = el('span', 'num');
+                num.appendChild(r.prevCount === 0 ? el('b', 'delta new', 'NEW')
+                    : el('b', 'delta ' + (r.shareDelta > 0 ? 'up' : 'down'), (r.shareDelta > 0 ? '▲' : '▼') + Math.abs(r.shareDelta) + '%p'));
+                // 좁은 화면에서 막대가 밀려 사라지지 않게 짧게 — "비중"은 마우스를 올리면 보이는 전체 수치에 있다
+                num.appendChild(el('span', 'one-media', r.prevShare + '→' + r.share + '%'));
+                return num;
+            }
+            if (facts.change) { // 직전 원문이 없으면 비중을 비교할 수 없어 건수로
                 const num = el('span', 'num');
                 num.appendChild(r.prevCount === 0 ? el('b', 'delta new', 'NEW')
                     : el('b', 'delta ' + (diff > 0 ? 'up' : 'down'), (diff > 0 ? '▲' : '▼') + r.rate.replace(/^[+-]/, '')));
@@ -1035,34 +1052,40 @@
             if (r.prevCount === 0) num.appendChild(el('b', 'delta new', 'NEW'));
             else if (diff > 0) num.appendChild(el('b', 'delta up', '▲' + diff));
             else if (diff < 0) num.appendChild(el('b', 'delta down', '▼' + (-diff)));
-            if (r.mediaCount === 1) num.appendChild(el('span', 'one-media', '· 1개 매체')); // 한 매체만 — 대중화로 보기 어렵다
+            if (r.mediaCount === 1) num.appendChild(el('span', 'one-media', '· 1개 출처')); // 한 출처만 — 대중화로 보기 어렵다
             return num;
         }
+
+        const BAR_ROWS = 5;
 
         /** 유행 질문의 판단 근거: 범위·기간·원문 수·매체 수, 주 축은 막대(건수·직전 대비, 전체 수치는 마우스를 올리면). */
         function factsBox(facts, period) {
             const box = el('div', 'facts-box');
             box.appendChild(el('div', 'facts-head', '판단 근거 — ' + facts.scopeLabel
                 + (period ? ' · ' + period.label + ' ' + period.from + ' ~ ' + period.to : '')
-                + ' · 원문 ' + facts.docCount + '건 · 매체 ' + facts.mediaCount + '곳 (직전 ' + facts.prevDocCount + '건)'));
+                + ' · 원문 ' + facts.docCount + '건 · 출처 ' + facts.mediaCount + '곳 (직전 ' + facts.prevDocCount + '건)'));
+            // 수집량이 직전과 크게 다르면 건수 증감이 유행 변화가 아니다 — 비중을 보라고 알린다(서버가 판단, TrendFactsService.volumeNote)
+            if (facts.volumeNote) box.appendChild(el('div', 'facts-note', '수집량 주의: ' + facts.volumeNote));
             // 묻는 축(첫 축)만 막대로 — 나머지 축 줄은 답 본문과 겹쳐 보이지 않는다(사용자 결정).
             // Claude에게 어떤 축을 보내는지는 TrendFactsService.lines()가 정한다
             const d = (facts.dimensions || [])[0];
             if (d) {
                 const bars = el('div', 'bars');
-                // 막대 길이는 유행점수(순서의 기준), 증감 질문은 건수 — 증감 순이라 첫 행이 가장 크지 않다
-                const size = function (r) { return facts.change ? r.count : r.score; };
-                const max = d.rows.reduce(function (m, r) { return Math.max(m, size(r)); }, 0);
-                d.rows.forEach(function (r) {
+                // 막대 길이는 유행점수(순서의 기준), 증감 질문은 비중 변화 폭(직전 원문이 없으면 건수) — 순서의 기준과 맞춘다
+                const size = function (r) { return !facts.change ? r.score : facts.prevDocCount > 0 ? Math.abs(r.shareDelta) : r.count; };
+                const shown = d.rows.slice(0, BAR_ROWS); // 판단 근거는 10개까지 오고(브리프 엑셀용) 막대는 상위 5개만
+                const max = shown.reduce(function (m, r) { return Math.max(m, size(r)); }, 0);
+                shown.forEach(function (r) {
                     const row = el('div', 'bar-row');
                     const cap = el('span', 'cap', r.label);
                     cap.title = r.label;
                     const track = el('span', 'track');
                     const fill = el('i', 'fill');
                     fill.style.width = (max ? size(r) * 100 / max : 0) + '%';
-                    track.append(fill, factsNum(r, facts.change));
+                    track.append(fill, factsNum(r, facts));
                     row.append(cap, track);
-                    row.title = r.label + ' — 유행점수 ' + r.score + ' · ' + r.count + '건 · 매체 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건 (' + r.rate + ')';
+                    row.title = r.label + ' — 유행점수 ' + r.score + ' · ' + r.count + '건 · 출처 ' + r.mediaCount + '곳 · 직전 ' + r.prevCount + '건 (' + r.rate + ')'
+                        + ' · 비중 ' + r.share + '% (직전 ' + r.prevShare + '%)';
                     bars.appendChild(row);
                     // 기타 묶음은 그 안의 아이템명 상위를 막대 아래에 — "기타 아우터"만으로는 무엇인지 모른다
                     if (r.names && r.names.length) bars.appendChild(el('div', 'bar-sub', '└ ' + r.names.join(' · ')));
@@ -1075,7 +1098,7 @@
 
         function metaText(view) {
             const p = view.period;
-            if (view.facts) return '유행 판단은 원문 수·매체 수 집계 기준 · 출처는 그 집계의 예시 원문';
+            if (view.facts) return '유행 판단은 원문 수·출처 수 집계 기준 · 출처는 그 집계의 예시 원문';
             let periodText = '';
             if (p && p.explicit) periodText = '기간 ' + p.label + ' ' + p.from + ' ~ ' + p.to + ' · ';
             else if (p && p.from) periodText = '근거 게시일 ' + p.from + ' ~ ' + p.to + ' (최근 자료 우선) · ';
@@ -1187,7 +1210,14 @@
                 });
             }
             if (view.body) bubble.appendChild(renderBody(view.body, sourcesByN, prefix));
+            // 답의 수치 중 집계에서 찾지 못한 것 — Claude가 옮겨 쓰다 틀렸을 수 있다. 판단 근거 막대(서버가 센 값)를 기준으로 보게 한다
+            if (view.unverifiedNumbers && view.unverifiedNumbers.length) {
+                bubble.appendChild(el('div', 'period-notice', '집계에서 확인되지 않은 수치가 있습니다(' + view.unverifiedNumbers.join(', ')
+                    + '). 아래 판단 근거의 수치를 기준으로 보세요.'));
+            }
             if (view.facts) bubble.appendChild(factsBox(view.facts, view.period));
+            // 비교·다른 기간 답은 인용한 집계마다 상자를 그린다 — 주 상자 하나만 그리면 답과 막대가 어긋났다
+            (view.moreFacts || []).forEach(function (f) { bubble.appendChild(factsBox(f, f.period)); });
             if (view.sources.length) {
                 const box = el('div', 'answer-sources');
                 const list = el('ol');
@@ -1197,6 +1227,302 @@
                 bubble.appendChild(box);
             }
             bubble.appendChild(el('div', 'meta', metaText(view)));
+        }
+
+        /** 증감 구분 — 직전 0건이면 신규, 늘면 상승, 줄면 하락. */
+        function trendMark(r) {
+            if (r.prevCount === 0) return r.count > 0 ? '신규' : '-';
+            return r.count > r.prevCount ? '상승' : r.count < r.prevCount ? '하락' : '유지';
+        }
+
+        /**
+         * 기획 브리프 PPT(사용자 요청 — 8개 구성) — /api/rag/brief가 질문 범위를 여러 갈래로 세고 Claude가 서술(brief)을 쓴다.
+         * 차트·건수·출처 분포는 서버 집계로 그린다. 유행점수·축별 상위표는 넣지 않는다(사용자 결정 — 실무에 필요한 정보만).
+         */
+        const NAVY = '1F3864';
+        const ACCENT = 'E8456B';
+        const SOFT = 'F3F5FA';
+        /** 컬러 칩 — 공통코드 컬러 이름 → RGB. 없는 이름(멀티컬러 등)은 회색. */
+        const COLOR_HEX = { '블랙': '111111', '화이트': 'FFFFFF', '아이보리': 'F4EFE1', '그레이': '9A9A9A', '베이지': 'D8C3A5',
+            '브라운': '7B5236', '카키': '6B6B3A', '네이비': '1F2A4A', '블루': '2F6FD1', '스카이블루': '8EC5F0', '그린': '3C8D4F',
+            '레드': 'C8102E', '버건디': '7A1F2B', '핑크': 'F2A6C0', '퍼플': '7D4FA0', '옐로우': 'F2C94C', '오렌지': 'EE7B30' };
+
+        function slideHead(no, text) {
+            return [
+                { type: 'text', x: 0.5, y: 0.3, w: 12.3, h: 0.75, paragraphs: [{ text: (no ? no + '. ' : '') + text, size: 26, bold: true, color: NAVY }] },
+                { type: 'text', x: 0.55, y: 1.02, w: 1.2, h: 0.06, fill: ACCENT, paragraphs: [] }
+            ];
+        }
+
+        /** 제목 붙은 글 상자(목록). items가 문자열이면 문단 하나. */
+        function textBox(x, y, w, h, heading, items, opts) {
+            opts = opts || {};
+            const list = Array.isArray(items) ? items : (items ? [items] : []);
+            const paragraphs = heading ? [{ text: heading, size: 14, bold: true, color: NAVY }] : [];
+            (list.length ? list : ['자료가 부족하다']).forEach(function (t) {
+                paragraphs.push({ text: t, size: opts.size || 13, bullet: Array.isArray(items) });
+            });
+            return { type: 'text', x: x, y: y, w: w, h: h, fill: opts.fill, paragraphs: paragraphs };
+        }
+
+        /** 가로 막대 차트 — 값 이름·막대·"N건 · 상승" 꼬리표. 기타 묶음은 뺀다(순위 항목이 아니다). */
+        function barChart(x, y, w, rows, opts) {
+            opts = opts || {};
+            const shown = (rows || []).filter(function (r) { return !/^기타/.test(r.label); }).slice(0, opts.limit || 6);
+            const rowH = opts.rowH || 0.42;
+            const labelW = opts.labelW || 1.9;
+            const tailW = 1.45;
+            const barMax = Math.max(0.3, w - labelW - tailW);
+            const max = shown.reduce(function (m, r) { return Math.max(m, r.count); }, 0) || 1;
+            const out = [];
+            if (opts.heading) out.push({ type: 'text', x: x, y: y - 0.45, w: w, h: 0.4, paragraphs: [{ text: opts.heading, size: 14, bold: true, color: NAVY }] });
+            shown.forEach(function (r, i) {
+                const yy = y + i * rowH;
+                out.push({ type: 'text', x: x, y: yy, w: labelW, h: rowH, paragraphs: [{ text: r.label.replace(/\(.*\)$/, ''), size: 11 }] });
+                out.push({ type: 'text', x: x + labelW, y: yy + rowH * 0.22, w: Math.max(0.05, barMax * r.count / max), h: rowH * 0.56,
+                    fill: opts.color || NAVY, paragraphs: [] });
+                const mark = trendMark(r);
+                out.push({ type: 'text', x: x + labelW + barMax + 0.05, y: yy, w: tailW, h: rowH, paragraphs: [{ size: 10,
+                    color: mark === '상승' || mark === '신규' ? ACCENT : '666666',
+                    text: r.count + '건' + (opts.share ? ' · ' + opts.share(r) : '') + (mark !== '유지' && mark !== '-' ? ' · ' + mark : '') }] });
+            });
+            if (!shown.length) out.push({ type: 'text', x: x, y: y, w: w, h: 0.5, paragraphs: [{ text: '자료가 부족하다', size: 11, color: '888888' }] });
+            return out;
+        }
+
+        function dimension(data, label) {
+            const d = (data.dimensions || []).find(function (x) { return x.label === label; });
+            return d ? d.rows : [];
+        }
+
+        /** 출처 사진을 받아 JPEG로(최대 1200px) — 파워포인트가 webp 등을 못 읽을 수 있어 한 형식으로 맞춘다. 실패하면 null. */
+        function jpegOf(url) {
+            return fetch(url, { silent: true }).then(function (res) {
+                if (!res.ok) throw new Error();
+                return res.blob();
+            }).then(function (blob) {
+                return new Promise(function (resolve, reject) {
+                    const img = new Image();
+                    const objectUrl = URL.createObjectURL(blob);
+                    img.onload = function () {
+                        const scale = Math.min(1, 1200 / Math.max(img.width, img.height));
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.round(img.width * scale);
+                        canvas.height = Math.round(img.height * scale);
+                        const ctx = canvas.getContext('2d');
+                        ctx.fillStyle = '#fff';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        URL.revokeObjectURL(objectUrl);
+                        canvas.toBlob(function (out) {
+                            if (!out) return reject(new Error());
+                            out.arrayBuffer().then(function (buf) {
+                                resolve({ data: new Uint8Array(buf), w: canvas.width, h: canvas.height });
+                            });
+                        }, 'image/jpeg', 0.85);
+                    };
+                    img.onerror = function () { URL.revokeObjectURL(objectUrl); reject(new Error()); };
+                    img.src = objectUrl;
+                });
+            }).catch(function () { return null; });
+        }
+
+        /** 사진을 칸(boxW × boxH) 안에 비율 그대로 + 아래 설명. */
+        function photoCells(photos, images, x0, y0, cols, boxW, boxH) {
+            const out = [];
+            images.forEach(function (img, i) {
+                if (!img) return;
+                const s = photos[i];
+                const col = i % cols, row = Math.floor(i / cols);
+                const x = x0 + col * (boxW + 0.25), y = y0 + row * (boxH + 0.75);
+                const ratio = Math.min(boxW / img.w, boxH / img.h);
+                out.push({ type: 'image', data: img.data, x: x + (boxW - img.w * ratio) / 2, y: y, w: img.w * ratio, h: img.h * ratio });
+                out.push({ type: 'text', x: x, y: y + boxH + 0.02, w: boxW, h: 0.6, paragraphs: [{ size: 9, color: '555555',
+                    text: [s.title, s.media, s.statDate].filter(Boolean).join(' · ') }] });
+            });
+            return out;
+        }
+
+        function briefSlides(data, images, photos) {
+            const b = data.brief || {};
+            const sum = b.summary || {}, items = b.items || {}, colors = b.colors || {}, fit = b.fit || {}, mat = b.materials || {};
+            const ev = b.evidence || {}, prop = b.proposals || {}, act = b.actions || {};
+            const p = data.period || {};
+            const day = new Date();
+            const today = day.getFullYear() + '-' + String(day.getMonth() + 1).padStart(2, '0') + '-' + String(day.getDate()).padStart(2, '0');
+            const share = function (r) { return data.docCount ? Math.round(r.count / data.docCount * 100) + '%' : '-'; };
+            const slides = [];
+
+            // 표지
+            slides.push({ elements: [
+                { type: 'text', x: 0, y: 0, w: 13.333, h: 3.0, fill: NAVY, paragraphs: [] },
+                { type: 'text', x: 0.7, y: 0.9, w: 12, h: 1.3, paragraphs: [{ text: b.title || '트렌드 기획 브리프', size: 36, bold: true, color: 'FFFFFF' }] },
+                { type: 'text', x: 0.7, y: 2.1, w: 12, h: 0.6, paragraphs: [{ text: b.season || data.scopeLabel, size: 18, color: 'DDE3F0' }] },
+                { type: 'text', x: 0.7, y: 3.6, w: 12, h: 2.6, paragraphs: [
+                    { text: '분석 기간  ' + (p.label || '') + ' (' + p.from + ' ~ ' + p.to + ')', size: 14, color: '555555' },
+                    { text: '분석 범위  ' + data.scopeLabel, size: 14, color: '555555' },
+                    { text: '분석 자료  원문 ' + data.docCount + '건 · 출처 ' + data.mediaCount + '곳', size: 14, color: '555555' },
+                    { text: '질문  ' + data.question, size: 14, color: '555555' },
+                    { text: '작성  ' + today + ' · 트렌드 챗봇(트렌드 관측 기반 — 판매 자료 아님)', size: 12, color: '888888' }] }
+            ] });
+
+            // 1. 기획 개요 및 핵심 요약
+            slides.push({ elements: slideHead(1, '기획 개요 및 핵심 요약').concat([
+                textBox(0.5, 1.3, 6.4, 5.6, '핵심 트렌드', (sum.trends || []).map(function (t, i) { return (i + 1) + '. ' + t; }).length
+                    ? (sum.trends || []).map(function (t, i) { return (i + 1) + '. ' + t; }) : [], { size: 15 }),
+                textBox(7.2, 1.3, 5.6, 2.3, '가장 주목할 변화', sum.change, { fill: SOFT, size: 14 }),
+                textBox(7.2, 3.8, 5.6, 3.1, '상품 기획 시사점', sum.implications || [])
+            ]) });
+
+            // 2. 핵심 아이템 트렌드 — 카테고리별 막대
+            const groups = (data.itemsByCategory || []).slice(0, 3);
+            const colW = 12.3 / Math.max(1, groups.length);
+            let itemEls = slideHead(2, '핵심 아이템 트렌드');
+            groups.forEach(function (g, i) {
+                itemEls = itemEls.concat(barChart(0.5 + i * colW, 1.85, colW - 0.3, g.rows, { heading: g.category, limit: 5, labelW: 1.6 }));
+            });
+            itemEls.push(textBox(0.5, 4.25, 12.3, 0.9, null, items.insight, { size: 13 }));
+            itemEls.push(textBox(0.5, 5.15, 12.3, 1.9, '눈여겨볼 아이템', items.highlights || [], { fill: SOFT }));
+            slides.push({ elements: itemEls });
+
+            // 3. 핵심 컬러 — 컬러칩 + 비중 + 대표 아이템
+            const colorRows = dimension(data, '컬러').filter(function (r) { return !/^기타/.test(r.label); }).slice(0, 8);
+            let colorEls = slideHead(3, '핵심 컬러 분석');
+            colorRows.forEach(function (r, i) {
+                const x = 0.5 + (i % 4) * 3.1, y = 1.4 + Math.floor(i / 4) * 1.55;
+                colorEls.push({ type: 'text', x: x, y: y, w: 0.9, h: 0.9, fill: COLOR_HEX[r.label] || 'BBBBBB', paragraphs: [] });
+                const mark = trendMark(r);
+                colorEls.push({ type: 'text', x: x + 1.0, y: y - 0.05, w: 2.0, h: 1.3, paragraphs: [
+                    { text: r.label + '  ' + share(r), size: 13, bold: true },
+                    { text: (mark === '유지' || mark === '-' ? '' : mark + ' · ') + r.rate, size: 10, color: mark === '상승' || mark === '신규' ? ACCENT : '666666' },
+                    { text: (r.items || []).slice(0, 2).map(function (n) { return n.replace(/ \d+건$/, ''); }).join('·'), size: 10, color: '555555' }] });
+            });
+            colorEls.push(textBox(0.5, 4.6, 6.1, 2.5, '컬러별 활용 아이템', [colors.insight].concat(colors.highlights || []).filter(Boolean)));
+            colorEls.push(textBox(6.9, 4.6, 5.9, 2.5, '컬러 조합·배색 방향', colors.combos || [], { fill: SOFT }));
+            colorEls.push({ type: 'text', x: 0.5, y: 7.05, w: 12.3, h: 0.35, paragraphs: [{ text: '비중 = 그 컬러가 나온 원문 ÷ 범위 원문(겹쳐 세서 합이 100%를 넘을 수 있다)', size: 9, color: '888888' }] });
+            slides.push({ elements: colorEls });
+
+            // 4. 핏·실루엣 및 디자인 디테일
+            slides.push({ elements: slideHead(4, '핏·실루엣 및 디자인 디테일')
+                .concat(barChart(0.5, 1.85, 4.1, dimension(data, '실루엣'), { heading: '핏·실루엣', color: '4A6FA5' }))
+                .concat(barChart(4.9, 1.85, 4.1, dimension(data, '디테일'), { heading: '디자인 디테일', color: '4A6FA5' }))
+                .concat([
+                    textBox(9.3, 1.3, 3.5, 2.9, '핏 변화', [fit.insight].concat(fit.fits || []).filter(Boolean), { size: 12 }),
+                    textBox(0.5, 4.75, 6.1, 2.3, '디테일', fit.details || [], { size: 12 }),
+                    textBox(6.9, 4.75, 5.9, 2.3, '아이템별 핏·디자인 조합', fit.combos || [], { fill: SOFT, size: 12 })]) });
+
+            // 5. 소재·패턴 분석
+            slides.push({ elements: slideHead(5, '소재·패턴 분석')
+                .concat(barChart(0.5, 1.85, 4.1, dimension(data, '소재'), { heading: '소재', color: '7B5236' }))
+                .concat(barChart(4.9, 1.85, 4.1, dimension(data, '패턴'), { heading: '패턴', color: '7B5236' }))
+                .concat([
+                    textBox(9.3, 1.3, 3.5, 2.9, '요약', mat.insight, { size: 12 }),
+                    textBox(0.5, 4.75, 4.0, 2.3, '소재별 관심·활용', mat.materials || [], { size: 12 }),
+                    textBox(4.7, 4.75, 4.0, 2.3, '패턴 변화', mat.patterns || [], { size: 12 }),
+                    textBox(8.9, 4.75, 3.9, 2.3, '소재 × 아이템', mat.pairings || [], { fill: SOFT, size: 12 })]) });
+
+            // 6. 데이터 근거 및 출처 분석
+            const mixRows = (data.sourceMix || []).map(function (m) { return { label: m.name, count: m.count, prevCount: m.count }; });
+            slides.push({ elements: slideHead(6, '데이터 근거 및 출처 분석').concat([
+                textBox(0.5, 1.3, 4.0, 1.9, '분석 자료', [
+                    '기간: ' + p.from + ' ~ ' + p.to + ' (' + (p.label || '') + ')',
+                    '원문: ' + data.docCount + '건 · 출처 ' + data.mediaCount + '곳',
+                    '직전 같은 길이 기간: ' + data.prevDocCount + '건'], { fill: SOFT, size: 12 })])
+                .concat(barChart(4.8, 1.75, 4.4, mixRows, { heading: '출처 분포(원문 수)', limit: 7, labelW: 2.3, color: '888888' }))
+                .concat([
+                    textBox(9.4, 1.3, 3.4, 4.0, '주의사항', ev.cautions || [], { size: 11 }),
+                    { type: 'text', x: 0.5, y: 5.4, w: 12.3, h: 1.6, paragraphs: [
+                        { text: '읽는 법', size: 12, bold: true, color: NAVY },
+                        { text: '일반 사용자 이미지는 업로드한 게시물(인스타 등), 매체명은 패션 매체 기사다. 같은 유행이라도 일반 사용자에게 넓게 보이는지, 매체가 집중해 다루는지 구분해 본다.', size: 11 },
+                        { text: '근거 원문과 사진은 마지막 레퍼런스 장에 있다.', size: 11 }] }]) });
+
+            // 7. 상품 기획 제안
+            slides.push({ elements: slideHead(7, '상품 기획 제안').concat([
+                textBox(0.5, 1.3, 6.1, 2.6, '우선 검토할 아이템', prop.priority_items || [], { fill: SOFT }),
+                textBox(6.9, 1.3, 5.9, 2.6, '추천 컬러·소재·핏 조합', prop.combos || []),
+                textBox(0.5, 4.1, 6.1, 1.5, '기본 상품 · 트렌드 상품 구성', prop.basic_vs_trend),
+                textBox(6.9, 4.1, 5.9, 1.5, '추가 조사·테스트가 필요한 상품', prop.tests || []),
+                textBox(0.5, 5.8, 12.3, 1.3, '근거와 불확실성', (prop.uncertainty ? prop.uncertainty + ' ' : '')
+                    + '판매·재고·원가 자료 없이 트렌드 관측으로 세운 가설이다.', { fill: 'FFF4F6', size: 12 })]) });
+
+            // 8. 실행 과제 및 결론
+            slides.push({ elements: slideHead(8, '실행 과제 및 결론').concat([
+                textBox(0.5, 1.3, 6.1, 2.8, '먼저 검토할 상품·디자인 방향', act.review || [], { fill: SOFT }),
+                textBox(6.9, 1.3, 5.9, 2.8, '추가로 수집할 데이터', act.data_needed || []),
+                textBox(0.5, 4.3, 6.1, 2.8, '후속 분석 과제', act.followups || []),
+                textBox(6.9, 4.3, 5.9, 2.8, '기획 담당자 확인 사항', act.checks || [], { fill: SOFT })]) });
+
+            // 부록 — 레퍼런스(사진·원문)
+            let refEls = slideHead(null, '부록 · 레퍼런스').concat(photoCells(photos, images, 0.5, 1.35, 4, 2.85, 2.0));
+            const texts = (data.sources || []).filter(function (s) { return !s.imageUrl; });
+            if (texts.length) {
+                refEls.push(textBox(0.5, images.some(Boolean) ? 6.0 : 1.35, 12.3, images.some(Boolean) ? 1.3 : 5.5, '기사 원문',
+                    texts.map(function (s) { return [s.title, s.media, s.statDate, s.url].filter(Boolean).join(' · '); }), { size: 10 }));
+            }
+            slides.push({ elements: refEls });
+            return { slides: slides, today: today };
+        }
+
+        function downloadBrief(view, button) {
+            const question = (view.interpretation && view.interpretation.resolvedQuestion) || view.question;
+            const label = button.textContent;
+            button.disabled = true;
+            button.textContent = '브리프 작성 중… (30초~1분)';
+            fetch('/api/rag/brief', {
+                method: 'POST', silent: true, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question: question })
+            }).then(function (res) {
+                if (!res.ok) return res.text().then(function (m) { throw new Error(m || '브리프를 만들지 못했습니다.'); });
+                return res.json();
+            }).then(function (data) {
+                const photos = (data.sources || []).filter(function (s) { return s.imageUrl; }).slice(0, 8);
+                return Promise.all(photos.map(function (s) { return jpegOf(s.imageUrl); })).then(function (images) {
+                    const built = briefSlides(data, images, photos);
+                    PptxWriter.download('기획브리프_' + built.today.replace(/-/g, '') + '.pptx', built.slides);
+                });
+            }).catch(function (err) {
+                alert(err.message || '브리프를 만들지 못했습니다.');
+            }).finally(function () {
+                button.disabled = false;
+                button.textContent = label;
+            });
+        }
+
+        /** 유행 질문 답 아래 "기획 브리프 PPT" — 집계(판단 근거)가 있는 답만. 누를 때마다 Claude를 한 번 부른다. */
+        function addBriefButton(bubble, view) {
+            if (!view.grounded || !view.facts) return;
+            const b = el('button', 'brief-btn', '📊 기획 브리프 PPT');
+            b.type = 'button';
+            b.title = '이 질문 범위로 8개 구성의 기획 브리프(핵심 요약·아이템·컬러·핏·소재·근거·제안·실행 과제)를 PPT로 받습니다. 30초~1분 걸립니다';
+            b.addEventListener('click', function () { downloadBrief(view, b); });
+            bubble.appendChild(b);
+        }
+
+        /** 답 아래 👍👎 — 질문 로그에 남긴다(관리 화면 "챗봇 질문 로그"). 다시 누르면 지운다. */
+        function addFeedback(bubble, logId) {
+            if (!logId) return;
+            const box = el('div', 'feedback', '이 답이 도움이 됐나요?');
+            // 대괄호 둘이 붙으면 Thymeleaf 인라인 문법으로 읽힌다 — 배열을 나눠 쓴다
+            const up = ['UP', '👍'];
+            const down = ['DOWN', '👎'];
+            [up, down].forEach(function (pair) {
+                const b = el('button', null, pair[1]);
+                b.type = 'button';
+                b.title = pair[0] === 'UP' ? '도움이 됐어요' : '아쉬워요';
+                b.addEventListener('click', function () {
+                    const value = b.classList.contains('on') ? null : pair[0];
+                    fetch('/api/rag/feedback', {
+                        method: 'POST', silent: true, headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ logId: logId, value: value })
+                    }).then(function (res) {
+                        if (!res.ok) throw new Error();
+                        box.querySelectorAll('button').forEach(function (x) { x.classList.remove('on'); });
+                        if (value) b.classList.add('on');
+                    }).catch(function () { alert('피드백을 저장하지 못했습니다.'); });
+                });
+                box.appendChild(b);
+            });
+            bubble.appendChild(box);
         }
 
         function renderError(msg, bubble, message, question) {
@@ -1242,6 +1568,8 @@
                 })
                 .then(function (view) {
                     renderAnswer(bubble, view);
+                    addBriefButton(bubble, view);
+                    if (view.reason !== 'OFF_TOPIC') addFeedback(bubble, view.logId);
                     remember(view);
                 })
                 .catch(function (err) { renderError(msg, bubble, err.message, question); })

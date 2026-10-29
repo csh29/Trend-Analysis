@@ -64,7 +64,8 @@ public class AnalysisService {
                            ObjectMapper objectMapper, TransactionTemplate transactionTemplate,
                            ApplicationEventPublisher eventPublisher,
                            @Value("${claude.api.key:}") String apiKey,
-                           @Value("${claude.model:claude-sonnet-5}") String model,
+                           // 정형화만 따로 정한다 — 챗봇(claude.model)과 나눠 바꿀 수 있게(2026-10-29 사용자 결정: 정형화만 Sonnet 5.5로)
+                           @Value("${claude.structure-model:claude-sonnet-5-5}") String model,
                            @Value("${ai.analysis.max-attempts:3}") int maxAttempts) {
         this.sourceDocumentRepository = sourceDocumentRepository;
         this.trendItemRepository = trendItemRepository;

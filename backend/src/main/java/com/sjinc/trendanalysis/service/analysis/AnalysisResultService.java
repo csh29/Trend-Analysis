@@ -5,6 +5,7 @@ import com.sjinc.trendanalysis.domain.SourceDocument;
 import com.sjinc.trendanalysis.domain.TrendItem;
 import com.sjinc.trendanalysis.domain.TrendItemValue;
 import com.sjinc.trendanalysis.domain.UploadedImage;
+import com.sjinc.trendanalysis.dto.analysis.AnalysisResultPage;
 import com.sjinc.trendanalysis.dto.analysis.AnalysisResultRow;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
@@ -27,14 +28,15 @@ import java.util.stream.Collectors;
 /**
  * 분석 결과 조회 화면(2026-10-29 사용자 요청) — 분석이 끝난 원문의 정형 결과를 사진과 함께 본다.
  * 조회 조건(카테고리·아이템 종류)에 맞는 의류 아이템이 있는 원문만, 값은 그 아이템들의 값만 보인다(키워드는 원문 단위).
+ * 거르기·정렬(최근 게시일)·페이지는 DB가 한다 — 원문이 많아져도 한 페이지만 읽는다.
  */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class AnalysisResultService {
 
-    /** 한 번에 보이는 원문 상한(최근 것부터) — 데이터가 많아지면 페이지 나누기를 붙인다. */
-    static final int MAX_ROWS = 1000;
+    static final int DEFAULT_PAGE_SIZE = 100;
+    static final int MAX_PAGE_SIZE = 500;
 
     private final SourceDocumentRepository sourceDocumentRepository;
     private final TrendItemRepository trendItemRepository;
@@ -42,10 +44,13 @@ public class AnalysisResultService {
     private final ComCdRepository comCdRepository;
     private final ImageService imageService;
 
-    public List<AnalysisResultRow> search(String category, String itemType) {
+    public AnalysisResultPage search(String category, String itemType, int page, int size) {
         String cat = blank(category);
         String type = blank(itemType);
-        List<SourceDocument> docs = sourceDocumentRepository.findByStatus(SourceDocument.DONE);
+        int pageSize = size <= 0 ? DEFAULT_PAGE_SIZE : Math.min(size, MAX_PAGE_SIZE);
+        org.springframework.data.domain.Page<SourceDocument> found = sourceDocumentRepository.findAnalyzed(cat, type,
+                org.springframework.data.domain.PageRequest.of(Math.max(0, page), pageSize));
+        List<SourceDocument> docs = found.getContent();
         Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(docs.stream().map(SourceDocument::getId).toList()).stream()
                 .collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
         Map<String, String> categoryNames = names(TrendCodes.CATEGORY);
@@ -54,12 +59,9 @@ public class AnalysisResultService {
         Map<String, String> patternNames = names(TrendCodes.PATTERN);
         Map<String, String> silhouetteNames = names(TrendCodes.SILHOUETTE);
 
-        List<SourceDocument> hits = docs.stream()
-                .filter(d -> items.containsKey(d.getId()))
-                .sorted(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getId, Comparator.reverseOrder()))
-                .toList();
+        List<SourceDocument> hits = docs.stream().filter(d -> items.containsKey(d.getId())).toList(); // 순서는 DB(최근 게시일부터)
         Map<Long, Long> textImages = firstAttachments(hits);
-        return hits.stream()
+        List<AnalysisResultRow> rows = hits.stream()
                 .map(doc -> {
                     TrendItem item = items.get(doc.getId());
                     List<TrendItem.Garment> garments = item.garments().stream()
@@ -76,8 +78,8 @@ public class AnalysisResultService {
                             values(garments, TrendItem.Garment::silhouettes, silhouetteNames));
                 })
                 .filter(Objects::nonNull)
-                .limit(MAX_ROWS)
                 .toList();
+        return new AnalysisResultPage(rows, found.getNumber(), pageSize, found.getTotalElements());
     }
 
     /** 행의 사진 — 이미지 원문은 그 사진, 텍스트 원문은 첫 첨부 사진. 분석이 끝난 원문만 연다. */

@@ -181,7 +181,7 @@ class AnalysisServiceTest {
         SourceDocument doc = textDocument();
         when(aiClient.structure(any(), any())).thenAnswer(invocation -> {
             AiClient.StructureRequest request = invocation.getArgument(0);
-            assertThat(request.model()).isEqualTo("claude-sonnet-5");
+            assertThat(request.model()).isEqualTo("claude-sonnet-5-5"); // 정형화는 claude.structure-model(기본 Sonnet 5.5) — claude.model과 따로
             assertThat(request.allowed().materials()).anyMatch(o -> o.value().equals("LEATHER") && o.name().contains("가죽"));
             assertThat(request.text()).contains("레더 재킷");
             return response(validResult());

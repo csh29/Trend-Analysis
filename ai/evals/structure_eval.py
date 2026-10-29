@@ -34,7 +34,7 @@ GOLD = AI_DIR / "evals" / "structure_gold.json"
 GOLD_DIR = AI_DIR / "evals" / "gold"
 RESULTS = AI_DIR / "evals" / "results"
 BACKEND = AI_DIR.parent / "backend"
-MODEL = "claude-sonnet-5"
+MODEL = "claude-sonnet-5-5"  # 실제 정형화와 같게(Spring claude.structure-model)
 ATTRS = ("materials", "colors", "silhouettes", "genders", "patterns", "details")  # genders·patterns는 정답에 칸이 있는 아이템만 채점한다
 
 

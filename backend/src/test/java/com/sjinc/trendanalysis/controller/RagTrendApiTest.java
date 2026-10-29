@@ -7,6 +7,7 @@ import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
 import com.sjinc.trendanalysis.repository.TrendItemRepository;
 import com.sjinc.trendanalysis.service.analysis.AiCallException;
 import com.sjinc.trendanalysis.service.analysis.AiClient;
+import com.sjinc.trendanalysis.service.rag.RagService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -54,6 +55,8 @@ class RagTrendApiTest {
     private SourceDocumentRepository sourceDocumentRepository;
     @Autowired
     private TrendItemRepository trendItemRepository;
+    @Autowired
+    private RagService ragService;
 
     private static boolean seeded;
 
@@ -105,6 +108,25 @@ class RagTrendApiTest {
 
     @Test
     @WithMockUser(username = "admin")
+    void 기획_브리프는_집계를_여러_갈래로_세고_서술은_Claude가_쓴다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.brief(any(), eq("test-key"))).thenReturn(new AiClient.BriefResponse(
+                Map.of("title", "아우터 브리프"), Map.of("input_tokens", 1000, "output_tokens", 500)));
+
+        mockMvc.perform(post("/api/rag/brief").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 기획 브리프 만들어줘")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.brief.title").value("아우터 브리프"))
+                .andExpect(jsonPath("$.docCount").value(4))
+                .andExpect(jsonPath("$.sourceMix").isArray())
+                .andExpect(jsonPath("$.itemsByCategory.length()").value(1)); // 범위가 아우터 하나면 그 카테고리만
+
+        ArgumentCaptor<AiClient.BriefRequest> sent = ArgumentCaptor.forClass(AiClient.BriefRequest.class);
+        verify(aiClient).brief(sent.capture(), eq("test-key"));
+        assertThat(sent.getValue().data()).anyMatch(l -> l.startsWith("[출처 분포]")); // 숫자는 집계가 준다
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
     void 유행_질문은_도구로_집계를_불러_인용한_원문으로_답한다() throws Exception {
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
@@ -122,7 +144,8 @@ class RagTrendApiTest {
                 .andExpect(jsonPath("$.interpretation.by").value("AGENT"))
                 .andExpect(jsonPath("$.points[0].sources.length()").value(1)) // 도구 결과에 없는 [9]는 빠진다
                 .andExpect(jsonPath("$.sources.length()").value(1))
-                .andExpect(jsonPath("$.facts.docCount").value(4));         // 판단 근거는 첫 집계
+                .andExpect(jsonPath("$.facts.docCount").value(4))          // 판단 근거는 답이 인용한 원문이 나온 집계
+                .andExpect(jsonPath("$.unverifiedNumbers").isEmpty());     // "3건"·"2곳"은 도구 결과에 있다
 
         ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
         verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
@@ -134,6 +157,53 @@ class RagTrendApiTest {
         assertThat(steps.getAllValues().get(0).cache()).isFalse(); // 캐시는 둘째 단계부터
         assertThat(steps.getAllValues().get(1).cache()).isTrue();
         verify(aiClient, org.mockito.Mockito.never()).answer(any(), any()); // 지금 경로는 부르지 않는다
+    }
+
+    /** 도구 경로 한 단계 응답 — count_trend 또는 final_answer 하나. */
+    private static AiClient.AgentStepResponse toolUse(String id, String name, Map<String, Object> input) {
+        return new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", id, "name", name, "input", input)),
+                Map.of("input_tokens", 100, "output_tokens", 20));
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 비교_답은_인용한_집계마다_판단_근거를_그리고_지어낸_인용_줄과_수치를_가린다() throws Exception {
+        // 번호: 미리 센 아우터 집계 RT-1·RT-2·RT-4 → [1][2][3], 데님 재킷 집계에서 RT-3 → [4]
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
+                toolUse("t1", "count_trend", Map.of("item_type", "OUTER_DENIM_JACKET")),
+                toolUse("t2", "count_trend", Map.of("item_type", "OUTER_PADDING")),
+                toolUse("t3", "final_answer", Map.of("summary", "최근 4주 데님 재킷이 패딩보다 많다(전체 9건)", "grounded", true, "body", "",
+                        "points", List.of(Map.of("text", "데님 재킷: 3건", "sources", List.of(4)),
+                                Map.of("text", "패딩: 1건", "sources", List.of(3)),
+                                Map.of("text", "지어낸 줄", "sources", List.of(9))))));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("데님 재킷이랑 패딩 비교해줘")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.points.length()").value(2))                  // [9]만 인용한 줄은 빠진다
+                .andExpect(jsonPath("$.facts.scopeLabel").value("아우터 · 데님 재킷(트러커)")) // 미리 센 "아우터"가 아니라 답이 쓴 집계
+                .andExpect(jsonPath("$.facts.docCount").value(3))
+                .andExpect(jsonPath("$.moreFacts[0].scopeLabel").value("아우터 · 패딩(숏패딩·푸퍼·패딩 점퍼)"))
+                .andExpect(jsonPath("$.moreFacts[0].period.label").value("최근 4주"))
+                .andExpect(jsonPath("$.unverifiedNumbers[0]").value("9건"))     // 어느 집계에도 없는 수치
+                .andExpect(jsonPath("$.unverifiedNumbers.length()").value(1));
+    }
+
+    @Test
+    void 도구_경로가_실패해도_쓴_토큰을_질문_토큰에_더한다() {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(new AiClient.AgentStepResponse("end_turn",
+                List.of(Map.of("type", "text", "text", "도구 없이 끝남")), Map.of("input_tokens", 100, "output_tokens", 10)));
+        when(aiClient.answer(any(), any())).thenReturn(grounded("RT-1"));
+
+        RagService.Answered answered = ragService.answer("요즘 아우터 뭐 입어?", List.of());
+
+        assertThat(answered.view().grounded()).isTrue();          // 고정 경로로 답했다
+        assertThat(answered.usage().input()).isGreaterThanOrEqualTo(100); // 실패한 도구 경로 토큰이 빠지지 않는다
+        assertThat(answered.usage().output()).isGreaterThanOrEqualTo(10);
     }
 
     @Test
@@ -178,8 +248,8 @@ class RagTrendApiTest {
         AiClient.AnswerRequest request = sent.getValue();
         assertThat(request.mode()).isEqualTo(AiClient.AnswerRequest.TREND);
         assertThat(request.category()).isEqualTo("OUTER");
-        assertThat(request.trendFacts()).anyMatch(l -> l.startsWith("대상: 아우터 · 원문 4건 · 매체 2곳 (직전 기간 원문 1건, +300%)"))
-                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷(트러커) 유행점수 2.5 · 3건 · 매체 2곳 · 직전 1건(+200%) / 패딩"));
+        assertThat(request.trendFacts()).anyMatch(l -> l.startsWith("대상: 아우터 · 원문 4건 · 출처 2곳 (직전 기간 원문 1건, +300%)"))
+                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷(트러커) 유행점수 2.5 · 3건 · 출처 2곳 · 직전 1건(+200%) · 비중 75%(직전 100%, -25%p) / 패딩"));
         // 예시 원문: 상위 종류마다 최근 2건 — 데님 재킷(RT-1·RT-2), 패딩(RT-4). 하의·실패·직전 기간 원문은 빠진다
         assertThat(request.evidenceDocIds()).containsExactly("RT-1", "RT-2", "RT-4");
     }

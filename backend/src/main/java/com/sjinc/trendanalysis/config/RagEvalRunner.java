@@ -65,8 +65,10 @@ public class RagEvalRunner implements ApplicationRunner {
             row.put("question", text);
             long started = System.currentTimeMillis();
             try {
-                RagAnswerView view = ragService.ask(text, history);
+                RagService.Answered answeredNow = ragService.answer(text, history);
+                RagAnswerView view = answeredNow.view();
                 row.put("answer", view);
+                row.put("toolResults", answeredNow.toolResults()); // 채점이 답의 수치를 도구 결과와 대조한다
                 answered.put(id, new Turned(text, view));
             } catch (RuntimeException e) {
                 row.put("error", e.getMessage()); // 한 문항이 실패해도 나머지는 돈다

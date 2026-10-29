@@ -1,6 +1,8 @@
 package com.sjinc.trendanalysis.repository;
 
 import com.sjinc.trendanalysis.domain.SourceDocument;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -52,4 +54,26 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
 
     /** 분석 로그의 대기·처리 중 건수. */
     long countByStatus(String status);
+
+    /**
+     * 분석 결과 조회 화면 — 분석 완료 원문 중 카테고리·아이템 종류(없으면 전체)에 맞는 의류 아이템이 있는 것, 최근 게시일부터 페이지로.
+     * 아이템 배열 이전 결과(garment_no 없음)는 문서 카테고리로 본다.
+     */
+    @Query(value = """
+            SELECT d.* FROM source_documents d
+            WHERE d.status = 'DONE' AND EXISTS (
+                SELECT 1 FROM trend_items t JOIN trend_item_values v ON v.trend_item_id = t.trend_item_id
+                WHERE t.document_id = d.document_id
+                  AND (:category IS NULL OR v.category = :category OR (v.garment_no IS NULL AND t.category = :category))
+                  AND (:itemType IS NULL OR (v.value_type = 'ITEM_TYPE' AND v.item_value = :itemType)))
+            ORDER BY d.published_at DESC, d.document_id DESC""",
+            countQuery = """
+            SELECT COUNT(*) FROM source_documents d
+            WHERE d.status = 'DONE' AND EXISTS (
+                SELECT 1 FROM trend_items t JOIN trend_item_values v ON v.trend_item_id = t.trend_item_id
+                WHERE t.document_id = d.document_id
+                  AND (:category IS NULL OR v.category = :category OR (v.garment_no IS NULL AND t.category = :category))
+                  AND (:itemType IS NULL OR (v.value_type = 'ITEM_TYPE' AND v.item_value = :itemType)))""",
+            nativeQuery = true)
+    Page<SourceDocument> findAnalyzed(@Param("category") String category, @Param("itemType") String itemType, Pageable pageable);
 }

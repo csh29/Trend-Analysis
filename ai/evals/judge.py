@@ -42,8 +42,9 @@ def api_key() -> str:
     raise SystemExit("application-local.properties에 claude.api.key가 없습니다.")
 
 
-def evidence_text(answer: dict) -> str:
-    """채점 모델에 줄 근거 — 해석·기간·판단 근거 집계·출처."""
+def evidence_text(answer: dict, tool_results: list | None = None) -> str:
+    """채점 모델에 줄 근거 — 해석·기간·판단 근거 집계·도구 조회 결과·출처. 도구 경로 답은 화면의 판단 근거(첫 집계 상위 5개)보다
+    많은 집계(상위 10개·다른 기간·주별 추이)를 읽고 답하므로, 그 글(toolResults)을 같이 줘야 "지어낸 수치"로 잘못 채점하지 않는다."""
     lines = []
     interp = answer.get("interpretation") or {}
     lines.append(f"해석: 패션={interp.get('fashion')} 유행={interp.get('trend')} 카테고리={interp.get('categoryName')} "
@@ -65,6 +66,8 @@ def evidence_text(answer: dict) -> str:
             lines.append(f"  [{d.get('label')}] " + " / ".join(rows))
         for t in facts.get("terms") or []:
             lines.append(f"  [질문 단어] {t['term']} {t['count']}건·매체 {t['mediaCount']}곳 (나온 표현: {', '.join(t.get('expressions') or [])})")
+    for i, text in enumerate(tool_results or [], 1):
+        lines.append(f"도구 조회 결과 {i}(답이 읽은 집계 — 이 수치도 근거다):\n{text}")
     for s in answer.get("sources") or []:
         chunk = (s.get("chunk") or "").replace("\n", " / ")[:CHUNK_CHARS]
         lines.append(f"출처 [{s['n']}] {s.get('title')} · {s.get('media')} · {s.get('statDate')}: {chunk}")
@@ -80,6 +83,8 @@ def answer_text(answer: dict) -> str:
     for p in answer.get("points") or []:
         refs = ", ".join(f"[{n}]" for n in p.get("sources") or [])
         lines.append(f"- {p['text']} {refs}".rstrip())
+    if answer.get("body"):  # 자유 형식 본문(표·목록) — [n]이 출처 번호다
+        lines.append(answer["body"])
     return "\n".join(lines)
 
 
@@ -114,7 +119,7 @@ def judge_one(key: str, question: dict, row: dict, common: list[str]) -> tuple[l
         return attach(verdicts, requirements), {}
     answer = row["answer"]
     req_text = "\n".join(f"{i}. ({kind}) {text}" for i, (kind, text) in enumerate(requirements))
-    content = (f"<question>\n{question['question']}\n</question>\n\n<evidence>\n{evidence_text(answer)}\n</evidence>\n\n"
+    content = (f"<question>\n{question['question']}\n</question>\n\n<evidence>\n{evidence_text(answer, row.get("toolResults"))}\n</evidence>\n\n"
                f"<answer>\n{answer_text(answer)}\n</answer>\n\n<requirements>\n{req_text}\n</requirements>\n\n"
                f"요건 {len(requirements)}개 모두(index 0~{len(requirements) - 1})에 verdict를 정하라.")
     started = time.monotonic()

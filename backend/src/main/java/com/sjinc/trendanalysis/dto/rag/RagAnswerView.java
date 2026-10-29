@@ -12,17 +12,21 @@ import java.util.List;
  * @param period         근거의 기간. explicit이면 질문이 정한 기간, 아니면 근거 원문의 게시일 범위(검색) 또는 집계 기간(유행).
  *                       stale이면 가장 최근 근거도 8주가 넘었다(화면이 알린다)
  * @param interpretation 질문을 어떻게 알아들었는지(유행 질문인지·범위·누가 해석했는지) — 화면에 보여 근거를 확인하게 한다
- * @param facts          유행 질문이면 판단 근거가 된 집계(원문 수·매체 수), 아니면 null
+ * @param facts          유행 질문이면 판단 근거가 된 집계(원문 수·출처 수), 아니면 null
+ * @param moreFacts      답이 인용한 다른 집계(비교 질문의 둘째 대상·다른 기간 등). 화면은 facts 아래에 상자를 더 그린다
+ * @param unverifiedNumbers 답 글의 수치(N건·N곳·N%·유행점수 N) 중 Claude가 읽은 집계에 없는 것 — 화면이 경고로 보인다. 검색 답은 늘 빈 목록
  */
 public record RagAnswerView(String question, boolean grounded, String answer, List<Point> points, String reason,
                             List<Source> sources, Double bestScore, double minScore, Period period,
-                            Interpretation interpretation, Facts facts, String body) {
+                            Interpretation interpretation, Facts facts, String body, List<Facts> moreFacts,
+                            List<String> unverifiedNumbers) {
 
     /** body 없는 답(근거 없음·안내) — 자유 형식 본문은 답이 형식을 요구했을 때만 있다. */
     public RagAnswerView(String question, boolean grounded, String answer, List<Point> points, String reason,
                          List<Source> sources, Double bestScore, double minScore, Period period,
                          Interpretation interpretation, Facts facts) {
-        this(question, grounded, answer, points, reason, sources, bestScore, minScore, period, interpretation, facts, null);
+        this(question, grounded, answer, points, reason, sources, bestScore, minScore, period, interpretation, facts, null,
+                List.of(), List.of());
     }
 
     public record Period(LocalDate from, LocalDate to, String label, boolean explicit, boolean stale) {
@@ -40,9 +44,11 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
     /**
      * 유행 판단 근거 집계. dimensions의 첫 번째가 주 축(아이템 종류 등). terms는 질문 단어(코드로 못 옮긴 말)별 언급 원문 수.
      * change는 증감 질문의 방향(UP·DOWN·BOTH) — 있으면 행이 증감 순이고 화면이 증감률을 보인다. 없으면 null.
+     * mediaCount는 출처 수(유행점수와 같은 기준 — 직접 업로드는 원문마다 다른 출처). period는 이 집계의 기간 — 상자가 여럿이면 상자마다 다르다.
+     * volumeNote는 수집량 주의(범위 원문 수가 직전과 크게 달라 증감률보다 비중 변화를 봐야 할 때) — 없으면 null.
      */
     public record Facts(String scopeLabel, int docCount, int mediaCount, int prevDocCount, String change, List<Dimension> dimensions,
-                        List<TermFact> terms) {
+                        List<TermFact> terms, Period period, String volumeNote) {
     }
 
     /**
@@ -59,9 +65,10 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
      * names는 기타 값일 때 그 안의 아이템명 상위(예: "퀼팅 재킷 4건") — 다른 값은 비어 있다.
      * items는 소재·컬러·실루엣 값일 때 그 값으로 나온 아이템 종류 상위(예: "레더 재킷 3건") — 컬러별 활용 아이템의 근거.
      * rate는 직전 대비 증감률("+200%"·"-50%"·"0%", 직전 0건이면 "신규", 둘 다 0이면 "-"). score는 유행점수(막대 길이·순서의 기준).
+     * share·prevShare는 비중(그 기간 범위 원문 중 %), shareDelta는 비중 변화(%p) — 수집량이 달라도 비교할 수 있다.
      */
     public record FactRow(String label, int count, int mediaCount, int prevCount, String rate, List<String> names, List<String> items,
-                          double score) {
+                          double score, int share, int prevShare, int shareDelta) {
     }
 
     /** 답의 한 줄. sources는 그 줄을 뒷받침하는 출처 번호(Source.n) — 집계 수치만으로 쓴 줄은 비어 있다. */
