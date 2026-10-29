@@ -238,6 +238,24 @@ public class AiClient {
         return body == null ? "" : body.path("text").asText("");
     }
 
+    /** 유사도 검색 한 건 — 청크가 나온 원문, 청크 글, 유사도(1 - 코사인 거리). */
+    public record SearchHit(String docId, String chunk, double score) {
+    }
+
+    /** 질문과 비슷한 청크(유사도 순, Claude 호출 없음) — 도구 경로의 search_documents. category가 있으면 그 카테고리 원문만. */
+    public List<SearchHit> search(String query, int topK, String category) {
+        JsonNode body = call(() -> restClient.get()
+                .uri(b -> b.path("/search").queryParam("q", query).queryParam("top_k", topK)
+                        .queryParamIfPresent("category", java.util.Optional.ofNullable(category)).build())
+                .retrieve().body(JsonNode.class));
+        List<SearchHit> hits = new java.util.ArrayList<>();
+        if (body != null) {
+            body.forEach(h -> hits.add(new SearchHit(h.path("metadata").path("doc_id").asText(h.path("id").asText().split("#")[0]),
+                    h.path("document").asText(""), h.path("score").asDouble())));
+        }
+        return hits;
+    }
+
     /** P-04 색인. 넣은 청크 수. */
     public int index(IndexRequest request) {
         JsonNode body = call(() -> restClient.post().uri("/index")

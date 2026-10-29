@@ -26,6 +26,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -189,6 +190,35 @@ class RagTrendApiTest {
                 .andExpect(jsonPath("$.moreFacts[0].period.label").value("최근 4주"))
                 .andExpect(jsonPath("$.unverifiedNumbers[0]").value("9건"))     // 어느 집계에도 없는 수치
                 .andExpect(jsonPath("$.unverifiedNumbers.length()").value(1));
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 이유를_물으면_문서_검색_도구로_찾은_원문을_인용한다() throws Exception {
+        // 미리 센 아우터 집계가 [1][2][3](RT-1·RT-2·RT-4) — 검색은 RT-3(기준 이상)만 새 번호 [4]. 기준 미달·분석 실패 원문은 빠진다
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.search(eq("데님 재킷이 유행하는 이유"), anyInt(), eq("OUTER"))).thenReturn(List.of(
+                new AiClient.SearchHit("RT-3", "데님 재킷은 레이어드하기 쉬워 간절기에 많이 입는다", 0.81),
+                new AiClient.SearchHit("RT-3", "같은 원문의 다른 청크", 0.70),
+                new AiClient.SearchHit("RT-7", "분석 실패 원문", 0.79),
+                new AiClient.SearchHit("RT-5", "관련 적은 원문", 0.41)));
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
+                toolUse("t1", "search_documents", Map.of("query", "데님 재킷이 유행하는 이유", "category", "OUTER")),
+                toolUse("t2", "final_answer", Map.of("summary", "최근 4주 데님 재킷은 레이어드하기 쉬워 많이 보인다", "grounded", true, "body", "",
+                        "points", List.of(Map.of("text", "이유: 간절기 레이어드가 쉽다", "sources", List.of(4))))));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("데님 재킷이 유행하는 이유는?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.sources.length()").value(1))
+                .andExpect(jsonPath("$.sources[0].docId").value("RT-3"))
+                .andExpect(jsonPath("$.sources[0].chunk").value("데님 재킷은 레이어드하기 쉬워 간절기에 많이 입는다"));
+
+        ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
+        verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
+        String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
+        assertThat(toolResult).contains("[4] RT-3").doesNotContain("RT-7").doesNotContain("RT-5").doesNotContain("다른 청크");
     }
 
     @Test

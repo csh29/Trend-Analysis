@@ -271,13 +271,14 @@ def delete_index(doc_id: str):
 
 
 @app.get("/search")
-def search_chunks(q: str, top_k: int = Query(default=10, ge=1, le=50)):
-    """질문으로 청크를 찾아 유사도와 함께 준다(읽기 전용, Claude 호출 없음) — 기준 유사도를 정할 때 점수 분포를 본다."""
+def search_chunks(q: str, top_k: int = Query(default=10, ge=1, le=50), category: str | None = None):
+    """질문으로 청크를 찾아 유사도와 함께 준다(읽기 전용, Claude 호출 없음) — 기준 유사도를 정할 때 점수 분포를 보고,
+    도구 경로의 search_documents(Spring)가 이유·사례 근거를 찾는다. category를 주면 그 카테고리 아이템이 있는 원문만."""
     try:
         query = rag.ensure_question(q, MAX_QUESTION_LENGTH)
     except AiServiceError as e:
         raise HTTPException(status_code=e.status_code, detail={"message": str(e), "retryable": False})
-    return rag.search(vector_store.get_collection(), query, top_k)
+    return rag.search(vector_store.get_collection(), query, top_k, {f"cat_{category}": True} if category else None)
 
 
 @app.post("/agent/step")

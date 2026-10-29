@@ -55,6 +55,9 @@ public class AgentService {
     static final int SUMMARY_CHARS = 160;
     static final int MAX_SERIES_WEEKS = 12;
     static final int MAX_FACT_BOXES = 3;         // 판단 근거 상자 최대 개수(비교 질문은 대상·기간마다 하나)
+    static final int SEARCH_CHUNKS = 10;         // search_documents가 받아 오는 후보 청크 수
+    static final int SEARCH_DOCS = 4;            // 그중 결과에 싣는 원문 수(문서 단위로 묶어서)
+    static final int SEARCH_CHARS = 300;         // 원문마다 싣는 청크 글 길이
     private static final DateTimeFormatter MD = DateTimeFormatter.ofPattern("MM/dd");
 
     private final AiClient aiClient;
@@ -64,11 +67,14 @@ public class AgentService {
     private final TrendItemRepository trendItemRepository;
     private final String model;
     private final int maxToolCalls;
+    private final double minScore;
 
     public AgentService(AiClient aiClient, TrendFactsService trendFactsService, ComCdRepository comCdRepository,
                         SourceDocumentRepository sourceDocumentRepository, TrendItemRepository trendItemRepository,
                         @Value("${rag.agent.model:${claude.model:claude-sonnet-5}}") String model,
-                        @Value("${rag.agent.max-tool-calls:6}") int maxToolCalls) {
+                        @Value("${rag.agent.max-tool-calls:6}") int maxToolCalls,
+                        @Value("${rag.min-score:0.60}") double minScore) {
+        this.minScore = minScore;
         this.aiClient = aiClient;
         this.trendFactsService = trendFactsService;
         this.comCdRepository = comCdRepository;
@@ -198,7 +204,8 @@ public class AgentService {
             return switch (name) {
                 case "count_trend" -> countTrend(input, today, codes, run);
                 case "trend_series" -> trendSeries(input, today, codes, run);
-                default -> "없는 도구다: " + name + ". count_trend·trend_series·final_answer만 쓴다.";
+                case "search_documents" -> searchDocuments(input, codes, run);
+                default -> "없는 도구다: " + name + ". count_trend·trend_series·search_documents·final_answer만 쓴다.";
             };
         } catch (IllegalArgumentException e) {
             run.calls.add(name + " 입력 오류");
@@ -251,6 +258,51 @@ public class AgentService {
         String text = "주별 원문 수(" + label + " 건수 / 그 주 전체 분석 원문, 주는 월요일 시작): " + series.stream()
                 .map(w -> w.weekStart().format(MD) + " 주 " + w.count() + "건/전체 " + w.total() + "건" + (w.current() ? "(이번 주, 진행 중)" : ""))
                 .collect(Collectors.joining(" · "));
+        run.toolResults.add(text);
+        return text;
+    }
+
+    /**
+     * 문서 검색 — 질문과 비슷한 원문 청크(기준 유사도 이상, 분석 완료 원문만)에 근거 번호를 붙여 준다. 집계는 "무엇이 많은지"만 알려 줘
+     * "와이드 팬츠가 유행하는 이유는?" 같은 이유·배경·사례 질문은 근거 글이 없어 답하지 못했다(2026-10-29 진단 B2). 수는 세지 않는다.
+     * 검색 실패는 도구 결과로 알리고 답은 계속한다(집계만으로도 답할 수 있다).
+     */
+    private String searchDocuments(Map<String, Object> input, Codes codes, Run run) {
+        String query = text(input.get("query"));
+        if (query == null) throw new IllegalArgumentException("query가 비었다");
+        String category = codes.known(TrendCodes.CATEGORY, input.get("category"), "category");
+        List<AiClient.SearchHit> hits;
+        try {
+            hits = aiClient.search(query, SEARCH_CHUNKS, category);
+        } catch (AiCallException e) {
+            run.calls.add("검색 실패");
+            return "검색에 실패했다(" + e.getMessage() + ") — 집계로만 답하고, 이유·사례는 자료가 부족하다고 밝혀라.";
+        }
+        Map<String, AiClient.SearchHit> best = new LinkedHashMap<>(); // 문서마다 가장 비슷한 청크(유사도 순으로 온다)
+        hits.stream().filter(h -> h.score() >= minScore).forEach(h -> best.putIfAbsent(h.docId(), h));
+        Map<String, SourceDocument> docs = sourceDocumentRepository.findByDocIdIn(best.keySet()).stream()
+                .filter(d -> SourceDocument.DONE.equals(d.getStatus()))
+                .collect(Collectors.toMap(SourceDocument::getDocId, Function.identity()));
+        run.calls.add("검색 " + query);
+        List<String> lines = new ArrayList<>();
+        for (AiClient.SearchHit h : best.values()) {
+            SourceDocument doc = docs.get(h.docId());
+            if (doc == null) continue;
+            int n = run.nByDocId.computeIfAbsent(h.docId(), id -> {
+                int next = run.docIdByN.size() + 1;
+                run.docIdByN.put(next, id);
+                return next;
+            });
+            String chunk = h.chunk().replaceAll("\\s+", " ").strip();
+            if (chunk.length() > SEARCH_CHARS) chunk = chunk.substring(0, SEARCH_CHARS) + "…";
+            run.summaryByN.putIfAbsent(n, chunk);
+            lines.add("[" + n + "] " + h.docId() + " · " + Objects.toString(doc.getTitle(), "") + " · " + Objects.toString(doc.getMedia(), "")
+                    + " · " + TrendAggregationService.statDate(doc) + " · 유사도 " + String.format("%.2f", h.score()) + " — " + chunk);
+            if (lines.size() >= SEARCH_DOCS) break;
+        }
+        String text = lines.isEmpty()
+                ? "기준 유사도(" + minScore + ") 이상인 원문이 없다 — 이유·사례의 근거를 찾지 못했다. 지어내지 말고 자료가 부족하다고 밝혀라."
+                : "검색 결과(질문과 비슷한 원문 — 사례·이유·설명의 근거, 수를 세는 자료가 아니다):\n" + String.join("\n", lines);
         run.toolResults.add(text);
         return text;
     }

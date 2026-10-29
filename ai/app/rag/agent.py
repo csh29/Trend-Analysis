@@ -53,6 +53,13 @@ TOOLS = [
          "value": {"type": "string", "description": "센 값의 코드(예: OUTER_PADDING, BROWN)"},
          "weeks": {"type": "integer", "minimum": 2, "maximum": 12},
      }, "required": ["weeks"]}},
+    {"name": "search_documents",
+     "description": "질문과 비슷한 원문(기사·사진 분석 요약)을 유사도로 찾아 [n] 번호와 함께 돌려준다. 이유·배경·스타일링·사례처럼 "
+                    "집계 수로는 답할 수 없는 내용의 근거를 찾을 때 쓴다. 수를 세는 도구가 아니다.",
+     "input_schema": {"type": "object", "properties": {
+         "query": {"type": "string", "description": "찾을 내용을 한 문장으로(예: 와이드 팬츠가 유행하는 이유·스타일링)"},
+         "category": {"type": "string", "description": "카테고리 코드로 좁힐 때(없으면 생략)"},
+     }, "required": ["query"]}},
     {"name": "final_answer",
      "description": "최종 답. 답변 규칙대로 summary(결론 한 줄)와 points(글머리 줄) 또는 body(표·목록·문단)를 쓰고, 근거는 도구 결과의 [n] 번호.",
      "input_schema": rag.build_schema()},

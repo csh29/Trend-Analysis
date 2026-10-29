@@ -330,7 +330,7 @@ class RagApiTest(unittest.TestCase):
         self.assertEqual(200, res.status_code)
         self.assertEqual("count_trend", res.json()["content"][0]["name"])
         kwargs = call.call_args.kwargs
-        self.assertEqual(["count_trend", "trend_series", "final_answer"], [t["name"] for t in kwargs["tools"]])
+        self.assertEqual(["count_trend", "trend_series", "search_documents", "final_answer"], [t["name"] for t in kwargs["tools"]])
         self.assertIn("OUTER=아우터", kwargs["system"][0]["text"])
         self.assertNotIn("cache_control", kwargs["system"][0])  # 첫 단계는 캐시를 만들지 않는다
         self.assertEqual("medium", kwargs["output_config"]["effort"])
