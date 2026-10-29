@@ -15,18 +15,26 @@ import java.util.List;
  * @param facts          유행 질문이면 판단 근거가 된 집계(원문 수·출처 수), 아니면 null
  * @param moreFacts      답이 인용한 다른 집계(비교 질문의 둘째 대상·다른 기간 등). 화면은 facts 아래에 상자를 더 그린다
  * @param unverifiedNumbers 답 글의 수치(N건·N곳·N%·유행점수 N) 중 Claude가 읽은 집계에 없는 것 — 화면이 경고로 보인다. 검색 답은 늘 빈 목록
+ * @param chart          추이 차트 — 도구 경로가 주별 추이(trend_series)를 셌으면 그 값으로 서버가 만든다(Claude가 숫자를 쓰지 않는다). 없으면 null
  */
 public record RagAnswerView(String question, boolean grounded, String answer, List<Point> points, String reason,
                             List<Source> sources, Double bestScore, double minScore, Period period,
                             Interpretation interpretation, Facts facts, String body, List<Facts> moreFacts,
-                            List<String> unverifiedNumbers) {
+                            List<String> unverifiedNumbers, Chart chart) {
 
     /** body 없는 답(근거 없음·안내) — 자유 형식 본문은 답이 형식을 요구했을 때만 있다. */
     public RagAnswerView(String question, boolean grounded, String answer, List<Point> points, String reason,
                          List<Source> sources, Double bestScore, double minScore, Period period,
                          Interpretation interpretation, Facts facts) {
         this(question, grounded, answer, points, reason, sources, bestScore, minScore, period, interpretation, facts, null,
-                List.of(), List.of());
+                List.of(), List.of(), null);
+    }
+
+    /** 꺾은선 차트 — labels는 x축(주 시작일 MM/dd), series는 값마다의 선(labels와 길이가 같다), note는 차트 아래 설명. */
+    public record Chart(String title, List<String> labels, List<ChartSeries> series, String note) {
+    }
+
+    public record ChartSeries(String name, List<Integer> values) {
     }
 
     public record Period(LocalDate from, LocalDate to, String label, boolean explicit, boolean stale) {

@@ -161,6 +161,8 @@
             addRow(dl, '경로', row.routeText + (row.reason ? ' (' + row.reason + ')' : ''));
             addRow(dl, '답', row.answerText, true);
             addRow(dl, '출처 원문', (row.sourceDocIds || '').split(',').filter(Boolean).join(', '));
+            // 도구 경로가 읽은 집계·검색 결과 — 답의 수치가 맞았는지 여기와 대조한다(진단 F4)
+            if (row.toolResults) addRow(dl, '읽은 집계', row.toolResults, true);
             addRow(dl, '토큰', '입력 ' + row.inputTokens.toLocaleString() + ' · 출력 ' + row.outputTokens.toLocaleString());
             addRow(dl, '소요', row.seconds + '초');
             addRow(dl, '피드백', row.feedbackText);

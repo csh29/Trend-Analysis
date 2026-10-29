@@ -42,6 +42,12 @@ public class RagLogService {
     /** 로그 ID(저장 실패면 null — 화면은 👍👎를 그리지 않는다). */
     @Transactional
     public Long record(String username, RagAnswerView view, TokenUsage usage, long elapsedMs) {
+        return record(username, view, usage, elapsedMs, List.of());
+    }
+
+    /** @param toolResults 도구 경로에서 Claude가 읽은 집계·검색 결과 글 — 답의 수치를 나중에 대조하려고 남긴다(없으면 빈 목록) */
+    @Transactional
+    public Long record(String username, RagAnswerView view, TokenUsage usage, long elapsedMs, List<String> toolResults) {
         try {
             String resolved = view.interpretation() == null ? null : view.interpretation().resolvedQuestion();
             return repository.save(RagQueryLog.builder()
@@ -49,6 +55,7 @@ public class RagLogService {
                     .question(cut(view.question())).resolvedQuestion(cut(resolved))
                     .route(route(view)).grounded(view.grounded()).reason(view.reason())
                     .answerText(answerText(view))
+                    .toolResults(toolResults == null || toolResults.isEmpty() ? null : String.join("\n\n---\n\n", toolResults))
                     .sourceDocIds(cut(view.sources() == null ? "" : view.sources().stream().map(RagAnswerView.Source::docId)
                             .collect(Collectors.joining(","))))
                     .inputTokens(usage.input() + usage.cacheCreation() + usage.cacheRead()).outputTokens(usage.output())

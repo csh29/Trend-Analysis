@@ -68,6 +68,14 @@ public class RagQueryLog {
     @Column(name = "source_doc_ids", length = 1000)
     private String sourceDocIds;
 
+    /**
+     * 도구 경로에서 Claude가 읽은 집계·검색 결과 글(미리 센 집계 + 도구 결과, 구분선으로 이어 붙임). 👎 받은 답의 수치가 집계와 맞았는지
+     * 나중에 확인하려고 남긴다(2026-10-29 진단 F4). 다른 경로는 null.
+     */
+    @Lob
+    @Column(name = "tool_results")
+    private String toolResults;
+
     @Column(name = "input_tokens")
     private long inputTokens;
 

@@ -234,7 +234,12 @@ class RagTrendApiTest {
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 20주 추이 비교해줘")))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.grounded").value(true));
+                .andExpect(jsonPath("$.grounded").value(true))
+                // 추이 차트는 서버가 센 값으로 만든다(진단 E1) — 20주, 값마다 선 하나
+                .andExpect(jsonPath("$.chart.labels.length()").value(20))
+                .andExpect(jsonPath("$.chart.series.length()").value(2))
+                .andExpect(jsonPath("$.chart.series[0].name").value("데님 재킷"))
+                .andExpect(jsonPath("$.chart.series[0].values.length()").value(20));
 
         ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
         verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));

@@ -179,7 +179,7 @@ public class RagService {
         Interpreted byAgent = new Interpreted(interpreted.question(), interpreted.fashion(), "AGENT", interpreted.original(),
                 interpreted.query());
         return view(text, result.response(), period, byAgent, facts == null ? null : factsView(facts),
-                used.stream().skip(1).map(RagService::factsView).toList(), result.toolResults());
+                used.stream().skip(1).map(RagService::factsView).toList(), result.toolResults(), result.chart());
     }
 
     /**
@@ -324,7 +324,7 @@ public class RagService {
                 p.from(), p.to(), facts.docCount(), facts.mediaCount(), response.grounded(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
         meter.add(response.usage());
-        return view(text, response, period, interpreted, factsView, List.of(), facts.lines());
+        return view(text, response, period, interpreted, factsView, List.of(), facts.lines(), null);
     }
 
     /**
@@ -345,16 +345,17 @@ public class RagService {
                 interpreted.question().category(), response.grounded(), response.reason(), response.bestScore(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
         meter.add(response.usage());
-        return view(text, response, period, interpreted, null, List.of(), List.of()); // 검색 답은 집계 수치를 쓰지 않아 대조하지 않는다
+        return view(text, response, period, interpreted, null, List.of(), List.of(), null); // 검색 답은 집계 수치를 쓰지 않아 대조하지 않는다
     }
 
     /**
      * @param moreFacts 주 판단 근거(facts) 말고 답이 인용한 다른 집계(비교 질문의 둘째 대상 등)
      * @param evidence  답의 수치를 대조할 근거 글(집계 줄·도구 결과). 비었으면 대조하지 않는다
+     * @param chart     도구 경로의 추이 차트(AgentService가 trend_series 결과로 만든 것), 없으면 null
      */
     private RagAnswerView view(String text, AiClient.AnswerResponse response, RagAnswerView.Period period,
                                Interpreted interpreted, RagAnswerView.Facts facts, List<RagAnswerView.Facts> moreFacts,
-                               List<String> evidence) {
+                               List<String> evidence, RagAnswerView.Chart chart) {
         if (!response.grounded()) {
             return new RagAnswerView(text, false, noEvidenceMessage(response, period), List.of(), response.reason(), List.of(),
                     response.bestScore(), minScore, period, interpreted.view(), facts);
@@ -373,7 +374,7 @@ public class RagService {
             log.warn("답의 수치 중 집계에 없는 것: {} (질문 {}자)", unverified, text.length());
         }
         return new RagAnswerView(text, true, response.answer(), points, null, sources, response.bestScore(), minScore, period,
-                interpreted.view(), facts, body, moreFacts, unverified);
+                interpreted.view(), facts, body, moreFacts, unverified, chart);
     }
 
     /** 기획 브리프 범위 — 질문을 해석해(AI, 실패하면 규칙) 묻는 축·증감은 비운다(모든 축을 센다). 토큰은 meter에 더한다. */

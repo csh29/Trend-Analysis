@@ -422,6 +422,7 @@
 </aside>
 
 <script src="/js/pptx-writer.js"></script>
+<script src="/js/line-chart.js"></script>
 <script src="/js/tabs.js"></script>
 <script>
     // 카드의 "… ›" 버튼 — 같은 화면의 사이드바 메뉴를 대신 눌러 탭 동작(tabs.js)을 그대로 쓴다.
@@ -1235,6 +1236,16 @@
             if (view.unverifiedNumbers && view.unverifiedNumbers.length) {
                 bubble.appendChild(el('div', 'period-notice', '집계에서 확인되지 않은 수치가 있습니다(' + view.unverifiedNumbers.join(', ')
                     + '). 아래 판단 근거의 수치를 기준으로 보세요.'));
+            }
+            // 추이 차트 — 서버가 trend_series 결과로 만든 값 그대로 그린다(Claude가 쓴 숫자가 아니다, 진단 E1)
+            if (view.chart && view.chart.series && view.chart.series.length) {
+                const chartBox = el('div', 'facts-box');
+                chartBox.appendChild(el('div', 'facts-head', view.chart.title));
+                const area = el('div');
+                chartBox.appendChild(area);
+                if (view.chart.note) chartBox.appendChild(el('div', 'facts-note', view.chart.note));
+                bubble.appendChild(chartBox);
+                LineChart.render(area, { labels: view.chart.labels, series: view.chart.series, height: 220, emptyMessage: '추이 데이터가 없습니다.' });
             }
             if (view.facts) bubble.appendChild(factsBox(view.facts, view.period));
             // 비교·다른 기간 답은 인용한 집계마다 상자를 그린다 — 주 상자 하나만 그리면 답과 막대가 어긋났다

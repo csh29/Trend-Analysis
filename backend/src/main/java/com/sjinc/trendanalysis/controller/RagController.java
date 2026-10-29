@@ -37,7 +37,8 @@ public class RagController {
     public com.sjinc.trendanalysis.dto.rag.RagAskResponse ask(@RequestBody RagQuestionRequest request, java.security.Principal principal) {
         long started = System.currentTimeMillis();
         com.sjinc.trendanalysis.service.rag.RagService.Answered answered = ragService.answer(request.question(), request.history());
-        Long logId = ragLogService.record(principal.getName(), answered.view(), answered.usage(), System.currentTimeMillis() - started);
+        Long logId = ragLogService.record(principal.getName(), answered.view(), answered.usage(), System.currentTimeMillis() - started,
+                answered.toolResults());
         return new com.sjinc.trendanalysis.dto.rag.RagAskResponse(answered.view(), logId);
     }
 

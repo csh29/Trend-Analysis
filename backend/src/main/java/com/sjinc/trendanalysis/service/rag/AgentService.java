@@ -89,7 +89,8 @@ public class AgentService {
      * 도구 경로의 답. facts는 판단 근거 상자에 그릴 집계(답이 인용한 원문이 나온 count_trend 결과, 없으면 미리 센 집계) — 없으면 빈 목록.
      * calls는 조회 기록(로그·화면용). toolResults는 Claude가 읽은 집계 글 전부(미리 센 집계 + 도구 결과) — 답의 수치를 이것과 대조한다.
      */
-    public record Result(AiClient.AnswerResponse response, List<TrendFactsService.Facts> facts, List<String> calls, List<String> toolResults) {
+    public record Result(AiClient.AnswerResponse response, List<TrendFactsService.Facts> facts, List<String> calls, List<String> toolResults,
+                         com.sjinc.trendanalysis.dto.rag.RagAnswerView.Chart chart) {
     }
 
     /** 한 번의 실행 — 답(result, 실패면 null)과 쓴 토큰. 실패해도 토큰은 과금되므로 질문 로그에 더한다(2026-10-29 진단). */
@@ -108,6 +109,7 @@ public class AgentService {
         final List<String> calls = new ArrayList<>();
         final List<String> toolResults = new ArrayList<>();
         final List<Counted> counts = new ArrayList<>();
+        com.sjinc.trendanalysis.dto.rag.RagAnswerView.Chart chart; // 마지막 trend_series 결과로 만든 추이 차트
         TokenUsage usage = TokenUsage.ZERO;
         int toolCalls;
     }
@@ -153,7 +155,7 @@ public class AgentService {
                         log.info("도구 경로 답 — 조회 {}번 {} 근거 원문 {}건 토큰 {} 소요 {}ms", run.toolCalls, run.calls,
                                 run.docIdByN.size(), run.usage, System.currentTimeMillis() - started);
                         AiClient.AnswerResponse answer = answer(input, run);
-                        return new Result(answer, usedFacts(run, answer), List.copyOf(run.calls), List.copyOf(run.toolResults));
+                        return new Result(answer, usedFacts(run, answer), List.copyOf(run.calls), List.copyOf(run.toolResults), run.chart);
                     }
                     results.add(Map.of("type", "tool_result", "tool_use_id", String.valueOf(use.get("id")),
                             "content", execute(name, input, today, codes, run)));
@@ -264,12 +266,22 @@ public class AgentService {
         run.calls.add("추이 " + scopeName + (values.isEmpty() ? "" : " · " + values) + " " + weeks + "주");
         List<String> lines = new ArrayList<>();
         List<TrendFactsService.WeekCount> first = null;
+        List<com.sjinc.trendanalysis.dto.rag.RagAnswerView.ChartSeries> chartSeries = new ArrayList<>();
         for (String v : values.isEmpty() ? java.util.Collections.<String>singletonList(null) : values) {
             List<TrendFactsService.WeekCount> series = trendFactsService.series(scope, axis, v, weeks, today);
             if (first == null) first = series;
+            String name = v == null ? scopeName : shortLabel(codes.name(axis, v));
             lines.add("- " + scopeName + (v == null ? "" : " · " + codes.name(axis, v)) + ": " + series.stream()
                     .map(w -> w.weekStart().format(MD) + " " + w.count() + "건").collect(Collectors.joining(" · ")));
+            // 차트는 그 주 전체 원문 중 비중(%) — 건수로 그리면 수집량이 늘어난 주에 모든 선이 함께 올라간다(진단 C2)
+            chartSeries.add(new com.sjinc.trendanalysis.dto.rag.RagAnswerView.ChartSeries(name, series.stream()
+                    .map(w -> w.total() == 0 ? 0 : (int) Math.round(w.count() * 100.0 / w.total())).toList()));
         }
+        // 차트 값은 서버가 센 값 그대로다 — Claude가 숫자를 옮기지 않는다(진단 E1). 마지막 추이 조회가 차트가 된다
+        run.chart = new com.sjinc.trendanalysis.dto.rag.RagAnswerView.Chart(scopeName + " 주별 비중(그 주 전체 분석 원문 중 %)",
+                first.stream().map(w -> w.weekStart().format(MD)).toList(), chartSeries,
+                "주별 전체 분석 원문: " + first.stream().map(w -> w.weekStart().format(MD) + " " + w.total() + "건").collect(Collectors.joining(" · "))
+                        + " — 마지막 주는 진행 중");
         // 주마다 전체 원문 수(수집량)를 한 번만 준다 — 수집량이 늘어난 주는 건수만 보면 모든 값이 늘어난 것처럼 보였다(2026-10-29 진단 C2)
         String text = "주별 원문 수(주는 월요일 시작, 마지막 주는 진행 중):\n"
                 + "- 그 주 전체 분석 원문: " + first.stream().map(w -> w.weekStart().format(MD) + " " + w.total() + "건")
@@ -379,6 +391,12 @@ public class AgentService {
                 "cache_creation_input_tokens", run.usage.cacheCreation(), "cache_read_input_tokens", run.usage.cacheRead());
         return new AiClient.AnswerResponse(grounded, text(input.get("summary")), points, sources, null, usage,
                 grounded ? null : "MODEL_DECLINED", null, body);
+    }
+
+    /** 코드 이름의 괄호 힌트를 뗀다 — 차트 범례가 길어지지 않게("패딩(숏패딩·푸퍼)" → "패딩"). */
+    private static String shortLabel(String name) {
+        int i = name.indexOf('(');
+        return i > 0 ? name.substring(0, i).strip() : name;
     }
 
     private static String text(Object o) {
