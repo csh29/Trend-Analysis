@@ -1066,9 +1066,30 @@
                 + ' · 원문 ' + facts.docCount + '건 · 출처 ' + facts.mediaCount + '곳 (직전 ' + facts.prevDocCount + '건)'));
             // 수집량이 직전과 크게 다르면 건수 증감이 유행 변화가 아니다 — 비중을 보라고 알린다(서버가 판단, TrendFactsService.volumeNote)
             if (facts.volumeNote) box.appendChild(el('div', 'facts-note', '수집량 주의: ' + facts.volumeNote));
+            // 질문 단어("레더 재킷이랑 무스탕")를 물었으면 그 말의 언급 원문 수를 먼저 막대로 — 답이 이 수로 비교하는데 상자에는
+            // 범위 "전체"의 아이템 막대만 있어 답과 어긋났다(2026-10-29 진단 B1). 대상 옷 포인트 줄은 여전히 그리지 않는다
+            const terms = facts.terms || [];
+            if (terms.length) {
+                const termBars = el('div', 'bars');
+                const termMax = terms.reduce(function (m, t) { return Math.max(m, t.count); }, 0);
+                terms.forEach(function (t) {
+                    const row = el('div', 'bar-row');
+                    const cap = el('span', 'cap', t.term);
+                    cap.title = t.term;
+                    const track = el('span', 'track');
+                    const fill = el('i', 'fill');
+                    fill.style.width = (termMax ? t.count * 100 / termMax : 0) + '%';
+                    track.append(fill, factsNum(t, { change: null })); // 질문 단어는 비중이 없어 건수·직전 대비로
+                    row.append(cap, track);
+                    row.title = t.term + ' — ' + t.count + '건 · 출처 ' + t.mediaCount + '곳 · 직전 ' + t.prevCount + '건'
+                        + (t.expressions && t.expressions.length ? ' · 나온 표현: ' + t.expressions.join(', ') : '');
+                    termBars.appendChild(row);
+                });
+                box.append(el('div', 'facts-head', '질문 단어 언급(원문 수)'), termBars);
+            }
             // 묻는 축(첫 축)만 막대로 — 나머지 축 줄은 답 본문과 겹쳐 보이지 않는다(사용자 결정).
-            // Claude에게 어떤 축을 보내는지는 TrendFactsService.lines()가 정한다
-            const d = (facts.dimensions || [])[0];
+            // Claude에게 어떤 축을 보내는지는 TrendFactsService.lines()가 정한다. 질문 단어만 물은 범위 "전체" 집계면 그리지 않는다(질문과 무관한 순위)
+            const d = terms.length && facts.scopeLabel === '전체' ? null : (facts.dimensions || [])[0];
             if (d) {
                 const bars = el('div', 'bars');
                 // 막대 길이는 유행점수(순서의 기준), 증감 질문은 비중 변화 폭(직전 원문이 없으면 건수) — 순서의 기준과 맞춘다
@@ -1092,7 +1113,7 @@
                 });
                 box.append(el('div', 'facts-head', d.label), bars);
             }
-            // 질문 단어 줄·대상 옷 포인트 줄은 그리지 않는다 — 답 본문이 같은 내용을 대상별로 쓰고, 막대 아래 줄은 빼기로 했다(2026-10-26 사용자 결정)
+            // 대상 옷 포인트 줄(컬러·소재…)은 그리지 않는다 — 답 본문이 같은 내용을 대상별로 쓰고, 막대 아래 줄은 빼기로 했다(2026-10-26 사용자 결정)
             return box;
         }
 
