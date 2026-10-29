@@ -45,13 +45,15 @@ TOOLS = [
          "top": {"type": "integer", "minimum": 1, "maximum": 15},
      }}},
     {"name": "trend_series",
-     "description": "범위 안에서 값 하나(axis + value, 없으면 범위 전체)의 주별 원문 수를 최근 weeks주 동안 센다. "
-                    "주마다 그 주 전체 분석 원문 수도 준다 — 수집량이 다른 주끼리는 건수가 아니라 전체 대비 비율로 비교한다.",
+     "description": "범위 안에서 값(axis + value 또는 values 최대 5개, 없으면 범위 전체)의 주별 원문 수를 최근 weeks주(최대 26) 동안 센다. "
+                    "주마다 그 주 전체 분석 원문 수도 준다 — 수집량이 다른 주끼리는 건수가 아니라 전체 대비 비율로 비교한다. "
+                    "여러 값의 흐름은 values로 한 번에 센다.",
      "input_schema": {"type": "object", "properties": {
          **_SCOPE,
-         "axis": {"type": "string", "enum": interpret.FOCUS, "description": "센 값의 축(value와 함께)"},
+         "axis": {"type": "string", "enum": interpret.FOCUS, "description": "센 값의 축(value·values와 함께)"},
          "value": {"type": "string", "description": "센 값의 코드(예: OUTER_PADDING, BROWN)"},
-         "weeks": {"type": "integer", "minimum": 2, "maximum": 12},
+         "values": {"type": "array", "items": {"type": "string"}, "maxItems": 5, "description": "센 값의 코드 여러 개(최대 5)"},
+         "weeks": {"type": "integer", "minimum": 2, "maximum": 26},
      }, "required": ["weeks"]}},
     {"name": "search_documents",
      "description": "질문과 비슷한 원문(기사·사진 분석 요약)을 유사도로 찾아 [n] 번호와 함께 돌려준다. 이유·배경·스타일링·사례처럼 "

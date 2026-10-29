@@ -53,7 +53,8 @@ public class AgentService {
     static final int EXAMPLES_PER_CALL = 6;      // count_trend 결과에 싣는 예시 원문
     static final int DEFAULT_TOP = 10;           // count_trend 축별 상위 개수 기본값 — 제외·다음 순위 질문도 다시 부르지 않고 답하게
     static final int SUMMARY_CHARS = 160;
-    static final int MAX_SERIES_WEEKS = 12;
+    static final int MAX_SERIES_WEEKS = 26;      // "최근 3개월·반년 추이"를 한 번에(진단 B3 — 12주로는 3개월을 덮지 못했다)
+    static final int MAX_SERIES_VALUES = 5;
     static final int MAX_FACT_BOXES = 3;         // 판단 근거 상자 최대 개수(비교 질문은 대상·기간마다 하나)
     static final int SEARCH_CHUNKS = 10;         // search_documents가 받아 오는 후보 청크 수
     static final int SEARCH_DOCS = 4;            // 그중 결과에 싣는 원문 수(문서 단위로 묶어서)
@@ -240,24 +241,39 @@ public class AgentService {
         QuestionInterpreter.Interpretation scope = codes.scope(input, today, false);
         int weeks = Math.min(MAX_SERIES_WEEKS, Math.max(2, input.get("weeks") instanceof Number n ? n.intValue() : 6));
         String axis = text(input.get("axis"));
-        String value = text(input.get("value"));
-        if ((axis == null) != (value == null)) {
-            throw new IllegalArgumentException("axis와 value는 함께 주거나 둘 다 빼야 한다");
+        // 값 여러 개를 한 번에 — 상위 5개 추이를 보려고 도구를 다섯 번 부르면 호출 상한(6)에 닿았다(2026-10-29 진단 B3)
+        List<String> values = new ArrayList<>();
+        String single = text(input.get("value"));
+        if (single != null) values.add(single);
+        if (input.get("values") instanceof List<?> list) {
+            list.stream().map(AgentService::text).filter(v -> v != null && !values.contains(v)).forEach(values::add);
+        }
+        if ((axis == null) != values.isEmpty()) {
+            throw new IllegalArgumentException("axis와 value(또는 values)는 함께 주거나 둘 다 빼야 한다");
         }
         if (axis != null && !RagService.FOCUS_AXES.contains(axis)) {
             throw new IllegalArgumentException("axis는 " + RagService.FOCUS_AXES + " 중 하나다: " + axis);
         }
-        if (value != null && !codes.knows(axis, value)) {
-            throw new IllegalArgumentException(axis + "에 없는 코드다: " + value);
+        if (values.size() > MAX_SERIES_VALUES) {
+            throw new IllegalArgumentException("values는 " + MAX_SERIES_VALUES + "개까지다");
         }
-        List<TrendFactsService.WeekCount> series = trendFactsService.series(scope, axis, value, weeks, today);
-        String label = (scope.itemTypeName() != null ? scope.itemTypeName() : scope.categoryName() != null ? scope.categoryName() : "전체")
-                + (value == null ? "" : " · " + codes.name(axis, value));
-        run.calls.add("추이 " + label + " " + weeks + "주");
-        // 주마다 전체 원문 수(수집량)를 같이 준다 — 수집량이 늘어난 주는 건수만 보면 모든 값이 늘어난 것처럼 보였다(2026-10-29 진단 C2)
-        String text = "주별 원문 수(" + label + " 건수 / 그 주 전체 분석 원문, 주는 월요일 시작): " + series.stream()
-                .map(w -> w.weekStart().format(MD) + " 주 " + w.count() + "건/전체 " + w.total() + "건" + (w.current() ? "(이번 주, 진행 중)" : ""))
-                .collect(Collectors.joining(" · "));
+        for (String v : values) {
+            if (!codes.knows(axis, v)) throw new IllegalArgumentException(axis + "에 없는 코드다: " + v);
+        }
+        String scopeName = scope.itemTypeName() != null ? scope.itemTypeName() : scope.categoryName() != null ? scope.categoryName() : "전체";
+        run.calls.add("추이 " + scopeName + (values.isEmpty() ? "" : " · " + values) + " " + weeks + "주");
+        List<String> lines = new ArrayList<>();
+        List<TrendFactsService.WeekCount> first = null;
+        for (String v : values.isEmpty() ? java.util.Collections.<String>singletonList(null) : values) {
+            List<TrendFactsService.WeekCount> series = trendFactsService.series(scope, axis, v, weeks, today);
+            if (first == null) first = series;
+            lines.add("- " + scopeName + (v == null ? "" : " · " + codes.name(axis, v)) + ": " + series.stream()
+                    .map(w -> w.weekStart().format(MD) + " " + w.count() + "건").collect(Collectors.joining(" · ")));
+        }
+        // 주마다 전체 원문 수(수집량)를 한 번만 준다 — 수집량이 늘어난 주는 건수만 보면 모든 값이 늘어난 것처럼 보였다(2026-10-29 진단 C2)
+        String text = "주별 원문 수(주는 월요일 시작, 마지막 주는 진행 중):\n"
+                + "- 그 주 전체 분석 원문: " + first.stream().map(w -> w.weekStart().format(MD) + " " + w.total() + "건")
+                .collect(Collectors.joining(" · ")) + "\n" + String.join("\n", lines);
         run.toolResults.add(text);
         return text;
     }

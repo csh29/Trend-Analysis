@@ -222,6 +222,29 @@ class RagTrendApiTest {
     }
 
     @Test
+    @WithMockUser(username = "admin")
+    void 추이_도구는_값_여러_개를_한_번에_세고_주별_전체_원문_수를_한_줄로_준다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
+                toolUse("t1", "trend_series", Map.of("category", "OUTER", "axis", "ITEM_TYPE",
+                        "values", List.of("OUTER_DENIM_JACKET", "OUTER_PADDING"), "weeks", 20)),
+                toolUse("t2", "final_answer", Map.of("summary", "최근 20주 데님 재킷이 꾸준하다", "grounded", true, "body", "",
+                        "points", List.of(Map.of("text", "데님 재킷: 꾸준하다", "sources", List.of(1))))));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 20주 추이 비교해줘")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true));
+
+        ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
+        verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
+        String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
+        // 12주 상한이 26주로 — 20주를 그대로 센다. 전체 원문 수는 한 줄, 값마다 한 줄
+        assertThat(toolResult).contains("- 그 주 전체 분석 원문:").contains("- 아우터 · 데님 재킷(트러커):").contains("- 아우터 · 패딩");
+        assertThat(toolResult.split("그 주 전체 분석 원문")).hasSize(2);
+    }
+
+    @Test
     void 도구_경로가_실패해도_쓴_토큰을_질문_토큰에_더한다() {
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
