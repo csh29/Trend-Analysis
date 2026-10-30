@@ -128,6 +128,24 @@ class RagTrendApiTest {
 
     @Test
     @WithMockUser(username = "admin")
+    void 매체_이름이_있는_질문은_그_매체_원문만_세어_답한다() throws Exception {
+        // 해석은 "특정 자료" 질문(검색)으로 봐도 — 매체명은 색인 글에 없어 검색으로는 근거 없음이 됐다(2026-10-30 "엘르코리아 패션 특징은?")
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(new AiClient.InterpretResponse(false, null, null, null, null, true, null));
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(toolUse("t1", "final_answer", Map.of("summary", "매체A 자료는 데님 재킷이 많다",
+                "grounded", true, "body", "", "points", List.of(Map.of("text", "데님 재킷: 많다", "sources", List.of(1))))));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("매체A 패션 특징은?")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.grounded").value(true))
+                .andExpect(jsonPath("$.interpretation.by").value("AGENT"));
+        ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
+        verify(aiClient).agentStep(steps.capture(), eq("test-key"));
+        assertThat(String.valueOf(steps.getValue().messages().get(0))).contains("<prefetched>").contains("매체A 원문");
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
     void 방금_답한_질문의_브리프는_해석을_다시_부르지_않는다() throws Exception {
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");

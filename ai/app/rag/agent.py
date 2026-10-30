@@ -35,6 +35,7 @@ _SCOPE = {
     "item_type": {"type": "string", "description": "아이템 종류 이름"},
     "materials": _CODES, "colors": _CODES, "silhouettes": _CODES, "patterns": _CODES, "details": _CODES, "genders": _CODES,
     "terms": {"type": "array", "items": {"type": "string"}, "description": "목록에 없는 패션 단어(무스탕·발마칸…)"},
+    "media": {"type": "array", "items": {"type": "string"}, "description": "매체 이름(그 매체 원문만 셀 때 — 예: 엘르코리아)"},
 }
 TOOLS = [
     {"name": "count_trend",

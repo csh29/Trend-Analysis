@@ -69,6 +69,8 @@ import java.util.stream.Collectors;
 public class TrendFactsService {
 
     static final int TOP = 5;
+    /** 매체 조건의 filters 키 — 옷 속성이 아니라 원문 단위(원문의 매체명)로 거른다(2026-10-30 "엘르코리아 패션 특징은?"). */
+    public static final String MEDIA = "MEDIA";
     /** 도구 경로의 count_trend가 고를 수 있는 축별 상위 개수 상한 — "패딩 제외하고" 같은 질문은 Claude가 넉넉히 받아 직접 뺀다. */
     static final int MAX_TOP = 15;
     /** 집계가 이보다 오래 걸리면 경고 로그 — 메모리 집계를 DB 집계로 옮길 때가 됐다는 신호. */
@@ -350,7 +352,7 @@ public class TrendFactsService {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (SourceDocument doc : docs) {
             TrendItem item = items.get(doc.getId());
-            if (item == null || !scope.inSeason(item) || item.garments().stream().noneMatch(scope::matches)) continue;
+            if (item == null || !scope.accepts(doc, item) || item.garments().stream().noneMatch(scope::matches)) continue;
             String media = doc.getMedia();
             String name = DocumentService.UPLOAD_MEDIA.equals(media) ? "일반 사용자 이미지(업로드)"
                     : media == null || media.isBlank() || DocumentService.TEXT_MEDIA.equals(media) ? "직접 등록 텍스트" : media;
@@ -398,7 +400,24 @@ public class TrendFactsService {
     private record Scope(String category, String itemType, Set<String> seasons, String focus, Map<String, List<String>> filters, int top) {
         boolean matches(TrendItem.Garment g) {
             return matchesBase(g)
-                    && filters.entrySet().stream().allMatch(f -> valuesOf(g, f.getKey()).stream().anyMatch(f.getValue()::contains));
+                    && attributes().entrySet().stream().allMatch(f -> valuesOf(g, f.getKey()).stream().anyMatch(f.getValue()::contains));
+        }
+
+        /** 옷의 속성 조건(소재·컬러…) — 문서 단위인 매체 조건은 뺀다. */
+        Map<String, List<String>> attributes() {
+            Map<String, List<String>> attrs = new LinkedHashMap<>(filters);
+            attrs.remove(MEDIA);
+            return attrs;
+        }
+
+        /** 매체 조건(원문의 매체명) — 없으면 빈 목록. */
+        List<String> media() {
+            return filters.getOrDefault(MEDIA, List.of());
+        }
+
+        /** 원문 단위 조건 — 시즌과 매체. */
+        boolean accepts(SourceDocument doc, TrendItem item) {
+            return inSeason(item) && (media().isEmpty() || media().contains(doc.getMedia()));
         }
 
         /** 속성 조건 없이 카테고리·종류만. */
@@ -442,20 +461,20 @@ public class TrendFactsService {
         Map<String, Set<Long>> keywordDocs = new LinkedHashMap<>();
         Set<Long> baseDocs = new HashSet<>();                    // 속성 조건 전 범위(카테고리·종류·시즌)의 기간 안 원문
         Map<String, Set<Long>> knownDocs = new LinkedHashMap<>(); // 조건 축 → 그 축 값이 있는 원문
-        scope.filters().keySet().forEach(axis -> knownDocs.put(axis, new HashSet<>()));
+        scope.attributes().keySet().forEach(axis -> knownDocs.put(axis, new HashSet<>()));
 
         // 최신 원문부터 — 예시 원문이 최근 것이 되게
         docs.sort(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getId, Comparator.reverseOrder()));
         for (SourceDocument doc : docs) {
             TrendItem item = items.get(doc.getId());
-            if (item == null || !scope.inSeason(item)) continue;
+            if (item == null || !scope.accepts(doc, item)) continue;
             LocalDate date = TrendAggregationService.statDate(doc);
             boolean current = !date.isBefore(period.from());
-            if (current && !scope.filters().isEmpty()) { // 조건 축 값이 아예 없는 원문은 조건으로 거를 수 없다 — 몇 건이 빠졌는지 센다
+            if (current && !scope.attributes().isEmpty()) { // 조건 축 값이 아예 없는 원문은 조건으로 거를 수 없다 — 몇 건이 빠졌는지 센다
                 List<TrendItem.Garment> base = item.garments().stream().filter(scope::matchesBase).toList();
                 if (!base.isEmpty()) {
                     baseDocs.add(doc.getId());
-                    scope.filters().keySet().stream().filter(axis -> base.stream().anyMatch(g -> !valuesOf(g, axis).isEmpty()))
+                    scope.attributes().keySet().stream().filter(axis -> base.stream().anyMatch(g -> !valuesOf(g, axis).isEmpty()))
                             .forEach(axis -> knownDocs.computeIfAbsent(axis, a -> new HashSet<>()).add(doc.getId()));
                 }
             }
@@ -557,7 +576,7 @@ public class TrendFactsService {
             Map<String, Set<Long>> keywords = new LinkedHashMap<>();
             for (SourceDocument doc : docs) { // 최신 원문부터
                 TrendItem item = items.get(doc.getId());
-                List<String> hits = item == null || !scope.inSeason(item) ? List.of() : mentions(item, keys);
+                List<String> hits = item == null || !scope.accepts(doc, item) ? List.of() : mentions(item, keys);
                 if (hits.isEmpty()) continue;
                 boolean current = !TrendAggregationService.statDate(doc).isBefore(period.from());
                 List<TrendItem.Garment> targets = item.garments().stream().filter(g -> matches(g.name(), keys)).toList();
@@ -737,10 +756,13 @@ public class TrendFactsService {
     /** 범위 이름 뒤에 붙는 속성 조건(예: " · 와이드", " · 크롭"). 조건이 없으면 빈 문자열. */
     private String filterLabel(Scope scope) {
         StringBuilder label = new StringBuilder();
-        scope.filters().forEach((type, values) -> {
+        scope.attributes().forEach((type, values) -> {
             Map<String, String> names = names(TrendCodes.VALUE_TYPE_GROUPS.get(type));
             label.append(" · ").append(values.stream().map(v -> shortName(names.getOrDefault(v, v))).collect(Collectors.joining("·")));
         });
+        if (!scope.media().isEmpty()) {
+            label.append(" · ").append(String.join("·", scope.media())).append(" 원문");
+        }
         return label.toString();
     }
 
@@ -843,7 +865,7 @@ public class TrendFactsService {
             LocalDate monday = TrendAggregationService.statDate(doc).with(java.time.DayOfWeek.MONDAY);
             totals.merge(monday, 1, Integer::sum);
             TrendItem item = items.get(doc.getId());
-            if (item == null || !scope.inSeason(item)) continue;
+            if (item == null || !scope.accepts(doc, item)) continue;
             List<TrendItem.Garment> garments = item.garments().stream().filter(scope::matches).toList();
             boolean hit = value == null ? !garments.isEmpty()
                     : garments.stream().anyMatch(g -> valuesOf(g, valueType).contains(value));
@@ -860,7 +882,7 @@ public class TrendFactsService {
         Map<Long, TrendItem> items = trendItemRepository.findByDocumentIdIn(done.stream().map(SourceDocument::getId).toList())
                 .stream().collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
         return done.stream()
-                .filter(d -> items.containsKey(d.getId()) && scope.inSeason(items.get(d.getId()))
+                .filter(d -> items.containsKey(d.getId()) && scope.accepts(d, items.get(d.getId()))
                         && items.get(d.getId()).garments().stream().anyMatch(scope::matches))
                 .map(TrendAggregationService::statDate)
                 .max(Comparator.naturalOrder()).orElse(null);

@@ -413,14 +413,17 @@ public class AgentService {
     }
 
     Codes codes() {
-        return new Codes(comCdRepository);
+        return new Codes(comCdRepository, sourceDocumentRepository.findAnalyzedMedia());
     }
 
     /** 사용 중 공통코드 — 도구 입력을 검증하고(목록 밖 코드는 입력 오류) Claude에게 허용 코드로 보낸다. */
     static final class Codes {
         private final Map<String, List<ComCd>> groups = new LinkedHashMap<>();
+        /** 분석이 끝난 원문의 매체명 — 도구의 media 조건을 확인한다. */
+        private final List<String> media;
 
-        Codes(ComCdRepository repository) {
+        Codes(ComCdRepository repository, List<String> media) {
+            this.media = media == null ? List.of() : media;
             for (String group : List.of(TrendCodes.CATEGORY, TrendCodes.ITEM_TYPE, TrendCodes.SEASON, TrendCodes.MATERIAL,
                     TrendCodes.COLOR, TrendCodes.SILHOUETTE, TrendCodes.GENDER, TrendCodes.PATTERN, TrendCodes.DETAIL)) {
                 groups.put(group, repository.findByCodeGroupAndUseYnOrderBySortOrderAsc(group, "Y"));
@@ -516,6 +519,19 @@ public class AgentService {
                 if (!values.isEmpty()) filters.put(type, values);
             });
             List<String> seasons = knownList(TrendCodes.SEASON, input.get("seasons"), "seasons");
+            // 매체 조건(원문 단위) — 매체명이나 줄임말("엘르")을 받아 등록된 매체명으로 바꾼다
+            if (input.get("media") instanceof List<?> list && !list.isEmpty()) {
+                List<String> picked = new ArrayList<>();
+                for (Object o : list) {
+                    String m = text(o);
+                    if (m == null) continue;
+                    String key = m.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
+                    String found = media.stream().filter(x -> RagService.mediaAliases(x).contains(key)).findFirst()
+                            .orElseThrow(() -> new IllegalArgumentException("media에 없는 매체다: " + m + " (있는 매체: " + media + ")"));
+                    if (!picked.contains(found)) picked.add(found);
+                }
+                if (!picked.isEmpty()) filters.put(TrendFactsService.MEDIA, picked);
+            }
             List<String> terms = input.get("terms") instanceof List<?> list
                     ? list.stream().map(AgentService::text).filter(Objects::nonNull).limit(RagService.MAX_TERMS).toList() : List.of();
             String focus = null, change = null;

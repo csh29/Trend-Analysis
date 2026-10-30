@@ -161,7 +161,7 @@ public class RagService {
             throw new AiCallException("claude.api.key가 설정되지 않았습니다. application.properties에 키를 넣으세요.", false);
         }
         LocalDate today = LocalDate.now();
-        Interpreted interpreted = interpret(text, today, history, meter);
+        Interpreted interpreted = withMedia(interpret(text, today, history, meter));
         if (interpreted.fashion()) {
             recentInterpretations.put(today + " " + interpreted.query().strip(), interpreted.question());
         }
@@ -200,6 +200,47 @@ public class RagService {
      * 해석 결과와 누가 해석했는지(AI·RULE). fashion은 AI 해석만 false가 될 수 있다(규칙으로는 주제를 가리지 않는다).
      * query는 검색·답변에 쓰는 질문 — 이어 묻기면 앞 대화로 채워 다시 쓴 질문, 아니면(규칙 해석 포함) 원래 질문.
      */
+    /**
+     * 질문에 등록된 매체 이름("엘르코리아", 줄여 쓴 "엘르")이 있으면 그 매체 원문만 세는 유행 질문으로 바꾼다(2026-10-30 사용자 결정).
+     * 매체명은 원문의 메타데이터라 색인 글에 없어 검색으로는 찾지 못했다("엘르코리아 패션 특징은?" → 근거 없음, 엘르코리아 원문 10건).
+     * 판단이 필요 없는 글자 맞춤이라 코드가 한다 — 해석 모델은 매체를 "특정 자료" 질문(검색)으로 본다. 매체 이름은 terms에서 뺀다.
+     */
+    private Interpreted withMedia(Interpreted interpreted) {
+        if (!interpreted.fashion()) return interpreted;
+        String asked = compactText(interpreted.original() + " " + interpreted.query());
+        List<String> media = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        for (String m : sourceDocumentRepository.findAnalyzedMedia()) {
+            if (com.sjinc.trendanalysis.service.analysis.DocumentService.UPLOAD_MEDIA.equals(m) || com.sjinc.trendanalysis.service.analysis.DocumentService.TEXT_MEDIA.equals(m)) continue;
+            for (String alias : mediaAliases(m)) {
+                if (asked.contains(alias)) {
+                    media.add(m);
+                    names.add(alias);
+                    break;
+                }
+            }
+        }
+        if (media.isEmpty()) return interpreted;
+        QuestionInterpreter.Interpretation q = interpreted.question();
+        Map<String, List<String>> filters = new LinkedHashMap<>(q.filters());
+        filters.put(TrendFactsService.MEDIA, List.copyOf(media));
+        List<String> terms = q.terms().stream().filter(t -> names.stream().noneMatch(n -> compactText(t).contains(n))).toList();
+        log.info("RAG 질문의 매체 {} — 그 매체 원문만 센다(유행 질문으로)", media);
+        return new Interpreted(new QuestionInterpreter.Interpretation(true, q.category(), q.categoryName(), q.itemType(), q.itemTypeName(),
+                q.period(), terms, q.seasons(), q.focus(), filters, q.change()), true, interpreted.by(), interpreted.original(), interpreted.query());
+    }
+
+    /** 매체명과 줄임말(뒤의 "코리아"·"Korea"를 뗀 이름, 2글자 이상) — 공백·대소문자 무시. */
+    static List<String> mediaAliases(String media) {
+        String full = compactText(media);
+        String shortName = full.replaceAll("(코리아|korea)$", "");
+        return shortName.length() >= 2 && !shortName.equals(full) ? List.of(full, shortName) : List.of(full);
+    }
+
+    private static String compactText(String text) {
+        return text == null ? "" : text.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
+    }
+
     private record Interpreted(QuestionInterpreter.Interpretation question, boolean fashion, String by, String original,
                                String query) {
         RagAnswerView.Interpretation view() {

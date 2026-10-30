@@ -29,6 +29,10 @@ public interface SourceDocumentRepository extends JpaRepository<SourceDocument, 
 
     List<SourceDocument> findByImageIdIn(Collection<Long> imageIds);
 
+    /** 분석이 끝난 원문의 매체명(빈 값 제외) — 질문에 나온 매체를 알아보는 데 쓴다. */
+    @Query("select distinct d.media from SourceDocument d where d.status = 'DONE' and d.media is not null and d.media <> ''")
+    List<String> findAnalyzedMedia();
+
     Optional<SourceDocument> findByImageId(Long imageId);
 
     List<SourceDocument> findByDocTypeOrderByRegisteredAtDescIdDesc(String docType);
