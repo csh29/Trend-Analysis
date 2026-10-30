@@ -249,18 +249,21 @@ public class TrendFactsService {
          * AI 서비스에 보내는 집계 줄(한국어) — 해석 규칙은 prompts/rag/answer.md. 묻는 축이 정해졌으면(focused) 그 축(첫 축)만 보낸다 —
          * "F/W 핵심 컬러" 답은 컬러 축과 그 주요 아이템만 썼고 나머지 축 줄 약 900토큰은 쓰이지 않았다(2026-10-26 사용자 결정).
          * 묻는 축이 없는 질문(기획 브리프 등)은 여러 축이 필요해 모두 보낸다.
+         * 증감 질문이 아니면 직전 건수·증감률·비중·수집량 주의·출처 수를 싣지 않는다 — 답에 쓰지 않는다(answer.md: 순위는 유행점수, 숫자는 묻지 않으면 쓰지 않는다).
+         * 값 이름의 괄호 속 같은 뜻 말("레더 재킷(라이더·…)")과 1건짜리 기타 아이템명도 뺀다(2026-10-30 사용자 요청 — 답에 엉뚱한 이름이 섞이고 토큰만 든다).
          */
         public List<String> lines() {
             List<String> lines = new ArrayList<>();
-            lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건 · 출처 " + mediaCount + "곳 (직전 기간 원문 " + prevDocCount + "건, "
-                    + rate(docCount, prevDocCount) + ")");
+            boolean changes = change != null;
+            lines.add("대상: " + scopeLabel + " · 원문 " + docCount + "건" + (changes ? " · 출처 " + mediaCount + "곳 (직전 기간 원문 "
+                    + prevDocCount + "건, " + rate(docCount, prevDocCount) + ")" : ""));
             lines.addAll(coverage);
-            String note = volumeNote();
+            String note = changes ? volumeNote() : null;
             if (note != null) {
                 lines.add("[수집량 주의] " + note);
             }
-            if (change == null) {
-                lines.add("[정렬] 유행점수 순 — 유행점수 = 출처마다 첫 원문 1점 + 같은 출처의 반복 원문 0.5점(직접 업로드는 원문마다 다른 출처)");
+            if (!changes) {
+                lines.add("[정렬] 유행점수 순");
             } else {
                 String by = prevDocCount > 0 ? "비중" : "원문 수";
                 lines.add("[정렬] " + switch (change) {
@@ -272,13 +275,17 @@ public class TrendFactsService {
             for (Dimension d : focused ? dimensions.stream().limit(1).toList() : dimensions) {
                 if (d.rows().isEmpty()) continue;
                 lines.add("[" + d.label() + "] " + d.rows().stream()
-                        .map(r -> r.label() + " 유행점수 " + score(r.score()) + " · " + r.count() + "건 · 출처 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건("
-                                + rate(r.count(), r.prevCount()) + ") · 비중 " + r.share() + "%(직전 " + r.prevShare() + "%, "
-                                + pointDelta(r.shareDelta()) + ")"
-                                + (r.names().isEmpty() ? "" : " (아이템명: " + r.names().stream()
-                                .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")")
-                                + (r.items().isEmpty() ? "" : " [주요 아이템: " + r.items().stream()
-                                .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + "]"))
+                        .map(r -> {
+                            // 기타 묶음 안 아이템명 — 1건짜리는 사례일 뿐이라 뺀다
+                            List<NameCount> names = r.names().stream().filter(n -> n.count() >= 2).toList();
+                            return shortName(r.label()) + " 유행점수 " + score(r.score()) + " · " + r.count() + "건"
+                                    + (changes ? " · 출처 " + r.mediaCount() + "곳 · 직전 " + r.prevCount() + "건(" + rate(r.count(), r.prevCount())
+                                    + ") · 비중 " + r.share() + "%(직전 " + r.prevShare() + "%, " + pointDelta(r.shareDelta()) + ")" : "")
+                                    + (names.isEmpty() ? "" : " (아이템명: " + names.stream()
+                                    .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")")
+                                    + (r.items().isEmpty() ? "" : " [주요 아이템: " + r.items().stream()
+                                    .map(n -> shortName(n.name()) + " " + n.count() + "건").collect(Collectors.joining(", ")) + "]");
+                        })
                         .collect(Collectors.joining(" / ")));
             }
             if (!combos.isEmpty()) {
@@ -290,12 +297,14 @@ public class TrendFactsService {
                         .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")));
             }
             for (TermRow t : terms) {
-                lines.add("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] " + t.term() + " " + t.count() + "건 · 출처 " + t.mediaCount()
-                        + "곳 · 직전 " + t.prevCount() + "건(" + rate(t.count(), t.prevCount()) + ")" + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
+                lines.add("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] " + t.term() + " " + t.count() + "건"
+                        + (changes ? " · 출처 " + t.mediaCount() + "곳 · 직전 " + t.prevCount() + "건(" + rate(t.count(), t.prevCount()) + ")" : "")
+                        + (t.expressions().isEmpty() ? "" : " (나온 표현: " + t.expressions().stream()
                         .map(n -> n.name() + " " + n.count() + "건").collect(Collectors.joining(", ")) + ")"));
                 for (TermPoint pt : t.points()) {
                     lines.add("  - " + t.term() + " 옷의 " + pt.label() + ": " + pt.values().stream()
-                            .map(v -> v.name() + " " + v.count() + "건(직전 " + v.prevCount() + ", " + rate(v.count(), v.prevCount()) + ")")
+                            .map(v -> shortName(v.name()) + " " + v.count() + "건"
+                                    + (changes ? "(직전 " + v.prevCount() + ", " + rate(v.count(), v.prevCount()) + ")" : ""))
                             .collect(Collectors.joining(", ")));
                 }
                 if (!t.together().isEmpty()) {

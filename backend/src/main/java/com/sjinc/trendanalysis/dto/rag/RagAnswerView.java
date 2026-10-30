@@ -31,7 +31,7 @@ public record RagAnswerView(String question, boolean grounded, String answer, Li
                 List.of(), List.of(), null, false);
     }
 
-    /** 검색 답의 기준·점수 종류를 질문 때 읽은 검색 방식(SearchSettings)으로 바꾼 답. */
+    /** 검색 답의 기준·점수 종류를 AI 서비스가 돌려준 값(리랭킹 여부·실제 기준)으로 바꾼 답. */
     public RagAnswerView withSearchScore(double minScore, boolean reranked) {
         return new RagAnswerView(question, grounded, answer, points, reason, sources, bestScore, minScore, period, interpretation,
                 facts, body, moreFacts, unverifiedNumbers, chart, reranked);

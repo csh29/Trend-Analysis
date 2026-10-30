@@ -78,7 +78,7 @@ public class AiClient {
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AnswerRequest(String question, String model, int topK, double minScore, String today, String mode, String category, AnswerPeriod period,
-                                List<String> trendFacts, List<String> evidenceDocIds, boolean rerank) {
+                                List<String> trendFacts, List<String> evidenceDocIds) {
 
         public static final String SEARCH = "SEARCH";
         public static final String TREND = "TREND";
@@ -149,7 +149,14 @@ public class AiClient {
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
-                                 Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period, String body) {
+                                 Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period, String body,
+                                 Boolean reranked, Double minScore) {
+
+        /** reranked·minScore — AI 서비스가 리랭킹을 했는지(ai/.env RERANK)와 실제로 건 근거 기준. 검색 답에만 있다. */
+        public AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
+                              Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period, String body) {
+            this(grounded, answer, points, sources, bestScore, usage, reason, period, body, null, null);
+        }
 
         public AnswerResponse(boolean grounded, String answer, List<AnswerPoint> points, List<AnswerSource> sources,
                               Double bestScore, Map<String, Object> usage, String reason, AnswerPeriod period) {
@@ -238,23 +245,26 @@ public class AiClient {
         return body == null ? "" : body.path("text").asText("");
     }
 
-    /** 검색 한 건 — 청크가 나온 원문, 청크 글, 근거 점수(리랭킹을 했으면 리랭커 점수, 아니면 유사도 1 - 코사인 거리). */
-    public record SearchHit(String docId, String chunk, double score) {
+    /** 검색 한 건 — 청크가 나온 원문, 청크 글, 근거 점수(reranked면 리랭커 점수, 아니면 유사도 1 - 코사인 거리). */
+    public record SearchHit(String docId, String chunk, double score, boolean reranked) {
     }
 
     /**
-     * 질문과 관련 있는 청크(관련 순, Claude 호출 없음) — 도구 경로의 search_documents. category가 있으면 그 카테고리 원문만.
-     * rerank면 AI 서비스가 리랭커로 다시 매기고, 점수도 리랭커 점수를 쓴다(SearchSettings).
+     * 질문과 관련 있는 청크 중 근거 기준을 넘은 것(관련 순, Claude 호출 없음) — 도구 경로의 search_documents. category가 있으면
+     * 그 카테고리 원문만. minScore는 유사도 기준이고, AI 서비스가 리랭킹을 켰으면(ai/.env RERANK) 리랭커 기준으로 바꿔 건다.
      */
-    public List<SearchHit> search(String query, int topK, String category, boolean rerank) {
+    public List<SearchHit> search(String query, int topK, String category, double minScore) {
         JsonNode body = call(() -> restClient.get()
-                .uri(b -> b.path("/search").queryParam("q", query).queryParam("top_k", topK).queryParam("rerank", rerank)
+                .uri(b -> b.path("/search").queryParam("q", query).queryParam("top_k", topK).queryParam("min_score", minScore)
                         .queryParamIfPresent("category", java.util.Optional.ofNullable(category)).build())
                 .retrieve().body(JsonNode.class));
         List<SearchHit> hits = new java.util.ArrayList<>();
         if (body != null) {
-            body.forEach(h -> hits.add(new SearchHit(h.path("metadata").path("doc_id").asText(h.path("id").asText().split("#")[0]),
-                    h.path("document").asText(""), h.path(rerank ? "rerank" : "score").asDouble())));
+            body.forEach(h -> {
+                boolean reranked = h.hasNonNull("rerank");
+                hits.add(new SearchHit(h.path("metadata").path("doc_id").asText(h.path("id").asText().split("#")[0]),
+                        h.path("document").asText(""), h.path(reranked ? "rerank" : "score").asDouble(), reranked));
+            });
         }
         return hits;
     }

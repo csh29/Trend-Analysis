@@ -19,7 +19,6 @@
 - **사용자별 권한 저장은 통째 교체**다. 벌크 DELETE 후 INSERT — 행 단위로 섞으면 (user, program) 유일 제약을 위반한다.
 - 공통코드 디테일은 마스터의 자연키(`codeGroup`)를 들고 있다.
 - **프로그램이 읽는 목록은 Java에 박지 않고 공통코드에 둔다**(사용자 결정): 트렌드 분석 화면 유형(`TREND_VALUE_TYPE`), 유행 질문 단어(`RAG_TREND_WORD`), 아이템 종류(`TREND_ITEM`, 코드값 = `카테고리_종류`) 등. 고치면 재기동 없이 다음 분석·질문부터 쓴다.
-- **챗봇 검색 설정(`RAG_SEARCH`)도 공통코드다**: `RERANK`의 사용 여부가 리랭킹 켜기/끄기, 속성이 리랭커 기준(0~1). 뜻은 [`rag-search.md`](rag-search.md)의 리랭킹.
 - **공통코드 속성(`attr1`)**: 비고는 사람이 읽는 설명, 속성은 프로그램이 읽는 값이다. 그룹마다 뜻이 다르고 그룹 비고에 적는다: `TREND_SILHOUETTE` `축,쓸 수 있는 카테고리…`(예: `FIT,OUTER,TOP,DRESS,SETUP`, 카테고리를 안 적으면 전체), `TREND_MATERIAL` IMAGE(사진으로 구분되는 소재), `TREND_CATEGORY` 일상 표현 쉼표 목록.
 - 초안에서 코드 이름을 바꾸면 `DataInitializer.OLD_DEFAULT_NAMES`에 예전 이름을 적는다 — 기존 DB에서 이름이 아직 예전 기본값이면 기동 때 새 이름으로 바꾼다(화면에서 고친 이름은 그대로). 이름의 괄호가 AI 분류 힌트라 기존 DB에도 들어가야 한다.
 - 초안에 코드를 더하면 `DataInitializer.NEW_CODES`에도 적는다 — 그룹이 이미 있는 DB는 초안을 다시 넣지 않으므로, 없으면 그룹 끝에 넣는다. 초안에서 뺀 코드는 `RETIRED_CODES`에 적는다(기존 DB에서 지운다).

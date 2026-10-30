@@ -69,7 +69,7 @@ class TrendFactsTermTest {
                 .containsExactly("무스탕", "무스탕 재킷", "무스탕 칼라");
         // 질문 단어가 나온 최근 원문이 예시 원문 앞에 온다
         assertThat(facts.evidenceDocIds()).startsWith("TM-1", "TM-2");
-        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] 무스탕 3건 · 출처 2곳 · 직전 1건(+200%) (나온 표현: "));
+        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[질문 단어 — 키워드·아이템명에 나온 원문, 범위 무관] 무스탕 3건 (나온 표현: ")); // 증감 질문이 아니면 출처·직전은 뺀다
     }
 
     /** 옷 여러 벌짜리 원문 — garments는 {카테고리, 종류, 이름, 컬러, 실루엣} (컬러·실루엣은 빈 문자열이면 없음). */
@@ -121,7 +121,7 @@ class TrendFactsTermTest {
         TrendFactsService.TermRow wide = facts.terms().get(1);
         assertThat(wide.count()).isEqualTo(1);
         assertThat(wide.together()).containsExactly(new TrendFactsService.NameCount("레더 재킷", 1));
-        assertThat(facts.lines()).contains("  - 가죽 재킷 옷의 컬러: 블랙 2건(직전 1, +100%)");
+        assertThat(facts.lines()).contains("  - 가죽 재킷 옷의 컬러: 블랙 2건");
     }
 
     @Test

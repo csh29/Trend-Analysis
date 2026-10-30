@@ -49,7 +49,7 @@ class AiClientWireTest {
     private static AiClient.AnswerRequest request() {
         return new AiClient.AnswerRequest("요즘 와이드 팬츠", "claude-sonnet-5", 8, 0.6,
                 LocalDate.of(2026, 10, 22).toString(), AiClient.AnswerRequest.SEARCH, "OUTER",
-                new AiClient.AnswerPeriod("2026-10-12", "2026-10-18", "지난주", true, false), List.of(), List.of(), true);
+                new AiClient.AnswerPeriod("2026-10-12", "2026-10-18", "지난주", true, false), List.of(), List.of());
     }
 
     @Test

@@ -34,8 +34,18 @@ class Settings:
     chunk_size: int
     chunk_overlap: int
     hybrid_search: bool = True  # P-06 검색에 키워드(BM25)를 RRF로 합친다. false면 벡터만
-    rerank_model: str = "BAAI/bge-reranker-v2-m3"  # P-06 리랭커(켜기/끄기는 Spring 공통코드 RAG_SEARCH)
+    rerank: bool = True  # P-06 근거 검색에 리랭킹. 켜면 근거 기준도 리랭커 점수(rerank_min_score), 끄면 Spring rag.min-score(유사도)
+    rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rerank_min_score: float = 0.10  # 리랭커 근거 기준(0~1) — 2026-10-30 rerank_eval: 자료 없는 주제 1위 최고 0.042, 정답은 모두 0.10 이상
     preload_models: bool = True  # 기동 때 임베딩·리랭커 모델을 백그라운드로 미리 올린다
+
+
+def _score(value: str) -> float:
+    """0~1 사이(양 끝 제외) 기준값. 잘못 적어 기준이 사라지면(0) 무관한 원문까지 근거가 되므로 기동을 막는다."""
+    score = float(value)
+    if not 0 < score < 1:
+        raise ValueError(f"RERANK_MIN_SCORE는 0과 1 사이여야 합니다: {value}")
+    return score
 
 
 def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
@@ -60,7 +70,9 @@ def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
         chunk_size=int(get("CHUNK_SIZE", "500")),
         chunk_overlap=int(get("CHUNK_OVERLAP", "80")),
         hybrid_search=get("HYBRID_SEARCH", "true").lower() != "false",
+        rerank=get("RERANK", "true").lower() != "false",
         rerank_model=get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+        rerank_min_score=_score(get("RERANK_MIN_SCORE", "0.10")),
         preload_models=get("PRELOAD_MODELS", "true").lower() != "false",
     )
 

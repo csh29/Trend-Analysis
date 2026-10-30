@@ -66,7 +66,6 @@ public class RagService {
     private final TrendFactsService trendFactsService;
     private final ComCdRepository comCdRepository;
     private final AgentService agentService;
-    private final SearchSettings searchSettings;
     private final boolean agentEnabled;
     private final String apiKey;
     private final String model;
@@ -81,7 +80,6 @@ public class RagService {
      */
     public RagService(AiClient aiClient, SourceDocumentRepository sourceDocumentRepository, ImageService imageService,
                       TrendFactsService trendFactsService, ComCdRepository comCdRepository, AgentService agentService,
-                      SearchSettings searchSettings,
                       @Value("${rag.agent.enabled:true}") boolean agentEnabled,
                       @Value("${claude.api.key:}") String apiKey,
                       @Value("${claude.model:claude-sonnet-5}") String model,
@@ -94,7 +92,6 @@ public class RagService {
         this.trendFactsService = trendFactsService;
         this.comCdRepository = comCdRepository;
         this.agentService = agentService;
-        this.searchSettings = searchSettings;
         this.agentEnabled = agentEnabled;
         this.apiKey = apiKey;
         this.model = model;
@@ -322,7 +319,7 @@ public class RagService {
         AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
                 today.toString(), AiClient.AnswerRequest.TREND, interpreted.question().category(),
                 new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), p.explicit(), facts.stale()),
-                facts.lines(), facts.evidenceDocIds(), false), apiKey);
+                facts.lines(), facts.evidenceDocIds()), apiKey);
         log.info("RAG 유행 질문 {}자 범위={} 기간={}~{} 원문 {}건 출처 {}곳 근거={} 인용 {}건 토큰 {}", text.length(), facts.scopeLabel(),
                 p.from(), p.to(), facts.docCount(), facts.mediaCount(), response.grounded(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
@@ -336,22 +333,22 @@ public class RagService {
      */
     private RagAnswerView askSearch(String text, Interpreted interpreted, LocalDate today, Meter meter) {
         QuestionInterpreter.Period p = interpreted.question().period();
-        SearchSettings.Mode mode = searchSettings.current();
-        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, mode.minScore(),
+        AiClient.AnswerResponse response = aiClient.answer(new AiClient.AnswerRequest(interpreted.query(), model, topK, minScore,
                 today.toString(), AiClient.AnswerRequest.SEARCH,
                 interpreted.question().category(),
                 p == null ? null : new AiClient.AnswerPeriod(p.from().toString(), p.to().toString(), p.label(), true, false),
-                List.of(), List.of(), mode.rerank()), apiKey);
+                List.of(), List.of()), apiKey);
+        boolean reranked = Boolean.TRUE.equals(response.reranked()); // 리랭킹 여부와 실제 기준은 AI 서비스 설정(ai/.env RERANK)이 정한다
         RagAnswerView.Period period = response.period() == null ? null : new RagAnswerView.Period(
                 date(response.period().from()), date(response.period().to()), response.period().label(),
                 response.period().explicit(), response.period().stale());
         log.info("RAG 질문 {}자 카테고리={} 근거={} 사유={} 최고 {}={} 출처 {}건 토큰 {}", text.length(),
-                interpreted.question().category(), response.grounded(), response.reason(), mode.rerank() ? "리랭커 점수" : "유사도",
+                interpreted.question().category(), response.grounded(), response.reason(), reranked ? "리랭커 점수" : "유사도",
                 response.bestScore(),
                 response.sources() == null ? 0 : response.sources().size(), TokenUsage.of(response.usage()));
         meter.add(response.usage());
         return view(text, response, period, interpreted, null, List.of(), List.of(), null) // 검색 답은 집계 수치를 쓰지 않아 대조하지 않는다
-                .withSearchScore(mode.minScore(), mode.rerank());
+                .withSearchScore(response.minScore() == null ? minScore : response.minScore(), reranked);
     }
 
     /**

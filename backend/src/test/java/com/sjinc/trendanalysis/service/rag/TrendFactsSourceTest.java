@@ -57,6 +57,6 @@ class TrendFactsSourceTest {
         TrendFactsService.Row padding = facts.dimensions().get(0).rows().get(0);
         assertThat(padding.mediaCount()).isEqualTo(4);
         assertThat(padding.score()).isEqualTo(TrendFactsService.trendScore(5, 4)); // 출처 수와 점수가 같은 기준
-        assertThat(facts.lines()).anyMatch(l -> l.contains("5건 · 출처 4곳"));
+        assertThat(facts.lines()).anyMatch(l -> l.contains("유행점수 4.5 · 5건")); // 증감 질문이 아니면 출처 수는 싣지 않는다
     }
 }

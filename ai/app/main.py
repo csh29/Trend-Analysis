@@ -43,6 +43,8 @@ def preload_models() -> None:
         vector_store.embed_query(collection, PRELOAD_TEXT)
         keyword_index.get(collection)
         log.info("임베딩 모델·키워드 색인을 미리 올렸습니다(%.1f초)", time.perf_counter() - started)
+        if not settings.rerank:
+            return  # 리랭킹을 끄면 리랭커는 올리지 않는다(메모리 약 2.3GB)
         reranker.get().score(PRELOAD_TEXT, [PRELOAD_TEXT])
         log.info("리랭커 모델을 미리 올렸습니다(누적 %.1f초)", time.perf_counter() - started)
     except Exception:
@@ -133,7 +135,6 @@ class AnswerRequest(BaseModel):
     period: PeriodModel | None = None
     trend_facts: list[str] = []
     evidence_doc_ids: list[str] = Field(default=[], max_length=20)
-    rerank: bool = False  # SEARCH: 리랭킹(Spring 공통코드 RAG_SEARCH) — 켜면 min_score는 리랭커 점수 기준
 
 
 class CodeHintModel(BaseModel):
@@ -302,19 +303,28 @@ def delete_index(doc_id: str):
 
 @app.get("/search")
 def search_chunks(q: str, top_k: int = Query(default=10, ge=1, le=50), category: str | None = None,
-                  hybrid: bool | None = None, rerank: bool = False):
+                  hybrid: bool | None = None, rerank: bool | None = None,
+                  min_score: float | None = Query(default=None, ge=0.0, le=1.0)):
     """질문으로 청크를 찾아 유사도와 함께 준다(읽기 전용, Claude 호출 없음) — 기준 유사도를 정할 때 점수 분포를 보고,
     도구 경로의 search_documents(Spring)가 이유·사례 근거를 찾는다. category를 주면 그 카테고리 아이템이 있는 원문만.
     결과는 관련 순서(하이브리드면 RRF)다. hybrid를 주면 설정(HYBRID_SEARCH) 대신 그 방식으로 — 검색 평가의 벡터/하이브리드 비교용.
-    rerank면 후보를 넉넉히(30개) 모아 리랭커 점수(rerank) 순으로 top_k개 — Spring이 리랭킹을 켰을 때 그 점수로 거른다."""
+    리랭킹(설정 RERANK, rerank로 덮어쓸 수 있다)이면 후보를 넉넉히(30개) 모아 리랭커 점수(rerank) 순으로 top_k개.
+    min_score(유사도 기준)를 주면 근거 기준을 넘은 것만 준다 — 리랭킹이면 리랭커 기준(RERANK_MIN_SCORE)으로 바꿔 건다.
+    도구 경로의 search_documents(Spring)가 이렇게 부른다."""
     try:
         query = rag.ensure_question(q, MAX_QUESTION_LENGTH)
     except AiServiceError as e:
         raise HTTPException(status_code=e.status_code, detail={"message": str(e), "retryable": False})
     where = {f"cat_{category}": True} if category else None
-    if not rerank:
-        return rag.search(vector_store.get_collection(), query, top_k, where, hybrid)
-    return rag.rerank(query, rag.search(vector_store.get_collection(), query, max(top_k, rag.CANDIDATES), where, hybrid))[:top_k]
+    rerank = settings.rerank if rerank is None else rerank
+    if rerank:
+        hits = rag.rerank(query, rag.search(vector_store.get_collection(), query, max(top_k, rag.CANDIDATES), where, hybrid))[:top_k]
+    else:
+        hits = rag.search(vector_store.get_collection(), query, top_k, where, hybrid)
+    if min_score is None:
+        return hits
+    gate = settings.rerank_min_score if rerank else min_score
+    return [h for h in hits if rag.evidence_score(h) >= gate]
 
 
 @app.post("/agent/step")
@@ -350,12 +360,16 @@ def answer_question(req: AnswerRequest, x_claude_api_key: str | None = Header(de
         raise HTTPException(status_code=401, detail={"message": "Claude API 키가 없습니다(claude.api.key).", "retryable": False})
     try:
         question = rag.ensure_question(req.question, MAX_QUESTION_LENGTH)
-        data = rag.AnswerInput(question=question, model=req.model, top_k=req.top_k, min_score=req.min_score,
+        # 리랭킹 여부와 그 기준은 이 서비스 설정(RERANK·RERANK_MIN_SCORE)이다. Spring이 보낸 min_score는 유사도 기준(리랭킹을 껐을 때)
+        rerank = settings.rerank and req.mode == "SEARCH"
+        min_score = settings.rerank_min_score if rerank else req.min_score
+        data = rag.AnswerInput(question=question, model=req.model, top_k=req.top_k, min_score=min_score,
                                today=req.today or date.today(), mode=req.mode, category=req.category,
                                period=rag.Period(req.period.start, req.period.end, req.period.label, req.period.explicit)
                                if req.period else None,
-                               trend_facts=req.trend_facts, evidence_doc_ids=req.evidence_doc_ids, rerank=req.rerank)
-        return rag.answer(vector_store.get_collection(), data, x_claude_api_key)
+                               trend_facts=req.trend_facts, evidence_doc_ids=req.evidence_doc_ids, rerank=rerank)
+        # 화면이 점수 이름(관련도/유사도)과 실제 쓴 기준을 보이게 같이 돌려준다
+        return {**rag.answer(vector_store.get_collection(), data, x_claude_api_key), "reranked": rerank, "min_score": min_score}
     except AiServiceError as e:
         log.warning("RAG 답변 실패: %s", e)
         detail = {"message": str(e), "retryable": e.retryable}

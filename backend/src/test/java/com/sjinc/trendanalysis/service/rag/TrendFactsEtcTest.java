@@ -63,6 +63,8 @@ class TrendFactsEtcTest {
         assertThat(types.rows().get(1).names()).isEmpty(); // 기타가 아닌 종류는 아이템명을 붙이지 않는다
 
         List<String> lines = facts.lines();
-        assertThat(lines).anyMatch(l -> l.contains("기타 아우터 유행점수 2.5 · 4건 · 출처 1곳 · 직전 0건(신규) · 비중 80%(직전 0%, +80%p) (아이템명: 퀼팅 재킷 2건, 사파리 재킷 1건, 케이프 1건)"));
+        // 증감 질문이 아니면 직전·비중은 싣지 않고, 1건짜리 아이템명은 뺀다(2026-10-30)
+        assertThat(lines).anyMatch(l -> l.contains("기타 아우터 유행점수 2.5 · 4건 (아이템명: 퀼팅 재킷 2건)"));
+        assertThat(lines).noneMatch(l -> l.contains("직전") || l.contains("비중") || l.contains("[수집량 주의]"));
     }
 }

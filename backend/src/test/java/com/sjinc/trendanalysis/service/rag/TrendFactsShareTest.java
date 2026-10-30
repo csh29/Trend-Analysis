@@ -80,7 +80,8 @@ class TrendFactsShareTest {
     void 수집량이_크게_다르면_주의를_붙인다() {
         TrendFactsService.Facts facts = count(null);
         assertThat(facts.volumeNote()).contains("직전 3건 → 이번 10건");
-        assertThat(facts.lines()).anyMatch(l -> l.startsWith("[수집량 주의]"));
+        assertThat(facts.lines()).noneMatch(l -> l.startsWith("[수집량 주의]")); // 증감 질문이 아니면 싣지 않는다(2026-10-30)
+        assertThat(count("UP").lines()).anyMatch(l -> l.startsWith("[수집량 주의]"));
 
         assertThat(TrendFactsService.volumeNote(129, 17)).isNotNull();
         assertThat(TrendFactsService.volumeNote(20, 18)).isNull();    // 비슷한 양이면 붙이지 않는다

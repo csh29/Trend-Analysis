@@ -13,7 +13,6 @@ import com.sjinc.trendanalysis.repository.UserProgramPermissionRepository;
 import com.sjinc.trendanalysis.repository.UserRepository;
 import com.sjinc.trendanalysis.service.analysis.TrendCodes;
 import com.sjinc.trendanalysis.service.program.ProgramService;
-import com.sjinc.trendanalysis.service.rag.SearchSettings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
@@ -61,7 +60,7 @@ public class DataInitializer implements CommandLineRunner {
         seedMenuGroupIfAbsent();
         seedTrendMenuGroupIfAbsent();
         seedTrendCodesIfAbsent();
-        seedRagSearchIfAbsent();
+        removeRagSearchCodes();
         List<Program> added = seedManagementProgramsIfAbsent();
         seedTrendProgramsIfAbsent(added);
         addReanalyzeButtons();
@@ -188,19 +187,18 @@ public class DataInitializer implements CommandLineRunner {
         }
     }
 
-    /** 챗봇 근거 검색 방식(공통코드 RAG_SEARCH) — 리랭킹 켜기/끄기와 리랭커 기준. 그룹이 없을 때만 넣는다(화면에서 고친 값을 덮어쓰지 않는다). */
-    private void seedRagSearchIfAbsent() {
-        if (comCdGroupRepository.existsById(SearchSettings.GROUP)) return;
-        comCdGroupRepository.save(ComCdGroup.builder()
-                .codeGroup(SearchSettings.GROUP).groupName("챗봇 검색 설정").sortOrder(30).useYn("Y")
-                .remark("챗봇 근거 검색 방식. 고치면 다음 질문부터 쓴다(재기동 없음)").build());
-        comCdRepository.save(ComCd.builder().codeGroup(SearchSettings.GROUP)
-                .codeValue(SearchSettings.RERANK).codeName("리랭킹").sortOrder(1).useYn("Y")
-                .attr1(SearchSettings.DEFAULT_RERANK_MIN_SCORE)
-                .remark("사용=켜기. 속성 = 근거로 인정하는 리랭커 점수(0~1). 끄면 설정 rag.min-score(유사도) 기준. 켜면 검색 질문이 이 PC(CPU)에서 20~30초 더 걸린다")
-                .build());
-        log.info("공통코드 {}(챗봇 검색 설정)을 추가했습니다.", SearchSettings.GROUP);
+    /**
+     * 공통코드 RAG_SEARCH(챗봇 검색 설정 — 리랭킹 켜기/끄기)를 지운다. 리랭킹은 AI 서비스 설정(ai/.env RERANK)으로 옮겼다
+     * (2026-10-30 사용자 결정 — 메모리 때문에 리랭커를 올리지 않으려면 AI 서비스 설정이어야 한다). 잠깐 이 공통코드로 띄운 DB에만 있다.
+     */
+    private void removeRagSearchCodes() {
+        if (!comCdGroupRepository.existsById(RETIRED_RAG_SEARCH)) return;
+        comCdRepository.deleteAll(comCdRepository.findByCodeGroupOrderBySortOrderAsc(RETIRED_RAG_SEARCH));
+        comCdGroupRepository.deleteById(RETIRED_RAG_SEARCH);
+        log.info("공통코드 {}(챗봇 검색 설정)를 지웠습니다 — 리랭킹은 AI 서비스 설정(RERANK)입니다.", RETIRED_RAG_SEARCH);
     }
+
+    private static final String RETIRED_RAG_SEARCH = "RAG_SEARCH";
 
     /** 그룹 비고 — 속성(attr1)을 쓰는 그룹은 무엇을 쓰는지 적는다. */
     private static final java.util.Map<String, String> GROUP_REMARKS = java.util.Map.of(

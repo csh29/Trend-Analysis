@@ -192,7 +192,7 @@ class PreloadTest(unittest.TestCase):
     def test_preload_warms_embedding_keyword_and_reranker(self):
         collection = FakeQueryCollection(ROWS)
         fake = FakeReranker("x")
-        with mock.patch.object(main.vector_store, "get_collection", return_value=collection),                 mock.patch.object(main.reranker, "get", return_value=fake):
+        with mock.patch.object(main, "settings", dataclasses.replace(main.settings, rerank=True)),                 mock.patch.object(main.vector_store, "get_collection", return_value=collection),                 mock.patch.object(main.reranker, "get", return_value=fake):
             main.preload_models()
         self.assertEqual([main.PRELOAD_TEXT], [q for q, _ in fake.calls])
         self.assertIs(collection, keyword_index._source)
@@ -200,6 +200,38 @@ class PreloadTest(unittest.TestCase):
     def test_preload_failure_is_logged_not_raised(self):
         with mock.patch.object(main.vector_store, "get_collection", side_effect=RuntimeError("chroma")),                 self.assertLogs("trend-ai", level="WARNING"):
             main.preload_models()
+
+
+class RerankSettingTest(unittest.TestCase):
+    """리랭킹 켜기/끄기와 그 기준은 AI 서비스 설정(ai/.env RERANK·RERANK_MIN_SCORE)이다. Spring이 보낸 min_score는 유사도 기준."""
+
+    def settings(self, rerank):
+        return dataclasses.replace(main.settings, rerank=rerank, rerank_min_score=0.1)
+
+    def test_search_gates_on_reranker_when_on(self):
+        with mock.patch.object(main, "settings", self.settings(True)),                 mock.patch.object(main.vector_store, "get_collection", return_value=FakeQueryCollection(ROWS)),                 mock.patch.object(rag.reranker, "get", return_value=FakeReranker("패딩")):
+            res = TestClient(main.app).get("/search", params={"q": "q", "top_k": 4, "min_score": 0.6})
+        self.assertEqual(["IMG-2#0"], [h["id"] for h in res.json()])  # 유사도 0.45지만 리랭커 0.9 ≥ 0.1, 나머지는 0.01
+
+    def test_search_gates_on_similarity_when_off(self):
+        with mock.patch.object(main, "settings", self.settings(False)),                 mock.patch.object(main.vector_store, "get_collection", return_value=FakeQueryCollection(ROWS)),                 mock.patch.object(rag.reranker, "get") as get:
+            res = TestClient(main.app).get("/search", params={"q": "q", "top_k": 4, "min_score": 0.6, "hybrid": "false"})
+        self.assertEqual(3, len(res.json()))  # 유사도 0.75·0.7·0.65 통과, 0.45 탈락
+        get.assert_not_called()
+
+    def test_answer_uses_service_setting_and_reports_it(self):
+        for on, expected in ((True, 0.1), (False, 0.6)):
+            with mock.patch.object(main, "settings", self.settings(on)),                     mock.patch.object(main.vector_store, "get_collection", return_value=FakeQueryCollection(ROWS)),                     mock.patch.object(main.rag, "answer", return_value={"grounded": False}) as answer:
+                res = TestClient(main.app).post("/answer", headers={"X-Claude-Api-Key": "k"},
+                                                json={"question": "q", "model": "m", "min_score": 0.6})
+            data = answer.call_args.args[1]
+            self.assertEqual((on, expected), (data.rerank, data.min_score))
+            self.assertEqual({"grounded": False, "reranked": on, "min_score": expected}, res.json())
+
+    def test_preload_skips_reranker_when_off(self):
+        with mock.patch.object(main, "settings", self.settings(False)),                 mock.patch.object(main.vector_store, "get_collection", return_value=FakeQueryCollection(ROWS)),                 mock.patch.object(main.reranker, "get") as get:
+            main.preload_models()
+        get.assert_not_called()
 
 
 class RagTest(unittest.TestCase):

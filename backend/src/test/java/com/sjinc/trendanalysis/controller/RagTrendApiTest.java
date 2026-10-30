@@ -136,7 +136,7 @@ class RagTrendApiTest {
                         "input", Map.of("category", "OUTER", "focus", "ITEM_TYPE"))), Map.of("input_tokens", 100, "output_tokens", 20)),
                 new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t2", "name", "final_answer",
                         "input", Map.of("summary", "최근 4주 아우터는 데님 재킷이 가장 많다", "grounded", true, "body", "",
-                                "points", List.of(Map.of("text", "데님 재킷 3건(매체 2곳)", "sources", List.of(1, 9)))))),
+                                "points", List.of(Map.of("text", "데님 재킷 3건", "sources", List.of(1, 9)))))),
                         Map.of("input_tokens", 300, "output_tokens", 50)));
 
         mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("데님 재킷이랑 패딩 중 뭐가 더 많아?")))
@@ -146,15 +146,15 @@ class RagTrendApiTest {
                 .andExpect(jsonPath("$.points[0].sources.length()").value(1)) // 도구 결과에 없는 [9]는 빠진다
                 .andExpect(jsonPath("$.sources.length()").value(1))
                 .andExpect(jsonPath("$.facts.docCount").value(4))          // 판단 근거는 답이 인용한 원문이 나온 집계
-                .andExpect(jsonPath("$.unverifiedNumbers").isEmpty());     // "3건"·"2곳"은 도구 결과에 있다
+                .andExpect(jsonPath("$.unverifiedNumbers").isEmpty());     // "3건"은 도구 결과에 있다
 
         ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
         verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
         // 둘째 단계 messages의 마지막은 도구 결과 — 집계 줄과 [1] 예시 원문이 실린다
         String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
-        assertThat(toolResult).contains("[아이템 종류]").contains("[1] RT-");
+        assertThat(toolResult).contains("[아이템 종류]").contains("[1] 매체A · ").doesNotContain("[1] RT-1"); // 예시 줄에 문서 ID는 없다
         // 첫 메시지에 해석 범위로 미리 센 집계가 실린다 — 순위 질문은 도구를 더 부르지 않고 답할 수 있다
-        assertThat(String.valueOf(steps.getAllValues().get(0).messages().get(0))).contains("<prefetched>").contains("[1] RT-");
+        assertThat(String.valueOf(steps.getAllValues().get(0).messages().get(0))).contains("<prefetched>").contains("[1] 매체A · ");
         assertThat(steps.getAllValues().get(0).cache()).isFalse(); // 캐시는 둘째 단계부터
         assertThat(steps.getAllValues().get(1).cache()).isTrue();
         verify(aiClient, org.mockito.Mockito.never()).answer(any(), any()); // 지금 경로는 부르지 않는다
@@ -195,15 +195,14 @@ class RagTrendApiTest {
     @Test
     @WithMockUser(username = "admin")
     void 이유를_물으면_문서_검색_도구로_찾은_원문을_인용한다() throws Exception {
-        // 미리 센 아우터 집계가 [1][2][3](RT-1·RT-2·RT-4) — 검색은 RT-3(기준 이상)만 새 번호 [4]. 기준 미달·분석 실패 원문은 빠진다.
-        // 리랭킹이 기본으로 켜져 있어 리랭커 점수로 받고 기준(0.10)도 그 점수에 건다
+        // 미리 센 아우터 집계가 [1][2][3](RT-1·RT-2·RT-4) — 검색은 RT-3만 새 번호 [4]. 근거 기준은 AI 서비스가 걸러서 주고(리랭킹이면
+        // 리랭커 점수), 분석 실패 원문은 Spring이 뺀다
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
-        when(aiClient.search(eq("데님 재킷이 유행하는 이유"), anyInt(), eq("OUTER"), eq(true))).thenReturn(List.of(
-                new AiClient.SearchHit("RT-3", "데님 재킷은 레이어드하기 쉬워 간절기에 많이 입는다", 0.81),
-                new AiClient.SearchHit("RT-3", "같은 원문의 다른 청크", 0.70),
-                new AiClient.SearchHit("RT-7", "분석 실패 원문", 0.79),
-                new AiClient.SearchHit("RT-5", "관련 적은 원문", 0.04)));
+        when(aiClient.search(eq("데님 재킷이 유행하는 이유"), anyInt(), eq("OUTER"), eq(0.60))).thenReturn(List.of(
+                new AiClient.SearchHit("RT-3", "데님 재킷은 레이어드하기 쉬워 간절기에 많이 입는다", 0.81, true),
+                new AiClient.SearchHit("RT-3", "같은 원문의 다른 청크", 0.70, true),
+                new AiClient.SearchHit("RT-7", "분석 실패 원문", 0.79, true)));
         when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
                 toolUse("t1", "search_documents", Map.of("query", "데님 재킷이 유행하는 이유", "category", "OUTER")),
                 toolUse("t2", "final_answer", Map.of("summary", "최근 4주 데님 재킷은 레이어드하기 쉬워 많이 보인다", "grounded", true, "body", "",
@@ -219,7 +218,8 @@ class RagTrendApiTest {
         ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
         verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
         String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
-        assertThat(toolResult).contains("[4] RT-3").contains("관련도 0.81").doesNotContain("RT-7").doesNotContain("RT-5").doesNotContain("다른 청크");
+        // 예시 줄에 문서 ID는 싣지 않는다(인용은 [n] — 2026-10-30)
+        assertThat(toolResult).contains("[4] ").contains("관련도 0.81").doesNotContain("RT-3").doesNotContain("RT-7").doesNotContain("다른 청크");
     }
 
     @Test
@@ -307,8 +307,9 @@ class RagTrendApiTest {
         AiClient.AnswerRequest request = sent.getValue();
         assertThat(request.mode()).isEqualTo(AiClient.AnswerRequest.TREND);
         assertThat(request.category()).isEqualTo("OUTER");
-        assertThat(request.trendFacts()).anyMatch(l -> l.startsWith("대상: 아우터 · 원문 4건 · 출처 2곳 (직전 기간 원문 1건, +300%)"))
-                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷(트러커) 유행점수 2.5 · 3건 · 출처 2곳 · 직전 1건(+200%) · 비중 75%(직전 100%, -25%p) / 패딩"));
+        // 증감 질문이 아니면 출처·직전·비중은 싣지 않고, 이름의 괄호 속 같은 뜻 말도 뺀다(2026-10-30)
+        assertThat(request.trendFacts()).anyMatch(l -> l.equals("대상: 아우터 · 원문 4건"))
+                .anyMatch(l -> l.startsWith("[아이템 종류] 데님 재킷 유행점수 2.5 · 3건 / 패딩"));
         // 예시 원문: 상위 종류마다 최근 2건 — 데님 재킷(RT-1·RT-2), 패딩(RT-4). 하의·실패·직전 기간 원문은 빠진다
         assertThat(request.evidenceDocIds()).containsExactly("RT-1", "RT-2", "RT-4");
     }

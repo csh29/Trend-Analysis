@@ -112,4 +112,17 @@ class RetiredColumnTest {
         assertThat(comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.COLOR))
                 .extracting(ComCd::getCodeValue).doesNotContain("DENIM").contains("BLUE", "NAVY");
     }
+
+    @Test
+    void 예전_DB의_챗봇_검색_설정_공통코드를_기동_때_지운다() {
+        // 리랭킹 켜기/끄기는 공통코드 RAG_SEARCH에서 AI 서비스 설정(ai/.env RERANK)으로 옮겼다(2026-10-30)
+        jdbcTemplate.update("INSERT INTO COM_CD_MST (code_group, group_name, sort_order, use_yn) VALUES ('RAG_SEARCH', '챗봇 검색 설정', 30, 'Y')");
+        comCdRepository.save(ComCd.builder().codeGroup("RAG_SEARCH").codeValue("RERANK").codeName("리랭킹").sortOrder(1).useYn("Y")
+                .attr1("0.10").build());
+
+        dataInitializer.run();
+
+        assertThat(comCdRepository.findByCodeGroupOrderBySortOrderAsc("RAG_SEARCH")).isEmpty();
+        assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM COM_CD_MST WHERE code_group = 'RAG_SEARCH'", Integer.class)).isZero();
+    }
 }

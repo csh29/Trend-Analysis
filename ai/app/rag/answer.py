@@ -5,7 +5,7 @@
   (아이템 종류·소재·컬러·실루엣별 원문 수·출처 수·직전 기간 대비)와, 집계 상위 값이 나온 예시 원문(doc_id)을 받아 답한다.
   예시 원문은 Chroma에서 doc_id로 꺼낸다.
 - SEARCH(그 밖의 질문): 질문을 임베딩해 비슷한 청크를 찾는다. 유사도 = 1 - 코사인 거리. 키워드(BM25)도 RRF로 합친다(하이브리드).
-  리랭킹을 켜면(Spring이 요청마다 알려 준다) 후보를 리랭커로 다시 매기고 기준도 리랭커 점수에 건다.
+  리랭킹을 켜면(설정 RERANK) 후보를 리랭커로 다시 매기고 기준도 리랭커 점수(RERANK_MIN_SCORE)에 건다.
   - 기준 유사도(min_score) 이상인 근거가 없으면 Claude를 부르지 않고 "근거 없음"(정의서 P-06 규칙).
   - 카테고리를 말했으면 그 카테고리 아이템이 있는 원문만(메타 cat_<코드>). 기간을 콕 집었으면 그 게시일 범위만.
   - 기간이 없으면 자르지 않고 후보를 넉넉히 모아 유사도 × 최신성(반감기 4주)으로 최근 자료를 앞세운다. 가장 최근 근거도
@@ -172,7 +172,7 @@ class AnswerInput:
     mode: str = "SEARCH"                              # SEARCH | TREND
     category: str | None = None                       # 질문의 카테고리 코드(SEARCH에서 거른다)
     period: Period | None = None                      # SEARCH: 콕 집은 기간, TREND: 집계 기간
-    rerank: bool = False                              # SEARCH: 리랭킹(Spring 공통코드 RAG_SEARCH) — min_score도 리랭커 점수 기준
+    rerank: bool = False                              # SEARCH: 리랭킹(설정 RERANK) — min_score도 리랭커 점수 기준
     trend_facts: list[str] = field(default_factory=list)  # TREND: Spring이 센 집계(한 줄씩)
     evidence_doc_ids: list[str] = field(default_factory=list)  # TREND: 집계 상위 값이 나온 예시 원문
 

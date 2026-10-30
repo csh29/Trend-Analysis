@@ -68,14 +68,14 @@ public class AgentService {
     private final TrendItemRepository trendItemRepository;
     private final String model;
     private final int maxToolCalls;
-    private final SearchSettings searchSettings;
+    private final double minScore;
 
     public AgentService(AiClient aiClient, TrendFactsService trendFactsService, ComCdRepository comCdRepository,
                         SourceDocumentRepository sourceDocumentRepository, TrendItemRepository trendItemRepository,
                         @Value("${rag.agent.model:${claude.model:claude-sonnet-5}}") String model,
                         @Value("${rag.agent.max-tool-calls:6}") int maxToolCalls,
-                        SearchSettings searchSettings) {
-        this.searchSettings = searchSettings;
+                        @Value("${rag.min-score:0.60}") double minScore) {
+        this.minScore = minScore;
         this.aiClient = aiClient;
         this.trendFactsService = trendFactsService;
         this.comCdRepository = comCdRepository;
@@ -299,17 +299,15 @@ public class AgentService {
         String query = text(input.get("query"));
         if (query == null) throw new IllegalArgumentException("query가 비었다");
         String category = codes.known(TrendCodes.CATEGORY, input.get("category"), "category");
-        SearchSettings.Mode mode = searchSettings.current();
-        String scoreName = mode.rerank() ? "관련도" : "유사도";
         List<AiClient.SearchHit> hits;
         try {
-            hits = aiClient.search(query, SEARCH_CHUNKS, category, mode.rerank());
+            hits = aiClient.search(query, SEARCH_CHUNKS, category, minScore); // 근거 기준을 넘은 것만 온다(리랭킹이면 리랭커 기준)
         } catch (AiCallException e) {
             run.calls.add("검색 실패");
             return "검색에 실패했다(" + e.getMessage() + ") — 집계로만 답하고, 이유·사례는 자료가 부족하다고 밝혀라.";
         }
         Map<String, AiClient.SearchHit> best = new LinkedHashMap<>(); // 문서마다 가장 관련 있는 청크(관련 순으로 온다)
-        hits.stream().filter(h -> h.score() >= mode.minScore()).forEach(h -> best.putIfAbsent(h.docId(), h));
+        hits.forEach(h -> best.putIfAbsent(h.docId(), h));
         Map<String, SourceDocument> docs = sourceDocumentRepository.findByDocIdIn(best.keySet()).stream()
                 .filter(d -> SourceDocument.DONE.equals(d.getStatus()))
                 .collect(Collectors.toMap(SourceDocument::getDocId, Function.identity()));
@@ -326,12 +324,11 @@ public class AgentService {
             String chunk = h.chunk().replaceAll("\\s+", " ").strip();
             if (chunk.length() > SEARCH_CHARS) chunk = chunk.substring(0, SEARCH_CHARS) + "…";
             run.summaryByN.putIfAbsent(n, chunk);
-            lines.add("[" + n + "] " + h.docId() + " · " + Objects.toString(doc.getTitle(), "") + " · " + Objects.toString(doc.getMedia(), "")
-                    + " · " + TrendAggregationService.statDate(doc) + " · " + scoreName + " " + String.format("%.2f", h.score()) + " — " + chunk);
+            lines.add("[" + n + "] " + exampleHead(doc) + " · " + (h.reranked() ? "관련도 " : "유사도 ") + String.format("%.2f", h.score()) + " — " + chunk);
             if (lines.size() >= SEARCH_DOCS) break;
         }
         String text = lines.isEmpty()
-                ? "기준 " + scoreName + "(" + mode.minScore() + ") 이상인 원문이 없다 — 이유·사례의 근거를 찾지 못했다. 지어내지 말고 자료가 부족하다고 밝혀라."
+                ? "근거 기준을 넘는 원문이 없다 — 이유·사례의 근거를 찾지 못했다. 지어내지 말고 자료가 부족하다고 밝혀라."
                 : "검색 결과(질문과 비슷한 원문 — 사례·이유·설명의 근거, 수를 세는 자료가 아니다):\n" + String.join("\n", lines);
         run.toolResults.add(text);
         return text;
@@ -357,10 +354,18 @@ public class AgentService {
             String summary = item == null || item.getSummary() == null ? "" : item.getSummary();
             if (summary.length() > SUMMARY_CHARS) summary = summary.substring(0, SUMMARY_CHARS) + "…";
             run.summaryByN.put(n, summary);
-            lines.add("[" + n + "] " + docId + " · " + Objects.toString(doc.getTitle(), "") + " · " + Objects.toString(doc.getMedia(), "")
-                    + " · " + TrendAggregationService.statDate(doc) + " — " + summary);
+            lines.add("[" + n + "] " + exampleHead(doc) + " — " + summary);
         }
         return lines;
+    }
+
+    /**
+     * 예시 원문 줄의 머리 — 제목·매체·날짜. 문서 ID는 싣지 않는다(인용은 [n]으로 한다), 이미지는 제목이 파일명이라 뺀다
+     * ("이미지_02.jpg"는 뜻이 없다 — 2026-10-30 사용자 요청).
+     */
+    private static String exampleHead(SourceDocument doc) {
+        String title = doc.isImage() ? "" : Objects.toString(doc.getTitle(), "").strip();
+        return (title.isEmpty() ? "" : title + " · ") + Objects.toString(doc.getMedia(), "") + " · " + TrendAggregationService.statDate(doc);
     }
 
     /**
