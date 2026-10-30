@@ -5,6 +5,7 @@
   (아이템 종류·소재·컬러·실루엣별 원문 수·출처 수·직전 기간 대비)와, 집계 상위 값이 나온 예시 원문(doc_id)을 받아 답한다.
   예시 원문은 Chroma에서 doc_id로 꺼낸다.
 - SEARCH(그 밖의 질문): 질문을 임베딩해 비슷한 청크를 찾는다. 유사도 = 1 - 코사인 거리. 키워드(BM25)도 RRF로 합친다(하이브리드).
+  리랭킹을 켜면(Spring이 요청마다 알려 준다) 후보를 리랭커로 다시 매기고 기준도 리랭커 점수에 건다.
   - 기준 유사도(min_score) 이상인 근거가 없으면 Claude를 부르지 않고 "근거 없음"(정의서 P-06 규칙).
   - 카테고리를 말했으면 그 카테고리 아이템이 있는 원문만(메타 cat_<코드>). 기간을 콕 집었으면 그 게시일 범위만.
   - 기간이 없으면 자르지 않고 후보를 넉넉히 모아 유사도 × 최신성(반감기 4주)으로 최근 자료를 앞세운다. 가장 최근 근거도
@@ -23,6 +24,7 @@ from app.core import prompt_loader
 from app.core.config import settings
 from app.core.claude import AiServiceError, create_message, parse_json, usage_of
 from app.indexing import keyword_index, vector_store
+from app.rag import reranker
 
 log = logging.getLogger("trend-ai")
 
@@ -75,9 +77,26 @@ def search(collection, query: str, top_k: int, where: dict | None = None, hybrid
     return sorted(hits, key=lambda h: (h["fused"], h["score"]), reverse=True)[:top_k]
 
 
+def rerank(query: str, hits: list[dict]) -> list[dict]:
+    """리랭커 점수(rerank, 0~1) 높은 순. 리랭킹을 켜면 근거 기준도 이 점수에 건다 — 임베딩 유사도는 관련·무관이 0.52~0.69에서
+    겹쳐 기준 하나로 가르지 못했고, 리랭커는 자료 없는 주제 1위가 0.05 아래로 떨어졌다(2026-10-30 rerank_eval)."""
+    if not hits:
+        return hits
+    started = time.perf_counter()
+    for hit, score in zip(hits, reranker.get().score(query, [h["document"] for h in hits])):
+        hit["rerank"] = round(score, 4)
+    log.info("리랭킹 후보 %d개 %.1f초 최고 %.3f", len(hits), time.perf_counter() - started, max(h["rerank"] for h in hits))
+    return sorted(hits, key=lambda h: h["rerank"], reverse=True)
+
+
+def evidence_score(hit: dict) -> float:
+    """근거 기준을 거는 점수 — 리랭킹을 했으면 리랭커 점수, 아니면 유사도."""
+    return hit.get("rerank", hit["score"])
+
+
 def relevance(hit: dict) -> float:
-    """관련 순서 — 하이브리드면 RRF 점수, 아니면 유사도."""
-    return hit.get("fused", hit["score"])
+    """관련 순서 — 리랭커 점수, 하이브리드면 RRF 점수, 아니면 유사도."""
+    return hit.get("rerank", hit.get("fused", hit["score"]))
 
 
 def published_date(meta: dict) -> date | None:
@@ -101,9 +120,9 @@ def group_by_document(hits: list[dict]) -> list[dict]:
     groups: dict[str, dict] = {}
     for hit in hits:
         doc_id = hit["metadata"].get("doc_id") or hit["id"].split("#")[0]
-        group = groups.setdefault(doc_id, {"doc_id": doc_id, "score": hit["score"], "order": hit.get("rank", relevance(hit)),
+        group = groups.setdefault(doc_id, {"doc_id": doc_id, "score": evidence_score(hit), "order": hit.get("rank", relevance(hit)),
                                            "metadata": hit["metadata"], "chunks": []})
-        group["score"] = max(group["score"], hit["score"])
+        group["score"] = max(group["score"], evidence_score(hit))
         group["order"] = max(group["order"], hit.get("rank", relevance(hit)))
         group["chunks"].append(hit["document"])
     ordered = sorted(groups.values(), key=lambda g: g["order"], reverse=True)
@@ -153,6 +172,7 @@ class AnswerInput:
     mode: str = "SEARCH"                              # SEARCH | TREND
     category: str | None = None                       # 질문의 카테고리 코드(SEARCH에서 거른다)
     period: Period | None = None                      # SEARCH: 콕 집은 기간, TREND: 집계 기간
+    rerank: bool = False                              # SEARCH: 리랭킹(Spring 공통코드 RAG_SEARCH) — min_score도 리랭커 점수 기준
     trend_facts: list[str] = field(default_factory=list)  # TREND: Spring이 센 집계(한 줄씩)
     evidence_doc_ids: list[str] = field(default_factory=list)  # TREND: 집계 상위 값이 나온 예시 원문
 
@@ -312,19 +332,25 @@ def answer(collection, data: AnswerInput, api_key: str, client: anthropic.Anthro
         return _answer_trend(collection, data, api_key, client)
 
     where = where_filter(data)
-    if data.period and data.period.explicit:
+    explicit = bool(data.period and data.period.explicit)
+    if data.rerank:
+        # 리랭커가 고를 수 있게 기간과 상관없이 후보를 넉넉히 모은다. 기준은 리랭커 점수에 건다
+        hits = rerank(data.question, search(collection, data.question, max(CANDIDATES, data.top_k), where))
+        passed = [h for h in hits if h["rerank"] >= data.min_score]
+        passed = passed[:data.top_k] if explicit else rank_by_recency(passed, data.today)[:data.top_k]
+    elif explicit:
         hits = search(collection, data.question, data.top_k, where)
         passed = [h for h in hits if h["score"] >= data.min_score]
     else:
         # 기간이 없으면 자르지 않고 후보를 넉넉히 모아, 관련 있는 것(기준 유사도 이상) 중 최근 것을 앞세운다
         hits = search(collection, data.question, max(CANDIDATES, data.top_k), where)
         passed = rank_by_recency([h for h in hits if h["score"] >= data.min_score], data.today)[:data.top_k]
-    best = max((h["score"] for h in hits), default=None)
+    best = max((evidence_score(h) for h in hits), default=None)
     groups = group_by_document(passed)
     info = period_info(data, groups)
-    log.info("RAG 검색 질문=%d자 카테고리=%s 기간=%s(%s~%s)%s 후보 %d개 기준 %.2f 통과 %d개 최고 %s", len(data.question),
+    log.info("RAG 검색 질문=%d자 카테고리=%s 기간=%s(%s~%s)%s 후보 %d개 기준(%s) %.2f 통과 %d개 최고 %s", len(data.question),
              data.category or "-", info["label"], info["from"], info["to"], " 오래된 자료" if passed and info["stale"] else "",
-             len(hits), data.min_score, len(passed), "-" if best is None else f"{best:.3f}")
+             len(hits), "리랭커" if data.rerank else "유사도", data.min_score, len(passed), "-" if best is None else f"{best:.3f}")
     if not passed:
         # 근거가 없으면 Claude를 부르지 않는다 — 지어낸 답을 막고 토큰도 쓰지 않는다
         return {"grounded": False, "answer": None, "points": [], "sources": [], "best_score": best, "usage": None,

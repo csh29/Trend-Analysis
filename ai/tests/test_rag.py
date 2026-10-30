@@ -131,6 +131,61 @@ class HybridSearchTest(unittest.TestCase):
         self.assertEqual(2, len(collection.gets))
 
 
+class FakeReranker:
+    """질문 낱말이 든 청크에 높은 점수 — 리랭커 모델 없이 순서·기준만 본다."""
+
+    def __init__(self, word):
+        self.word, self.calls = word, []
+
+    def score(self, query, documents):
+        self.calls.append((query, list(documents)))
+        return [0.9 if self.word in d else 0.01 for d in documents]
+
+
+class RerankTest(unittest.TestCase):
+    """리랭킹을 켜면 순서와 근거 기준이 리랭커 점수(rerank)로 바뀐다. 유사도(score)는 그대로 남는다."""
+
+    def test_rerank_orders_by_reranker_score(self):
+        with mock.patch.object(rag.reranker, "get", return_value=FakeReranker("패딩")):
+            hits = rag.rerank("q", rag.search(FakeQueryCollection(ROWS), "q", 4, hybrid=False))
+        self.assertEqual("IMG-2#0", hits[0]["id"])  # 유사도는 꼴찌(0.45)지만 리랭커가 1위로
+        self.assertEqual(0.45, hits[0]["score"])
+        self.assertEqual(0.9, hits[0]["rerank"])
+
+    def test_answer_gates_on_reranker_score(self):
+        body = json.dumps({"summary": "패딩", "grounded": True, "points": [{"text": "줄", "sources": [1]}]})
+        messages = FakeMessages(fake_response(body))
+        with mock.patch.object(rag.reranker, "get", return_value=FakeReranker("패딩")):
+            result = rag.answer(FakeQueryCollection(ROWS), data(min_score=0.1, rerank=True), "k",
+                                client=SimpleNamespace(messages=messages))
+        sent = messages.calls[0]["messages"][0]["content"]
+        self.assertIn("패딩 재킷", sent)            # 유사도 0.45라 예전 기준(0.6)이면 빠졌을 청크
+        self.assertNotIn("와이드 팬츠가 유행", sent)  # 유사도는 높아도 리랭커 기준 미달
+        self.assertEqual(0.9, result["sources"][0]["score"])
+        self.assertEqual(0.9, result["best_score"])
+
+    def test_no_evidence_when_reranker_rejects_all(self):
+        messages = FakeMessages(fake_response("{}"))
+        with mock.patch.object(rag.reranker, "get", return_value=FakeReranker("없는말")):
+            result = rag.answer(FakeQueryCollection(ROWS), data(min_score=0.1, rerank=True), "k",
+                                client=SimpleNamespace(messages=messages))
+        self.assertEqual("NO_EVIDENCE", result["reason"])
+        self.assertEqual([], messages.calls)
+
+    def test_reranker_not_loaded_when_off(self):
+        with mock.patch.object(rag.reranker, "get") as get:
+            rag.answer(FakeQueryCollection(ROWS), data(min_score=0.9), "k",
+                       client=SimpleNamespace(messages=FakeMessages(fake_response("{}"))))
+        get.assert_not_called()
+
+    def test_search_api_reranks_when_asked(self):
+        with mock.patch.object(main.vector_store, "get_collection", return_value=FakeQueryCollection(ROWS)),                 mock.patch.object(rag.reranker, "get", return_value=FakeReranker("패딩")):
+            res = TestClient(main.app).get("/search", params={"q": "q", "top_k": 2, "rerank": "true"})
+        self.assertEqual(200, res.status_code)
+        self.assertEqual(["IMG-2#0", 0.9], [res.json()[0]["id"], res.json()[0]["rerank"]])
+        self.assertEqual(2, len(res.json()))
+
+
 class RagTest(unittest.TestCase):
     def test_search_turns_distance_into_score(self):
         hits = rag.search(FakeQueryCollection(ROWS), "q", 2)

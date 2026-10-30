@@ -195,14 +195,15 @@ class RagTrendApiTest {
     @Test
     @WithMockUser(username = "admin")
     void 이유를_물으면_문서_검색_도구로_찾은_원문을_인용한다() throws Exception {
-        // 미리 센 아우터 집계가 [1][2][3](RT-1·RT-2·RT-4) — 검색은 RT-3(기준 이상)만 새 번호 [4]. 기준 미달·분석 실패 원문은 빠진다
+        // 미리 센 아우터 집계가 [1][2][3](RT-1·RT-2·RT-4) — 검색은 RT-3(기준 이상)만 새 번호 [4]. 기준 미달·분석 실패 원문은 빠진다.
+        // 리랭킹이 기본으로 켜져 있어 리랭커 점수로 받고 기준(0.10)도 그 점수에 건다
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
-        when(aiClient.search(eq("데님 재킷이 유행하는 이유"), anyInt(), eq("OUTER"))).thenReturn(List.of(
+        when(aiClient.search(eq("데님 재킷이 유행하는 이유"), anyInt(), eq("OUTER"), eq(true))).thenReturn(List.of(
                 new AiClient.SearchHit("RT-3", "데님 재킷은 레이어드하기 쉬워 간절기에 많이 입는다", 0.81),
                 new AiClient.SearchHit("RT-3", "같은 원문의 다른 청크", 0.70),
                 new AiClient.SearchHit("RT-7", "분석 실패 원문", 0.79),
-                new AiClient.SearchHit("RT-5", "관련 적은 원문", 0.41)));
+                new AiClient.SearchHit("RT-5", "관련 적은 원문", 0.04)));
         when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
                 toolUse("t1", "search_documents", Map.of("query", "데님 재킷이 유행하는 이유", "category", "OUTER")),
                 toolUse("t2", "final_answer", Map.of("summary", "최근 4주 데님 재킷은 레이어드하기 쉬워 많이 보인다", "grounded", true, "body", "",
@@ -218,7 +219,7 @@ class RagTrendApiTest {
         ArgumentCaptor<AiClient.AgentStepRequest> steps = ArgumentCaptor.forClass(AiClient.AgentStepRequest.class);
         verify(aiClient, org.mockito.Mockito.times(2)).agentStep(steps.capture(), eq("test-key"));
         String toolResult = String.valueOf(steps.getAllValues().get(1).messages().get(2));
-        assertThat(toolResult).contains("[4] RT-3").doesNotContain("RT-7").doesNotContain("RT-5").doesNotContain("다른 청크");
+        assertThat(toolResult).contains("[4] RT-3").contains("관련도 0.81").doesNotContain("RT-7").doesNotContain("RT-5").doesNotContain("다른 청크");
     }
 
     @Test

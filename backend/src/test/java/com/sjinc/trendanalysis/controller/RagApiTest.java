@@ -10,6 +10,7 @@ import com.sjinc.trendanalysis.repository.UserProgramPermissionRepository;
 import com.sjinc.trendanalysis.repository.UserRepository;
 import com.sjinc.trendanalysis.service.analysis.AiCallException;
 import com.sjinc.trendanalysis.service.analysis.AiClient;
+import com.sjinc.trendanalysis.service.rag.SearchSettings;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -19,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import com.jayway.jsonpath.JsonPath;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
@@ -66,6 +68,8 @@ class RagApiTest {
     private UserProgramPermissionRepository permissionRepository;
     @Autowired
     private DataInitializer dataInitializer;
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     private static boolean seeded;
 
@@ -113,7 +117,8 @@ class RagApiTest {
                 .andExpect(jsonPath("$.sources[0].media").value("샘플 매거진"))
                 .andExpect(jsonPath("$.sources[0].statDate").value("2026-10-14"))
                 .andExpect(jsonPath("$.sources[0].url").value("https://example.com/TXT-R-1"))
-                .andExpect(jsonPath("$.minScore").value(0.6))
+                .andExpect(jsonPath("$.minScore").value(0.1)) // 리랭킹이 기본으로 켜져 있다(공통코드 RAG_SEARCH) — 기준은 리랭커 점수
+                .andExpect(jsonPath("$.reranked").value(true))
                 // 결론 한 줄 + 글머리 줄. 재분석 중이라 빠진 출처(2번)는 줄의 인용 번호에서도 빼고, 그 출처만 인용한 줄은 뺀다(확인할 수 없는 문장)
                 .andExpect(jsonPath("$.answer").value("와이드 팬츠가 많다."))
                 .andExpect(jsonPath("$.points", hasSize(2)))
@@ -128,9 +133,30 @@ class RagApiTest {
 
         ArgumentCaptor<AiClient.AnswerRequest> sent = ArgumentCaptor.forClass(AiClient.AnswerRequest.class);
         verify(aiClient).answer(sent.capture(), eq("test-key"));
-        assertThat(sent.getValue().minScore()).isEqualTo(0.60);
+        assertThat(sent.getValue().minScore()).isEqualTo(0.10);
+        assertThat(sent.getValue().rerank()).isTrue();
         assertThat(sent.getValue().model()).isEqualTo("claude-sonnet-5");
         assertThat(sent.getValue().today()).isEqualTo(LocalDate.now().toString()); // 최신성·기간의 기준일 — "2026-10-22" 꼴 문자열
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
+    void 리랭킹을_끄면_유사도_기준으로_묻는다() throws Exception {
+        when(aiClient.answer(any(), any())).thenReturn(new AiClient.AnswerResponse(false, null, List.of(), List.of(), 0.41, null, "NO_EVIDENCE",
+                new AiClient.AnswerPeriod("2026-10-12", "2026-10-18", "지난주", true, false)));
+        jdbcTemplate.update("UPDATE COM_CD_DTL SET use_yn = 'N' WHERE code_group = ? AND code_value = ?", SearchSettings.GROUP, SearchSettings.RERANK);
+        try {
+            mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("레더 재킷 코디")))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.minScore").value(0.6))
+                    .andExpect(jsonPath("$.reranked").value(false));
+            ArgumentCaptor<AiClient.AnswerRequest> sent = ArgumentCaptor.forClass(AiClient.AnswerRequest.class);
+            verify(aiClient, org.mockito.Mockito.atLeastOnce()).answer(sent.capture(), any());
+            assertThat(sent.getValue().rerank()).isFalse();
+            assertThat(sent.getValue().minScore()).isEqualTo(0.60); // 설정 rag.min-score
+        } finally {
+            jdbcTemplate.update("UPDATE COM_CD_DTL SET use_yn = 'Y' WHERE code_group = ? AND code_value = ?", SearchSettings.GROUP, SearchSettings.RERANK);
+        }
     }
 
     @Test

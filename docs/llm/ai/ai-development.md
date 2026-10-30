@@ -27,13 +27,14 @@ py -m venv .venv
 
 - 워커는 1개로 띄운다(`--workers`를 주지 않는다). **내장형 Chroma 폴더(`chroma_data/`)는 한 프로세스만 연다** — 조회도 다른 프로세스로 폴더를 직접 열지 말고 실행 중인 서비스 API로 한다(아래).
 - 첫 색인 때 임베딩 모델 `Qwen/Qwen3-VL-Embedding-2B`(약 4GB)를 내려받는다(`~/.cache/huggingface`). 모델은 첫 색인·검색 때 올라가며 RAM을 약 4.5GB 쓴다.
+- 리랭커 `RERANK_MODEL`(기본 `BAAI/bge-reranker-v2-m3`, 약 2.3GB)은 리랭킹을 켠 첫 검색 때 내려받고 올린다(RAM 약 2.3GB 더, 올리는 데 약 30초). 이 PC(RAM 16GB)에서는 임베딩 모델과 합쳐 약 7GB라 Spring·브라우저와 함께면 빠듯하다.
 - torch는 CPU 빌드다(이 PC GPU는 VRAM 2GB라 모델이 안 올라간다). CPU 임베딩 시간은 글자 수에 따라 늘어 이 PC에서 100자 약 5초, 300자 약 14초, 500자(청크 최대 `CHUNK_SIZE`) 약 20초다(`GET /search` 질의 임베딩으로 잰 값, 모델을 처음 올리는 첫 호출은 약 1분 더). Spring의 AI 호출 대기 시간(3분)을 넘기면 색인 실패로 남으므로, 본문이 약 3,500자(500자 청크 약 9개)를 넘으면 색인 실패를 의심한다(제안값).
 
 ### 색인(Chroma) 데이터 조회
 
 AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAPI 기본 화면)를 열고 아래 API를 "Try it out"으로 부른다.
 
-- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다. `hybrid=false`면 벡터만).
+- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다. `hybrid=false`면 벡터만, `rerank=true`면 리랭커 점수 `rerank` 순).
 
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.
 
@@ -67,6 +68,7 @@ ai/
 │  └─ rag/                 P-06 검색·답변
 │     ├─ interpret.py      질문 해석(작은 모델 — 패션 질문인지·유행 질문인지·카테고리·종류·기간, 이어 묻기면 질문 다시 쓰기)
 │     ├─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(하이브리드 — 벡터 + 키워드 RRF, 카테고리·기간 필터, 최신성 가중치)·Claude 답변
+│     ├─ reranker.py       리랭커(cross-encoder, 기본 bge-reranker-v2-m3) — 질문·청크 쌍을 0~1 점수로
 │     ├─ agent.py          도구 경로 한 단계(유행 질문 — Claude가 도구를 고르고 Spring이 실행·반복)
 │     └─ brief.py          기획 브리프 서술(8개 구성 JSON — 숫자는 Spring 집계)
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)

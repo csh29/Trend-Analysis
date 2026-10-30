@@ -104,6 +104,7 @@ class AnswerRequest(BaseModel):
     period: PeriodModel | None = None
     trend_facts: list[str] = []
     evidence_doc_ids: list[str] = Field(default=[], max_length=20)
+    rerank: bool = False  # SEARCH: 리랭킹(Spring 공통코드 RAG_SEARCH) — 켜면 min_score는 리랭커 점수 기준
 
 
 class CodeHintModel(BaseModel):
@@ -272,15 +273,19 @@ def delete_index(doc_id: str):
 
 @app.get("/search")
 def search_chunks(q: str, top_k: int = Query(default=10, ge=1, le=50), category: str | None = None,
-                  hybrid: bool | None = None):
+                  hybrid: bool | None = None, rerank: bool = False):
     """질문으로 청크를 찾아 유사도와 함께 준다(읽기 전용, Claude 호출 없음) — 기준 유사도를 정할 때 점수 분포를 보고,
     도구 경로의 search_documents(Spring)가 이유·사례 근거를 찾는다. category를 주면 그 카테고리 아이템이 있는 원문만.
-    결과는 관련 순서(하이브리드면 RRF)다. hybrid를 주면 설정(HYBRID_SEARCH) 대신 그 방식으로 — 검색 평가의 벡터/하이브리드 비교용."""
+    결과는 관련 순서(하이브리드면 RRF)다. hybrid를 주면 설정(HYBRID_SEARCH) 대신 그 방식으로 — 검색 평가의 벡터/하이브리드 비교용.
+    rerank면 후보를 넉넉히(30개) 모아 리랭커 점수(rerank) 순으로 top_k개 — Spring이 리랭킹을 켰을 때 그 점수로 거른다."""
     try:
         query = rag.ensure_question(q, MAX_QUESTION_LENGTH)
     except AiServiceError as e:
         raise HTTPException(status_code=e.status_code, detail={"message": str(e), "retryable": False})
-    return rag.search(vector_store.get_collection(), query, top_k, {f"cat_{category}": True} if category else None, hybrid)
+    where = {f"cat_{category}": True} if category else None
+    if not rerank:
+        return rag.search(vector_store.get_collection(), query, top_k, where, hybrid)
+    return rag.rerank(query, rag.search(vector_store.get_collection(), query, max(top_k, rag.CANDIDATES), where, hybrid))[:top_k]
 
 
 @app.post("/agent/step")
@@ -320,7 +325,7 @@ def answer_question(req: AnswerRequest, x_claude_api_key: str | None = Header(de
                                today=req.today or date.today(), mode=req.mode, category=req.category,
                                period=rag.Period(req.period.start, req.period.end, req.period.label, req.period.explicit)
                                if req.period else None,
-                               trend_facts=req.trend_facts, evidence_doc_ids=req.evidence_doc_ids)
+                               trend_facts=req.trend_facts, evidence_doc_ids=req.evidence_doc_ids, rerank=req.rerank)
         return rag.answer(vector_store.get_collection(), data, x_claude_api_key)
     except AiServiceError as e:
         log.warning("RAG 답변 실패: %s", e)

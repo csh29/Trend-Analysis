@@ -78,7 +78,7 @@ public class AiClient {
      */
     @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
     public record AnswerRequest(String question, String model, int topK, double minScore, String today, String mode, String category, AnswerPeriod period,
-                                List<String> trendFacts, List<String> evidenceDocIds) {
+                                List<String> trendFacts, List<String> evidenceDocIds, boolean rerank) {
 
         public static final String SEARCH = "SEARCH";
         public static final String TREND = "TREND";
@@ -238,20 +238,23 @@ public class AiClient {
         return body == null ? "" : body.path("text").asText("");
     }
 
-    /** 유사도 검색 한 건 — 청크가 나온 원문, 청크 글, 유사도(1 - 코사인 거리). */
+    /** 검색 한 건 — 청크가 나온 원문, 청크 글, 근거 점수(리랭킹을 했으면 리랭커 점수, 아니면 유사도 1 - 코사인 거리). */
     public record SearchHit(String docId, String chunk, double score) {
     }
 
-    /** 질문과 비슷한 청크(유사도 순, Claude 호출 없음) — 도구 경로의 search_documents. category가 있으면 그 카테고리 원문만. */
-    public List<SearchHit> search(String query, int topK, String category) {
+    /**
+     * 질문과 관련 있는 청크(관련 순, Claude 호출 없음) — 도구 경로의 search_documents. category가 있으면 그 카테고리 원문만.
+     * rerank면 AI 서비스가 리랭커로 다시 매기고, 점수도 리랭커 점수를 쓴다(SearchSettings).
+     */
+    public List<SearchHit> search(String query, int topK, String category, boolean rerank) {
         JsonNode body = call(() -> restClient.get()
-                .uri(b -> b.path("/search").queryParam("q", query).queryParam("top_k", topK)
+                .uri(b -> b.path("/search").queryParam("q", query).queryParam("top_k", topK).queryParam("rerank", rerank)
                         .queryParamIfPresent("category", java.util.Optional.ofNullable(category)).build())
                 .retrieve().body(JsonNode.class));
         List<SearchHit> hits = new java.util.ArrayList<>();
         if (body != null) {
             body.forEach(h -> hits.add(new SearchHit(h.path("metadata").path("doc_id").asText(h.path("id").asText().split("#")[0]),
-                    h.path("document").asText(""), h.path("score").asDouble())));
+                    h.path("document").asText(""), h.path(rerank ? "rerank" : "score").asDouble())));
         }
         return hits;
     }
