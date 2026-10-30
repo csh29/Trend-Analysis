@@ -33,7 +33,7 @@ py -m venv .venv
 
 AI 서비스를 띄운 뒤 브라우저에서 http://127.0.0.1:8001/docs (FastAPI 기본 화면)를 열고 아래 API를 "Try it out"으로 부른다.
 
-- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다).
+- `GET /index/stats`(컬렉션·모드·모델·청크 수), `GET /index/chunks`(문서별 청크·메타), `GET /index/doc-ids`(색인된 문서 ID — Spring 기동 정리용), `GET /search?q=`(질문과 비슷한 청크와 유사도, Claude 호출 없음 — RAG 기준 유사도를 정할 때 점수 분포를 본다. `hybrid=false`면 벡터만).
 
 - 서버형(`CHROMA_MODE=http`)으로 바꿔도 같은 API로 본다.
 
@@ -62,10 +62,11 @@ ai/
 │  │  ├─ indexer.py        청크 만들기·Chroma 저장(문서 ID 단위 갈아끼움)·게시일 숫자 메타
 │  │  ├─ chunker.py        본문 청크 분할
 │  │  ├─ embedding.py      임베딩 함수(Qwen3-VL / fastembed)
+│  │  ├─ keyword_index.py  키워드 색인(BM25, 메모리) — 하이브리드 검색의 키워드 쪽
 │  │  └─ vector_store.py   Chroma 클라이언트를 만드는 유일한 곳
 │  └─ rag/                 P-06 검색·답변
 │     ├─ interpret.py      질문 해석(작은 모델 — 패션 질문인지·유행 질문인지·카테고리·종류·기간, 이어 묻기면 질문 다시 쓰기)
-│     ├─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(카테고리·기간 필터, 최신성 가중치)·Claude 답변
+│     ├─ answer.py         유행 질문(Spring 집계 + 예시 원문) / 검색(하이브리드 — 벡터 + 키워드 RRF, 카테고리·기간 필터, 최신성 가중치)·Claude 답변
 │     ├─ agent.py          도구 경로 한 단계(유행 질문 — Claude가 도구를 고르고 Spring이 실행·반복)
 │     └─ brief.py          기획 브리프 서술(8개 구성 JSON — 숫자는 Spring 집계)
 ├─ prompts/                Claude가 읽는 글(코드에 쓰지 않는다)

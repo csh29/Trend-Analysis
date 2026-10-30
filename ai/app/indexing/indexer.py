@@ -3,6 +3,7 @@
 같은 문서를 다시 분석하면 이전 청크를 지우고 새로 넣는다(문서 ID 단위로 갈아끼움). 이미지는 본문이 없으므로
 정형화 결과(요약·키워드·의류 아이템별 소재·컬러·실루엣)를 문장으로 만든 청크 하나를 넣는다. RAG(P-06)가 근거를 표시할 때 메타를 쓴다.
 """
+from app.indexing import keyword_index
 from app.indexing.chunker import split_text
 from app.core.config import settings
 
@@ -99,11 +100,13 @@ def index_document(collection, doc_id: str, doc_type: str, text: str | None, str
         documents=chunks,
         metadatas=[{**base_meta, "chunk_index": i} for i in range(len(chunks))],
     )
+    keyword_index.invalidate()
     return len(chunks)
 
 
 def delete_document(collection, doc_id: str) -> None:
     collection.delete(where={"doc_id": doc_id})
+    keyword_index.invalidate()
 
 
 def indexed_doc_ids(collection) -> list[str]:

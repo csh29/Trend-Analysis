@@ -1,12 +1,13 @@
-"""P-06 검색(벡터) 평가 — 질문마다 AI 서비스 /search(Claude 없음, 로컬 임베딩)로 찾은 문서를 정답 문서와 맞댄다. 무료.
+"""P-06 검색 평가 — 질문마다 AI 서비스 /search(Claude 없음, 로컬 임베딩)로 찾은 문서를 정답 문서와 맞댄다. 무료.
 
 정답 문서: search_questions.json의 rule을 DB 분석 결과(의류 아이템)에 적용해 정한다(facts_check.load로 읽기 — Spring 앱을 내린 상태).
 지표(문서 단위 — 한 문서의 청크 여럿은 가장 높은 점수 하나로):
 - Recall@k: 정답 중 상위 k에 든 비율. Precision@k: 상위 k 중 정답 비율(정답이 k보다 적으면 정답 수로 나눈다). MRR: 첫 정답 순위의 역수.
 - 점수 분포: 정답 문서 점수 / 정답 질문의 정답 밖 문서 점수 / 자료 없는 주제(negative) 1위 점수 — 기준 유사도 0.60이 이들을 가르는지 본다.
-챗봇 검색 답변은 여기에 최신성 가중치·기간 거르기를 더한다(rag.search_documents) — 여기는 순수 유사도만 본다.
+순위는 /search가 준 순서(하이브리드면 RRF)를 따른다. 챗봇 검색 답변은 여기에 최신성 가중치·기간 거르기를 더한다 — 여기는 빼고 본다.
 
-사용: py ai/evals/search_eval.py [--k 8] (AI 서비스 8001이 떠 있어야 한다)
+사용: py ai/evals/search_eval.py [--k 8] [--vector] (AI 서비스 8001이 떠 있어야 한다). --vector는 설정과 상관없이 벡터만 —
+하이브리드와 비교할 때 둘 다 돌려 search-eval-vector.json과 search-eval-hybrid.json을 맞댄다.
 """
 import argparse
 import json
@@ -42,27 +43,31 @@ def relevant(rule: dict, docs: dict) -> set[str]:
     return hits
 
 
-def search(q: str) -> list[tuple[str, float]]:
-    with urllib.request.urlopen(f"{AI}/search?{urllib.parse.urlencode({'q': q, 'top_k': 50})}", timeout=120) as r:
+def search(q: str, hybrid: bool) -> list[tuple[str, float]]:
+    """문서 순위(처음 나온 청크 순서)와 문서별 가장 높은 유사도."""
+    params = {"q": q, "top_k": 50, "hybrid": str(hybrid).lower()}
+    with urllib.request.urlopen(f"{AI}/search?{urllib.parse.urlencode(params)}", timeout=120) as r:
         chunks = json.loads(r.read().decode("utf-8"))
     best: dict[str, float] = {}
     for c in chunks.get("results", chunks) if isinstance(chunks, dict) else chunks:
         doc_id, score = c["doc_id"] if "doc_id" in c else c["metadata"]["doc_id"], c["score"]
         best[doc_id] = max(best.get(doc_id, 0.0), score)
-    return sorted(best.items(), key=lambda e: -e[1])
+    return list(best.items())
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--k", type=int, default=8, help="챗봇 검색과 같은 상위 개수(rag.top-k 기본 8)")
+    parser.add_argument("--vector", action="store_true", help="벡터만(하이브리드 끔)")
     args = parser.parse_args()
+    mode = "vector" if args.vector else "hybrid"
     k = args.k
     docs, _ = facts_check.load()
     rows, rel_scores, other_scores, neg_top = [], [], [], []
     for q in json.loads(QUESTIONS.read_text(encoding="utf-8"))["questions"]:
-        ranked = search(q["q"])
+        ranked = search(q["q"], not args.vector)
         if q.get("negative"):
-            top = ranked[0][1] if ranked else 0.0
+            top = max((sc for _, sc in ranked), default=0.0)
             neg_top.append(top)
             rows.append({"id": q["id"], "q": q["q"], "negative": True, "top": ranked[:3]})
             print(f"{q['id']} {q['q']} — 자료 없는 주제, 1위 {top:.3f} {'(기준 이상!)' if top >= MIN_SCORE else ''}")
@@ -97,18 +102,18 @@ def main():
                 f"{MIN_SCORE:.2f} 이상 {sum(x >= MIN_SCORE for x in xs) / len(xs):.0%}")
 
     summary = {
-        "questions": len(scored), "k": k,
+        "mode": mode, "questions": len(scored), "k": k,
         "recall": round(statistics.mean(r["recall"] for r in scored), 3),
         "precision": round(statistics.mean(r["precision"] for r in scored), 3),
         "mrr": round(statistics.mean(r["rr"] for r in scored), 3),
     }
-    print(f"\n질문 {summary['questions']}개 · Recall@{k} {summary['recall']} · Precision@{k} {summary['precision']} · MRR {summary['mrr']}")
+    print(f"\n[{mode}] 질문 {summary['questions']}개 · Recall@{k} {summary['recall']} · Precision@{k} {summary['precision']} · MRR {summary['mrr']}")
     print("점수 분포(문서별 최고 청크 점수)")
     print("  정답 문서        :", dist(rel_scores))
     print(f"  정답 밖 상위 {k}개  :", dist(other_scores))
     print("  자료 없는 주제 1위:", dist(neg_top))
     RESULTS.mkdir(exist_ok=True)
-    out = RESULTS / "search-eval.json"
+    out = RESULTS / f"search-eval-{mode}.json"
     out.write_text(json.dumps({"summary": summary, "rows": rows, "relevant_scores": rel_scores, "other_scores": other_scores,
                                "negative_top": neg_top}, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"저장: {out}")

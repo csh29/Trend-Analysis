@@ -1,4 +1,5 @@
 """P-06 RAG 테스트(네트워크·실제 Claude·Chroma 없음). 실행: .venv\\Scripts\\python -m unittest"""
+import dataclasses
 import json
 import unittest
 from datetime import date
@@ -7,7 +8,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from app.indexing import indexer
+from app.indexing import indexer, keyword_index
 from app import main
 from app.rag import answer as rag
 from tests.test_core import FakeMessages, fake_response
@@ -37,13 +38,16 @@ class FakeQueryCollection:
                 return False
         return True
 
-    def query(self, query_texts, n_results, include, where=None):
-        self.queries.append((query_texts, n_results, where))
-        rows = [r for r in self.rows if self._match(r[2], where)][:n_results]
+    def _embed(self, input, is_query=False):
+        return [[1.0] for _ in input]
+
+    def query(self, query_embeddings, n_results, include, where=None, ids=None):
+        self.queries.append((query_embeddings, n_results, where) if ids is None else ("ids", ids))
+        rows = [r for r in self.rows if self._match(r[2], where) and (ids is None or r[0] in ids)][:n_results]
         return {"ids": [[r[0] for r in rows]], "documents": [[r[1] for r in rows]],
                 "metadatas": [[r[2] for r in rows]], "distances": [[r[3] for r in rows]]}
 
-    def get(self, where=None, include=None):
+    def get(self, where=None, include=None, ids=None):
         self.gets.append(where)
         rows = [r for r in self.rows if self._match(r[2], where)]
         return {"ids": [r[0] for r in rows], "documents": [r[1] for r in rows], "metadatas": [r[2] for r in rows]}
@@ -85,6 +89,46 @@ class DateNumberTest(unittest.TestCase):
         self.assertEqual(20261022, indexer.date_number("2026-10-22"))
         self.assertEqual(0, indexer.date_number(""))
         self.assertEqual(0, indexer.date_number("unknown"))
+
+
+class HybridSearchTest(unittest.TestCase):
+    """키워드(BM25)를 RRF로 합친다 — 후보를 넓히고 순서를 바꿀 뿐, score는 언제나 유사도다."""
+    ROWS = [
+        ("A#0", "블랙 팬츠", meta("A"), 0.20),
+        ("B#0", "패딩 재킷", meta("B"), 0.25),
+        ("C#0", "무스탕 재킷", meta("C", categories=("OUTER",)), 0.30),
+    ]
+
+    def test_keyword_only_chunk_joins_with_its_similarity(self):
+        collection = FakeQueryCollection(self.ROWS)
+        hits = rag.search(collection, "무스탕", 2, hybrid=True)
+        self.assertEqual(["A#0", "C#0"], [h["id"] for h in hits])  # 벡터 상위 2개 밖의 C가 키워드로 들어온다
+        self.assertEqual(0.7, hits[1]["score"])                     # 같은 질의 벡터로 구한 유사도
+        self.assertEqual(("ids", ["C#0"]), collection.queries[1])
+
+    def test_keyword_side_keeps_meta_filter(self):
+        collection = FakeQueryCollection(self.ROWS)
+        hits = rag.search(collection, "무스탕", 2, {"cat_BOTTOM": True}, hybrid=True)
+        self.assertNotIn("C#0", [h["id"] for h in hits])
+        self.assertEqual(1, len(collection.queries))
+
+    def test_vector_only_when_off(self):
+        collection = FakeQueryCollection(self.ROWS)
+        hits = rag.search(collection, "무스탕", 2, hybrid=False)
+        self.assertEqual(["A#0", "B#0"], [h["id"] for h in hits])
+        self.assertNotIn("fused", hits[0])
+
+    def test_tokens_ignore_spaces(self):
+        self.assertEqual(keyword_index.tokens("와이드팬츠"), keyword_index.tokens("와이드 팬츠!"))
+
+    def test_index_is_rebuilt_after_invalidate(self):
+        collection = FakeQueryCollection(self.ROWS)
+        keyword_index.get(collection)
+        keyword_index.get(collection)
+        self.assertEqual(1, len(collection.gets))  # 바뀌지 않았으면 다시 만들지 않는다
+        keyword_index.invalidate()
+        keyword_index.get(collection)
+        self.assertEqual(2, len(collection.gets))
 
 
 class RagTest(unittest.TestCase):
@@ -132,6 +176,7 @@ class RagTest(unittest.TestCase):
         self.assertIn("| 아이템 | 근거 |", result["body"])
         self.assertIn("한계 문장.", result["body"])
 
+    @mock.patch.object(rag, "settings", dataclasses.replace(rag.settings, hybrid_search=False))  # 번호 순서는 유사도 순으로 본다
     def test_only_passed_sources_go_to_claude_and_cited_ones_come_back(self):
         body = json.dumps({"summary": "와이드 팬츠가 많이 보인다.", "grounded": True, "points": [
             {"text": "트랙 팬츠: 블랙 와이드가 반복된다.", "sources": [2, 2, 9]},

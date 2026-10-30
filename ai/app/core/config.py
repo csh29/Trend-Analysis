@@ -33,6 +33,7 @@ class Settings:
     embedding_model: str
     chunk_size: int
     chunk_overlap: int
+    hybrid_search: bool = True  # P-06 검색에 키워드(BM25)를 RRF로 합친다. false면 벡터만
 
 
 def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
@@ -56,6 +57,7 @@ def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
         embedding_model=get("EMBEDDING_MODEL", "Qwen/Qwen3-VL-Embedding-2B"),
         chunk_size=int(get("CHUNK_SIZE", "500")),
         chunk_overlap=int(get("CHUNK_OVERLAP", "80")),
+        hybrid_search=get("HYBRID_SEARCH", "true").lower() != "false",
     )
 
 

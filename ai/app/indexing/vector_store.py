@@ -50,3 +50,9 @@ def get_collection():
             log.info("예전 청크 %d개에 게시일 숫자·카테고리 플래그 메타를 채웠습니다 — RAG 기간·카테고리 필터용", filled)
         _collection = collection
     return _collection
+
+
+def embed_query(collection, text: str) -> list[float]:
+    """질의 임베딩(질의 지시문 포함, Chroma와 같은 방식). 하이브리드 검색이 벡터 검색과 키워드로만 찾은 청크의 유사도 계산에
+    같은 벡터를 쓴다 — CPU에서 질의 임베딩 한 번이 수 초라 두 번 만들지 않는다. _embed는 Chroma 내부 함수라 버전을 올리면 확인한다."""
+    return [float(v) for v in collection._embed(input=[text], is_query=True)[0]]

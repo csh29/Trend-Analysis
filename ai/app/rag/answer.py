@@ -4,7 +4,7 @@
 - TREND(유행 질문): 유행 = 많이 입어 대중화된 것(2026-10-22 사용자 정의)이라 문장 유사도로 고르지 않는다. Spring이 센 집계
   (아이템 종류·소재·컬러·실루엣별 원문 수·출처 수·직전 기간 대비)와, 집계 상위 값이 나온 예시 원문(doc_id)을 받아 답한다.
   예시 원문은 Chroma에서 doc_id로 꺼낸다.
-- SEARCH(그 밖의 질문): 질문을 임베딩해 비슷한 청크를 찾는다. 유사도 = 1 - 코사인 거리.
+- SEARCH(그 밖의 질문): 질문을 임베딩해 비슷한 청크를 찾는다. 유사도 = 1 - 코사인 거리. 키워드(BM25)도 RRF로 합친다(하이브리드).
   - 기준 유사도(min_score) 이상인 근거가 없으면 Claude를 부르지 않고 "근거 없음"(정의서 P-06 규칙).
   - 카테고리를 말했으면 그 카테고리 아이템이 있는 원문만(메타 cat_<코드>). 기간을 콕 집었으면 그 게시일 범위만.
   - 기간이 없으면 자르지 않고 후보를 넉넉히 모아 유사도 × 최신성(반감기 4주)으로 최근 자료를 앞세운다. 가장 최근 근거도
@@ -20,7 +20,9 @@ from datetime import date
 import anthropic
 
 from app.core import prompt_loader
+from app.core.config import settings
 from app.core.claude import AiServiceError, create_message, parse_json, usage_of
+from app.indexing import keyword_index, vector_store
 
 log = logging.getLogger("trend-ai")
 
@@ -31,11 +33,11 @@ HALF_LIFE_DAYS = 28   # 최신성 가중치가 절반이 되는 날수 — "요�
 CANDIDATES = 30       # 최신성으로 다시 고르기 전에 유사도로 모으는 후보 청크 수
 STALE_DAYS = 56       # 가장 최근 근거가 이보다 오래되면 "자료가 오래됐다"고 밝힌다
 CHUNKS_PER_EXAMPLE = 2  # 유행 질문의 예시 원문마다 보내는 청크 수(요약 청크 + 본문 앞부분)
+RRF_K = 60              # RRF 1/(60+순위) — 표준값. 순위만 써서 유사도와 BM25 점수 크기를 맞출 필요가 없다
 
 
-def search(collection, query: str, top_k: int, where: dict | None = None) -> list[dict]:
-    """질문과 비슷한 청크(유사도 높은 순). 질의 임베딩은 Chroma가 embed_query(질의 지시문 포함)로 만든다. where는 메타 필터."""
-    got = collection.query(query_texts=[query], n_results=top_k, where=where,
+def _query(collection, vector: list[float], n: int, where: dict | None = None, ids: list[str] | None = None) -> list[dict]:
+    got = collection.query(query_embeddings=[vector], n_results=n, where=where, ids=ids,
                            include=["documents", "metadatas", "distances"])
     hits = []
     for i, chunk_id in enumerate(got["ids"][0]):
@@ -48,6 +50,36 @@ def search(collection, query: str, top_k: int, where: dict | None = None) -> lis
     return hits
 
 
+def search(collection, query: str, top_k: int, where: dict | None = None, hybrid: bool | None = None) -> list[dict]:
+    """질문과 비슷한 청크(관련 높은 순). where는 메타 필터. score는 언제나 유사도(1 - 코사인 거리)라 기준 유사도는 그대로 건다.
+
+    하이브리드(기본, HYBRID_SEARCH)면 벡터 상위 top_k와 키워드(BM25) 상위 top_k를 RRF로 합쳐 순서(fused)를 정한다 —
+    키워드로만 걸린 청크도 같은 질의 벡터로 유사도를 구한다. 키워드는 후보를 넓히고 순서를 바꿀 뿐 근거 기준을 낮추지 않는다."""
+    vector = vector_store.embed_query(collection, query)
+    hits = _query(collection, vector, top_k, where)
+    if not (settings.hybrid_search if hybrid is None else hybrid):
+        return hits
+    allowed = None if where is None else set(collection.get(where=where, include=[])["ids"])
+    keyword = keyword_index.get(collection).search(query, top_k, allowed)
+    seen = {h["id"] for h in hits}
+    missing = [chunk_id for chunk_id, _ in keyword if chunk_id not in seen]
+    if missing:
+        hits += _query(collection, vector, len(missing), ids=missing)
+    fused = {}
+    for ranking in ([h["id"] for h in hits[:top_k]], [chunk_id for chunk_id, _ in keyword]):
+        for rank, chunk_id in enumerate(ranking, start=1):
+            fused[chunk_id] = fused.get(chunk_id, 0.0) + 1.0 / (RRF_K + rank)
+    for hit in hits:
+        hit["fused"] = round(fused.get(hit["id"], 0.0), 6)
+    log.info("하이브리드 검색 벡터 %d개 키워드 %d개(키워드로만 %d개)", min(len(hits), top_k), len(keyword), len(missing))
+    return sorted(hits, key=lambda h: (h["fused"], h["score"]), reverse=True)[:top_k]
+
+
+def relevance(hit: dict) -> float:
+    """관련 순서 — 하이브리드면 RRF 점수, 아니면 유사도."""
+    return hit.get("fused", hit["score"])
+
+
 def published_date(meta: dict) -> date | None:
     try:
         return date.fromisoformat(meta.get("published_at") or "")
@@ -56,23 +88,23 @@ def published_date(meta: dict) -> date | None:
 
 
 def rank_by_recency(hits: list[dict], today: date) -> list[dict]:
-    """유사도 × 0.5^(경과일/28)로 다시 줄 세운다(rank). 게시일을 모르면 가장 오래된 것으로 친다(가중치 0)."""
+    """관련 순서(유사도 또는 RRF) × 0.5^(경과일/28)로 다시 줄 세운다(rank). 게시일을 모르면 가장 오래된 것으로 친다(가중치 0)."""
     for hit in hits:
         published = published_date(hit["metadata"])
         weight = 0.0 if published is None else 0.5 ** (max((today - published).days, 0) / HALF_LIFE_DAYS)
-        hit["rank"] = round(hit["score"] * weight, 4)
+        hit["rank"] = round(relevance(hit) * weight, 8)
     return sorted(hits, key=lambda h: h["rank"], reverse=True)
 
 
 def group_by_document(hits: list[dict]) -> list[dict]:
-    """청크를 문서별로 묶는다(순위 — 최신성 순위가 있으면 그것, 없으면 유사도 — 높은 순). 번호(n)는 1부터 — Claude가 인용하는 번호다."""
+    """청크를 문서별로 묶는다(순위 — 최신성 순위가 있으면 그것, 없으면 관련 순서 — 높은 순). 번호(n)는 1부터 — Claude가 인용하는 번호다."""
     groups: dict[str, dict] = {}
     for hit in hits:
         doc_id = hit["metadata"].get("doc_id") or hit["id"].split("#")[0]
-        group = groups.setdefault(doc_id, {"doc_id": doc_id, "score": hit["score"], "order": hit.get("rank", hit["score"]),
+        group = groups.setdefault(doc_id, {"doc_id": doc_id, "score": hit["score"], "order": hit.get("rank", relevance(hit)),
                                            "metadata": hit["metadata"], "chunks": []})
         group["score"] = max(group["score"], hit["score"])
-        group["order"] = max(group["order"], hit.get("rank", hit["score"]))
+        group["order"] = max(group["order"], hit.get("rank", relevance(hit)))
         group["chunks"].append(hit["document"])
     ordered = sorted(groups.values(), key=lambda g: g["order"], reverse=True)
     for n, group in enumerate(ordered, start=1):
