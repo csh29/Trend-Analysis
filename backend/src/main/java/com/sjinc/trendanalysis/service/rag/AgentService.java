@@ -259,8 +259,10 @@ public class AgentService {
         if (values.size() > MAX_SERIES_VALUES) {
             throw new IllegalArgumentException("values는 " + MAX_SERIES_VALUES + "개까지다");
         }
-        for (String v : values) {
-            if (!codes.knows(axis, v)) throw new IllegalArgumentException(axis + "에 없는 코드다: " + v);
+        for (int i = 0; i < values.size(); i++) { // 이름으로 와도 코드값으로 바꾼다
+            String code = codes.codeOf(axis, values.get(i));
+            if (code == null) throw new IllegalArgumentException(axis + "에 없는 값이다(허용 값 목록의 이름으로): " + values.get(i));
+            values.set(i, code);
         }
         String scopeName = scope.itemTypeName() != null ? scope.itemTypeName() : scope.categoryName() != null ? scope.categoryName() : "전체";
         run.calls.add("추이 " + scopeName + (values.isEmpty() ? "" : " · " + values) + " " + weeks + "주");
@@ -440,9 +442,45 @@ public class AgentService {
             return TrendWeeklyStat.CATEGORY.equals(axis) ? TrendCodes.CATEGORY : TrendCodes.VALUE_TYPE_GROUPS.get(axis);
         }
 
-        boolean knows(String axis, String value) {
+        /** 축의 값(코드값 또는 이름) → 코드값. 없으면 null. */
+        String codeOf(String axis, String value) {
             String group = group(axis);
-            return group != null && groups.getOrDefault(group, List.of()).stream().anyMatch(c -> c.getCodeValue().equals(value));
+            return group == null ? null : resolve(group, value);
+        }
+
+        /**
+         * 코드값 또는 이름 → 코드값(2026-10-30 — 도구 입력을 이름으로 받는다: 허용 값 목록에서 영문 코드값을 빼 입력 약 1,500토큰을 줄였다).
+         * 이름은 공백·대소문자를 무시하고, 괄호 앞 이름·"·"로 나뉜 조각·괄호 속 같은 뜻 말·카테고리 일상 표현(속성)도 받는다. 정식 이름이 먼저다.
+         */
+        String resolve(String group, String raw) {
+            if (raw == null) return null;
+            List<ComCd> codes = groups.getOrDefault(group, List.of());
+            for (ComCd c : codes) {
+                if (c.getCodeValue().equals(raw)) return c.getCodeValue();
+            }
+            String key = norm(raw);
+            for (ComCd c : codes) {
+                String name = Objects.toString(c.getCodeName(), "");
+                if (norm(name).equals(key) || norm(mainName(name)).equals(key) || norm(c.getCodeValue()).equals(key)) return c.getCodeValue();
+            }
+            for (ComCd c : codes) {
+                String name = Objects.toString(c.getCodeName(), "");
+                String main = mainName(name);
+                List<String> aliases = new ArrayList<>(List.of(main.split("·")));
+                aliases.addAll(List.of(name.substring(main.length()).replaceAll("^\\s*\\(|\\)\\s*$", "").split("[·,]")));
+                if (TrendCodes.CATEGORY.equals(group)) aliases.addAll(List.of(Objects.toString(c.getAttr1(), "").split(",")));
+                if (aliases.stream().map(Codes::norm).anyMatch(a -> !a.isEmpty() && a.equals(key))) return c.getCodeValue();
+            }
+            return null;
+        }
+
+        private static String mainName(String name) {
+            int i = name.indexOf('(');
+            return i > 0 ? name.substring(0, i).strip() : name;
+        }
+
+        private static String norm(String text) {
+            return text == null ? "" : text.replaceAll("\\s+", "").toLowerCase(java.util.Locale.ROOT);
         }
 
         String name(String axis, String value) {
@@ -454,10 +492,11 @@ public class AgentService {
         private String known(String group, Object raw, String field) {
             String value = text(raw);
             if (value == null) return null;
-            if (groups.get(group).stream().noneMatch(c -> c.getCodeValue().equals(value))) {
-                throw new IllegalArgumentException(field + "에 없는 코드다: " + value);
+            String code = resolve(group, value);
+            if (code == null) {
+                throw new IllegalArgumentException(field + "에 없는 값이다(허용 값 목록의 이름으로): " + value);
             }
-            return value;
+            return code;
         }
 
         private List<String> knownList(String group, Object raw, String field) {

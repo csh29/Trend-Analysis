@@ -72,6 +72,17 @@ public class RagService {
     private final String interpretModel;
     private final double minScore;
     private final int topK;
+    /**
+     * 최근 답한 질문의 해석(날짜+검색에 쓴 질문 → 해석, 최근 200건). 브리프 버튼은 방금 답한 질문을 다시 보내므로 이것을 쓰고
+     * 작은 모델을 다시 부르지 않는다(2026-10-30 — 같은 질문을 두 번 해석했다). 이어 묻기도 다시 쓴 질문으로 찾아 앞 대화 범위가 이어진다.
+     */
+    private final Map<String, QuestionInterpreter.Interpretation> recentInterpretations = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, QuestionInterpreter.Interpretation> eldest) {
+                    return size() > 200;
+                }
+            });
 
     /**
      * @param minScore 근거로 인정하는 최소 유사도(1 - 코사인 거리). 0.60은 2026-10-21 이미지 32건으로 잰 임시값 —
@@ -151,6 +162,9 @@ public class RagService {
         }
         LocalDate today = LocalDate.now();
         Interpreted interpreted = interpret(text, today, history, meter);
+        if (interpreted.fashion()) {
+            recentInterpretations.put(today + " " + interpreted.query().strip(), interpreted.question());
+        }
         if (!interpreted.fashion()) {
             log.info("RAG 질문 {}자 — 패션 질문이 아니라 답하지 않음", text.length());
             return new RagAnswerView(text, false, OFF_TOPIC_ANSWER, List.of(), "OFF_TOPIC", List.of(), null, minScore,
@@ -383,7 +397,9 @@ public class RagService {
     /** 기획 브리프 범위 — 질문을 해석해(AI, 실패하면 규칙) 묻는 축·증감은 비운다(모든 축을 센다). 토큰은 meter에 더한다. */
     QuestionInterpreter.Interpretation briefScope(String question, LocalDate today, Answered[] usageOut) {
         Meter meter = new Meter();
-        QuestionInterpreter.Interpretation q = interpret(question, today, List.of(), meter).question();
+        QuestionInterpreter.Interpretation cached = recentInterpretations.get(today + " " + question.strip());
+        QuestionInterpreter.Interpretation q = cached != null ? cached : interpret(question, today, List.of(), meter).question();
+        if (cached != null) log.info("브리프 범위 — 방금 답한 질문의 해석을 다시 쓴다(해석 호출 없음)");
         usageOut[0] = new Answered(null, meter.total, List.of());
         return new QuestionInterpreter.Interpretation(true, q.category(), q.categoryName(), q.itemType(), q.itemTypeName(), q.period(),
                 q.terms(), q.seasons(), null, q.filters(), null);

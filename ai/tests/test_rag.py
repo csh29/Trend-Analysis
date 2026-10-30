@@ -479,7 +479,8 @@ class RagApiTest(unittest.TestCase):
         self.assertEqual("count_trend", res.json()["content"][0]["name"])
         kwargs = call.call_args.kwargs
         self.assertEqual(["count_trend", "trend_series", "search_documents", "final_answer"], [t["name"] for t in kwargs["tools"]])
-        self.assertIn("OUTER=아우터", kwargs["system"][0]["text"])
+        self.assertIn("- category: 아우터", kwargs["system"][0]["text"])  # 허용 값은 이름만(도구 입력도 이름 — Spring이 코드값으로 바꾼다)
+        self.assertNotIn("OUTER", kwargs["system"][0]["text"])
         self.assertNotIn("cache_control", kwargs["system"][0])  # 첫 단계는 캐시를 만들지 않는다
         self.assertEqual("medium", kwargs["output_config"]["effort"])
         with mock.patch.object(agent, "create_message", return_value=reply) as call:
@@ -487,6 +488,19 @@ class RagApiTest(unittest.TestCase):
                              json={"model": "m", "messages": [{"role": "user", "content": "q"}], "cache": True})
         self.assertEqual({"type": "ephemeral"}, call.call_args.kwargs["system"][0]["cache_control"])
         self.assertIn("2026-10-28", self.client.get("/agent/task", params={"today": "2026-10-28"}).json()["text"])
+
+    def test_agent_sends_detail_list_only_when_question_mentions_details(self):
+        # 디테일 목록은 질문(첫 메시지)에 디테일 말이 있을 때만 — 질문 해석과 같은 기준(2026-10-30 입력 토큰 최적화)
+        from app.rag import agent, interpret
+        hints = interpret.InterpretInput(question="", model="m", today=TODAY, categories=[interpret.CodeHint("TOP", "상의")],
+                                         item_types=[interpret.CodeHint("TOP_KNIT", "니트·스웨터")],
+                                         details=[interpret.CodeHint("NECK_HALF", "하프넥(하이넥·모크넥)")])
+
+        def system(question):
+            return agent.system_prompt(agent.AgentStepInput(model="m", today=TODAY, hints=hints,
+                                                            messages=[{"role": "user", "content": question}]))[0]["text"]
+        self.assertNotIn("attributes(디테일)", system("요즘 유행하는 니트는?"))
+        self.assertIn("attributes(디테일): 하프넥(하이넥·모크넥)", system("모크넥 니트 유행해?"))
 
     def test_answer_passes_key(self):
         with mock.patch.object(main.rag, "answer", return_value={"grounded": False}) as a, \

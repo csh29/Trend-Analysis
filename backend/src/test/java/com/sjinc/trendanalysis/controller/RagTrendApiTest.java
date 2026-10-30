@@ -128,12 +128,30 @@ class RagTrendApiTest {
 
     @Test
     @WithMockUser(username = "admin")
+    void 방금_답한_질문의_브리프는_해석을_다시_부르지_않는다() throws Exception {
+        when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
+        when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
+        when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(toolUse("t1", "final_answer", Map.of("summary", "최근 4주 아우터 요약",
+                "grounded", true, "body", "", "points", List.of(Map.of("text", "데님 재킷: 많다", "sources", List.of(1))))));
+        when(aiClient.brief(any(), eq("test-key"))).thenReturn(new AiClient.BriefResponse(
+                Map.of("title", "아우터 브리프"), Map.of("input_tokens", 1000, "output_tokens", 500)));
+
+        mockMvc.perform(post("/api/rag/ask").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 26FW 브리프 줘")))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/rag/brief").with(csrf()).contentType(MediaType.APPLICATION_JSON).content(question("아우터 26FW 브리프 줘")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.brief.title").value("아우터 브리프"));
+        verify(aiClient, org.mockito.Mockito.times(1)).interpret(any(), eq("test-key")); // 답할 때 한 번만
+    }
+
+    @Test
+    @WithMockUser(username = "admin")
     void 유행_질문은_도구로_집계를_불러_인용한_원문으로_답한다() throws Exception {
         when(aiClient.interpret(any(), eq("test-key"))).thenReturn(trendOuter());
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
         when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
                 new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t1", "name", "count_trend",
-                        "input", Map.of("category", "OUTER", "focus", "ITEM_TYPE"))), Map.of("input_tokens", 100, "output_tokens", 20)),
+                        "input", Map.of("category", "아우터", "focus", "ITEM_TYPE"))), Map.of("input_tokens", 100, "output_tokens", 20)), // 도구 입력은 이름 — Codes.resolve가 OUTER로 바꾼다
                 new AiClient.AgentStepResponse("tool_use", List.of(Map.of("type", "tool_use", "id", "t2", "name", "final_answer",
                         "input", Map.of("summary", "최근 4주 아우터는 데님 재킷이 가장 많다", "grounded", true, "body", "",
                                 "points", List.of(Map.of("text", "데님 재킷 3건", "sources", List.of(1, 9)))))),
@@ -229,7 +247,7 @@ class RagTrendApiTest {
         when(aiClient.agentTask(any())).thenReturn("도구로 조회해 답하라.");
         when(aiClient.agentStep(any(), eq("test-key"))).thenReturn(
                 toolUse("t1", "trend_series", Map.of("category", "OUTER", "axis", "ITEM_TYPE",
-                        "values", List.of("OUTER_DENIM_JACKET", "OUTER_PADDING"), "weeks", 20)),
+                        "values", List.of("데님 재킷", "OUTER_PADDING"), "weeks", 20)), // 이름·코드값 둘 다 받는다
                 toolUse("t2", "final_answer", Map.of("summary", "최근 20주 데님 재킷이 꾸준하다", "grounded", true, "body", "",
                         "points", List.of(Map.of("text", "데님 재킷: 꾸준하다", "sources", List.of(1))))));
 
