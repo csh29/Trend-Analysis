@@ -1524,9 +1524,16 @@
             });
         }
 
-        /** 유행 질문 답 아래 "기획 브리프 PPT" — 집계(판단 근거)가 있는 답만. 누를 때마다 Claude를 한 번 부른다. */
+        /** 브리프를 요청한 질문 — 원래 질문 또는 이어 묻기를 다시 쓴 질문("그걸로 브리프 만들어줘")에 이 말이 있으면. */
+        const BRIEF_WORDS = /브리프|기획\s*(안|서)/;
+
+        /**
+         * 유행 질문 답 아래 "기획 브리프 PPT" — 브리프를 요청했고 집계(판단 근거)가 있는 답만. 누를 때마다 Claude를 한 번 부른다.
+         * 모든 유행 답에 붙였더니 "요즘 유행하는 아우터는?"에도 브리프가 뜬 것처럼 보였다(2026-10-30 사용자 결정).
+         */
         function addBriefButton(bubble, view) {
-            if (!view.grounded || !view.facts) return;
+            const i = view.interpretation || {};
+            if (!view.grounded || !view.facts || !BRIEF_WORDS.test((view.question || '') + ' ' + (i.resolvedQuestion || ''))) return;
             const b = el('button', 'brief-btn', '📊 기획 브리프 PPT');
             b.type = 'button';
             b.title = '이 질문 범위로 8개 구성의 기획 브리프(핵심 요약·아이템·컬러·핏·소재·근거·제안·실행 과제)를 PPT로 받습니다. 30초~1분 걸립니다';
