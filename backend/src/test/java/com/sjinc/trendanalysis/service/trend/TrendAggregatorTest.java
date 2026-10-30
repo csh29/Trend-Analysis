@@ -40,6 +40,27 @@ class TrendAggregatorTest {
     }
 
     @Test
+    void 마감된_주는_다시_만들지_않고_확정_언급량으로_전주와_4주_평균을_낸다() {
+        // 마감된 주(BASE 이전)의 원문이 남아 있어도 세지 않는다 — 확정값(closed)만 쓴다
+        List<Mention> list = new ArrayList<>();
+        mentions(list, BASE, "OUTER", "MATERIAL", "LEATHER", 3);
+        List<TrendAggregator.WeekCount> closed = List.of(
+                new TrendAggregator.WeekCount(BASE.minusWeeks(1), TrendWeeklyStat.ALL, "MATERIAL", "LEATHER", 2),
+                new TrendAggregator.WeekCount(BASE.minusWeeks(2), TrendWeeklyStat.ALL, "MATERIAL", "LEATHER", 2),
+                new TrendAggregator.WeekCount(BASE.minusWeeks(1), TrendWeeklyStat.ALL, "COLOR", "BLACK", 4));
+
+        List<Row> rows = TrendAggregator.aggregate(list, closed, BASE, BASE, RULE);
+
+        assertThat(rows).allMatch(r -> !r.weekStart().isBefore(BASE)); // 마감된 주의 행은 만들지 않는다
+        Row leather = row(rows, BASE, TrendWeeklyStat.ALL, "MATERIAL", "LEATHER").orElseThrow();
+        assertThat(leather.prevCount()).isEqualTo(2);
+        assertThat(leather.prevRate()).isEqualTo(50.0);
+        assertThat(leather.monthAvg()).isEqualTo(1.0); // (2 + 2 + 0 + 0) / 4
+        // 마감된 주에만 있던 값은 열린 주에서 사라진 것으로(-100%) 나온다
+        assertThat(row(rows, BASE, TrendWeeklyStat.ALL, "COLOR", "BLACK").orElseThrow().prevRate()).isEqualTo(-100.0);
+    }
+
+    @Test
     void 전주_대비_20퍼센트_이상이면_급상승이다() {
         List<Mention> list = new ArrayList<>();
         mentions(list, BASE.minusWeeks(1), "OUTER", "MATERIAL", "LEATHER", 5);

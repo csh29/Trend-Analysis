@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/css/grid.css">
     <style>
         /* 화면 공통 뼈대는 common-ui.css, 그리드는 grid.css, 차트는 line-chart.js가 담당한다. 여기는 요약 카드·증감률 색만. */
-        .summary-cards{ display:grid; grid-template-columns:repeat(4, minmax(140px, 1fr)); gap:10px; }
+        .summary-cards{ display:grid; grid-template-columns:repeat(5, minmax(130px, 1fr)); gap:10px; }
         .summary-card{ background:var(--card); border:1px solid var(--line); border-radius:var(--radius-box); padding:12px 14px; }
         .summary-card .label{ font-size:11.5px; font-weight:700; color:var(--text-sub); }
         .summary-card .value{ margin-top:4px; font-size:18px; font-weight:800; color:var(--text); }
@@ -39,6 +39,7 @@
             <div class="summary-card"><div class="label">급상승 (전주 대비 기준 이상)</div><div class="value" id="sumSurge">-</div></div>
             <div class="summary-card"><div class="label">신규 (전주 0건)</div><div class="value" id="sumNew">-</div></div>
             <div class="summary-card"><div class="label">마지막 집계</div><div class="value small" id="sumAggregated">-</div></div>
+            <div class="summary-card"><div class="label">기준 주 마감</div><div class="value small" id="sumClosed">-</div></div>
         </section>
 
         <section class="panel-head">
@@ -54,6 +55,17 @@
             <table class="grid">
                 <thead id="trendGridHead"></thead>
                 <tbody id="trendGridBody"></tbody>
+            </table>
+        </section>
+
+        <section class="panel-head">
+            <div class="panel-title" id="closeTitle">주 마감 이력</div>
+            <div class="form-hint">마감한 주는 다시 집계하지 않습니다. 매주 월요일 새벽에 지난주까지 자동 마감하고, 마감 뒤 들어온 지난 날짜의 원문은 첫 열린 주에 셉니다.</div>
+        </section>
+        <section>
+            <table class="grid">
+                <thead id="closeGridHead"></thead>
+                <tbody id="closeGridBody"></tbody>
             </table>
         </section>
     </main>
@@ -170,7 +182,9 @@
             document.getElementById('sumNew').textContent = view.newCount + '건';
             document.getElementById('sumAggregated').textContent = view.aggregatedAt
                 ? String(view.aggregatedAt).replace('T', ' ').substring(0, 16) : '집계 전';
-            document.getElementById('rowsTitle').textContent = '기준 주 집계 (' + mmdd(base) + ' ~ ' + mmdd(addDays(base, 6)) + ')';
+            document.getElementById('rowsTitle').textContent = '기준 주 집계 (' + mmdd(base) + ' ~ ' + mmdd(addDays(base, 6)) + ')'
+                + (view.closed ? ' — 마감' : '');
+            document.getElementById('sumClosed').textContent = view.closed ? '마감' : '열림 (다시 집계됨)';
 
             LineChart.render(document.getElementById('trendChart'), {
                 labels: view.weeks.map(function (w) { return mmdd(parse(w)); }),
@@ -202,6 +216,15 @@
         const evidenceBackdrop = document.getElementById('evidenceBackdrop');
         const EVIDENCE_COLUMNS = [
             { id: 'statDate', label: '집계일', width: 100, align: 'center' },
+            {
+                // 마감된 주의 날짜로 늦게 들어온 원문은 첫 열린 주에 센다 — 그때만 표시한다
+                id: 'statWeek', label: '센 주', width: 90, align: 'center',
+                render: function (value, row) {
+                    const date = parse(row.statDate);
+                    const own = addDays(date, -((date.getDay() + 6) % 7));
+                    return value && value !== iso(own) ? mmdd(parse(value)) + '주' : '';
+                }
+            },
             { id: 'docId', label: '문서 ID', width: 170, align: 'center' },
             { id: 'title', label: '제목', width: 200, title: true },
             { id: 'summary', label: '요약', title: true },
@@ -255,21 +278,94 @@
 
         // ── 집계(기타1) ─────────────────────────────────────────────
         function aggregateNow() {
-            fetch(API_URL + '/aggregate', { method: 'POST' })
+            const week = search.values().baseWeek;
+            fetch(API_URL + '/aggregate?weekStart=' + encodeURIComponent(week), { method: 'POST' })
                 .then(function (res) {
-                    if (!res.ok) throw new Error('집계에 실패했습니다.');
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '집계에 실패했습니다.'); });
                     return res.json();
                 })
                 .then(function (result) {
-                    alert('집계했습니다. 분석 완료 문서 ' + result.documents + '건 → 집계 ' + result.rows + '행 (급상승 ' + result.surges + '행)');
+                    alert('열린 주를 다시 집계했습니다(마감된 주는 그대로). 분석 완료 문서 ' + result.documents + '건 → 집계 ' + result.rows + '행 (급상승 ' + result.surges + '행)');
                     searchTrend();
                 })
                 .catch(function (err) { alert(err.message); });
         }
 
+        // ── 주 마감(기타2)·마감 취소(기타3) ─────────────────────────
+        const CLOSE_COLUMNS = [
+            { id: 'actedAt', label: '일시', width: 140, align: 'center', render: function (v) { return String(v).replace('T', ' ').substring(0, 16); } },
+            { id: 'action', label: '구분', width: 80, align: 'center', render: function (v) { return v === 'CLOSE' ? '마감' : '마감 취소'; } },
+            { id: 'weekStart', label: '주', width: 120, align: 'center', render: function (v) { return mmdd(parse(v)) + ' ~ ' + mmdd(addDays(parse(v), 6)); } },
+            { id: 'actor', label: '처리자', width: 100, align: 'center', render: function (v) { return v === 'SYSTEM' ? '자동' : v; } },
+            { id: 'reason', label: '취소 사유', title: true }
+        ];
+        Grid.renderHeader(document.getElementById('closeGridHead'), CLOSE_COLUMNS);
+
+        function loadCloseStatus() {
+            return fetch(API_URL + '/closes')
+                .then(function (res) {
+                    if (!res.ok) throw new Error('마감 현황을 읽지 못했습니다.');
+                    return res.json();
+                })
+                .then(function (status) {
+                    document.getElementById('closeTitle').textContent = '주 마감 이력 — '
+                        + (status.lastClosedWeek ? mmdd(addDays(parse(status.lastClosedWeek), 6)) + '까지 마감' : '마감 없음');
+                    Grid.render(document.getElementById('closeGridBody'), CLOSE_COLUMNS, status.logs, { emptyMessage: '마감 이력이 없습니다.' });
+                    return status;
+                })
+                .catch(function (err) { alert(err.message); });
+        }
+
+        function postJson(url, body) {
+            return fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+                .then(function (res) {
+                    if (res.status === 403) throw new Error('이 작업을 할 권한이 없습니다.');
+                    if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || '처리에 실패했습니다.'); });
+                    return res.json();
+                });
+        }
+
+        function closeWeek() {
+            const week = search.values().baseWeek;
+            const end = iso(addDays(parse(week), 6));
+            if (!confirm(week + ' ~ ' + end + ' 주까지 마감합니다(앞의 열린 주도 함께).\n마감한 주는 다시 집계되지 않습니다. 계속할까요?')) return;
+            postJson(API_URL + '/closes', { weekStart: week })
+                .then(function (weeks) {
+                    alert(weeks.length + '주를 마감했습니다 (' + weeks[0] + ' ~ ' + weeks[weeks.length - 1] + ' 주).');
+                    loadCloseStatus();
+                    searchTrend();
+                })
+                .catch(function (err) { alert(err.message); });
+        }
+
+        function cancelClose() {
+            loadCloseStatus().then(function (status) {
+                if (!status || !status.lastClosedWeek) {
+                    alert('마감된 주가 없습니다.');
+                    return;
+                }
+                const week = status.lastClosedWeek;
+                const reason = prompt(week + ' ~ ' + iso(addDays(parse(week), 6)) + ' 주의 마감을 취소합니다(가장 최근 마감 주부터 하나씩).\n취소 사유를 입력하세요.');
+                if (reason === null) return;
+                if (!reason.trim()) {
+                    alert('취소 사유를 입력하세요.');
+                    return;
+                }
+                postJson(API_URL + '/closes/cancel', { reason: reason })
+                    .then(function (cancelled) {
+                        alert(cancelled + ' 주의 마감을 취소했습니다. 그 주부터 다시 집계했습니다.');
+                        loadCloseStatus();
+                        searchTrend();
+                    })
+                    .catch(function (err) { alert(err.message); });
+            });
+        }
+
         PageButtons.bind({
             btnSearch: searchTrend,
             btnEtc1: aggregateNow,
+            btnEtc2: closeWeek,
+            btnEtc3: cancelClose,
             btnReset: function () {
                 search.reset();
                 searchTrend();
@@ -284,6 +380,7 @@
         });
 
         search.ready.then(searchTrend);
+        loadCloseStatus();
     })();
 </script>
 </body>

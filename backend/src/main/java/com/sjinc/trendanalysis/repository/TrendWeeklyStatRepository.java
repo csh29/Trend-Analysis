@@ -2,6 +2,7 @@ package com.sjinc.trendanalysis.repository;
 
 import com.sjinc.trendanalysis.domain.TrendWeeklyStat;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 
 import java.time.LocalDate;
@@ -19,4 +20,14 @@ public interface TrendWeeklyStatRepository extends JpaRepository<TrendWeeklyStat
     /** 집계가 있는 가장 최근 주(월요일). */
     @Query("select max(s.weekStart) from TrendWeeklyStat s")
     LocalDate findLastWeekStart();
+
+    /** 마감된 주의 확정 언급량 — 열린 주의 전주·4주 평균에 쓴다. */
+    List<TrendWeeklyStat> findByWeekStartBetween(LocalDate from, LocalDate to);
+
+    int countByWeekStart(LocalDate weekStart);
+
+    /** 열린 주만 다시 만든다 — 마감된 주(from 이전)의 행은 건드리지 않는다. */
+    @Modifying
+    @Query("delete from TrendWeeklyStat s where s.weekStart >= :from")
+    int deleteFromWeek(LocalDate from);
 }

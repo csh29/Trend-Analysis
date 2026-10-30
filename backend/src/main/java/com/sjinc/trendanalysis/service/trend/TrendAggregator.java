@@ -52,11 +52,24 @@ public final class TrendAggregator {
         return date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
     }
 
+    /** 마감된 주의 확정 언급량 한 건(그 주의 집계 행) — 다시 세지 않고 열린 주의 전주·4주 평균에만 쓴다. */
+    public record WeekCount(LocalDate weekStart, String category, String valueType, String value, int count) {
+    }
+
     /**
      * 첫 언급 주부터 lastWeek까지 주마다 집계한다. 이번 주·전주 모두 0인 값은 행을 만들지 않는다.
      * 카테고리 범위는 전체(ALL)와 문서의 카테고리 두 가지다. 카테고리 자체의 언급량은 전체 범위에만 둔다.
      */
     public static List<Row> aggregate(List<Mention> mentions, LocalDate lastWeek, SurgeRule rule) {
+        return aggregate(mentions, List.of(), null, lastWeek, rule);
+    }
+
+    /**
+     * 주 마감(2026-10-30) — fromWeek(첫 열린 주)부터의 행만 만든다. mentions는 열린 주 원문만(날짜는 집계 주),
+     * closed는 마감된 주의 확정 언급량(fromWeek 이전 4주면 충분하다). fromWeek가 null이면 마감이 없는 것이다.
+     */
+    public static List<Row> aggregate(List<Mention> mentions, List<WeekCount> closed, LocalDate fromWeek,
+                                      LocalDate lastWeek, SurgeRule rule) {
         Map<Key, Map<LocalDate, Set<Long>>> docsByWeek = new HashMap<>();
         LocalDate firstWeek = null;
         LocalDate endWeek = weekStart(lastWeek);
@@ -69,14 +82,25 @@ public final class TrendAggregator {
                 add(docsByWeek, new Key(m.category(), m.valueType(), m.value()), week, m.documentId());
             }
         }
+        // 주별 문서 수 — 마감된 주는 확정값을 그대로 쓴다(원문을 다시 세지 않는다)
+        Map<Key, Map<LocalDate, Integer>> counts = new HashMap<>();
+        docsByWeek.forEach((key, weeks) -> weeks.forEach((week, docs) ->
+                counts.computeIfAbsent(key, k -> new HashMap<>()).put(week, docs.size())));
+        for (WeekCount c : closed) {
+            counts.computeIfAbsent(new Key(c.category(), c.valueType(), c.value()), k -> new HashMap<>()).put(c.weekStart(), c.count());
+            firstWeek = firstWeek == null || c.weekStart().isBefore(firstWeek) ? c.weekStart() : firstWeek;
+        }
         if (firstWeek == null) {
             return List.of();
         }
+        if (fromWeek != null && fromWeek.isAfter(firstWeek)) {
+            firstWeek = fromWeek;
+        }
 
         List<Row> rows = new ArrayList<>();
-        for (Map.Entry<Key, Map<LocalDate, Set<Long>>> entry : docsByWeek.entrySet()) {
+        for (Map.Entry<Key, Map<LocalDate, Integer>> entry : counts.entrySet()) {
             Key key = entry.getKey();
-            Map<LocalDate, Set<Long>> weeks = entry.getValue();
+            Map<LocalDate, Integer> weeks = entry.getValue();
             for (LocalDate week = firstWeek; !week.isAfter(endWeek); week = week.plusWeeks(1)) {
                 int count = count(weeks, week);
                 int prev = count(weeks, week.minusWeeks(1));
@@ -105,9 +129,8 @@ public final class TrendAggregator {
         docsByWeek.computeIfAbsent(key, k -> new HashMap<>()).computeIfAbsent(week, w -> new HashSet<>()).add(documentId);
     }
 
-    private static int count(Map<LocalDate, Set<Long>> weeks, LocalDate week) {
-        Set<Long> docs = weeks.get(week);
-        return docs == null ? 0 : docs.size();
+    private static int count(Map<LocalDate, Integer> weeks, LocalDate week) {
+        return weeks.getOrDefault(week, 0);
     }
 
     private static double rate(int current, double base) {

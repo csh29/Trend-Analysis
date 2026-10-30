@@ -42,6 +42,8 @@ public class DataInitializer implements CommandLineRunner {
     private static final int INITIAL_PASSWORD_LENGTH = 20;
     private static final String RETIRED_RAG_PROGRAM = "rag-search";
     private static final String REANALYZE_LABEL = "재분석";
+    private static final String CLOSE_LABEL = "마감";
+    private static final String CANCEL_CLOSE_LABEL = "마감 취소";
 
     private final UserRepository userRepository;
     private final ProgramRepository programRepository;
@@ -272,12 +274,12 @@ public class DataInitializer implements CommandLineRunner {
                     .build()));
             log.info("프로그램 text-upload(텍스트 등록)를 등록했습니다.");
         }
-        // P-05 트렌드 분석. "집계"(기타1)는 일 1회 배치를 기다리지 않고 바로 다시 집계한다.
+        // P-05 트렌드 분석. "집계"(기타1)는 일 1회 배치를 기다리지 않고 바로 다시 집계한다. "마감"(기타2)·"마감 취소"(기타3)는 주 마감.
         if (!programRepository.existsById("trend-analysis")) {
             added.add(programRepository.save(Program.builder()
                     .programId("trend-analysis").programNm("트렌드 분석").url("/program/trend-analysis").sortOrder(3).useYn("Y")
                     .menuGroup(Program.GROUP_TREND).icon("📈")
-                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("N").resetYn("Y").etc1Nm("집계")
+                    .searchYn("Y").newYn("N").saveYn("N").deleteYn("N").resetYn("Y").etc1Nm("집계").etc2Nm(CLOSE_LABEL).etc3Nm(CANCEL_CLOSE_LABEL)
                     .build()));
             log.info("프로그램 trend-analysis(트렌드 분석)를 등록했습니다.");
         }
@@ -310,6 +312,15 @@ public class DataInitializer implements CommandLineRunner {
                 REANALYZE_LABEL, "text-upload");
         if (img + text > 0) {
             log.info("일괄 재분석 버튼을 붙였습니다(이미지 업로드 {}·텍스트 등록 {}).", img, text);
+        }
+        // 트렌드 주 마감(2026-10-30 사용자 요청) — 트렌드 분석의 기타2·기타3. 버튼 권한은 admin만 받아 두었고(등록 때 모든 버튼),
+        // 다른 사용자는 사용자별 권한관리에서 준다. 서버도 버튼 권한을 확인한다(TrendController)
+        int close = jdbcTemplate.update("UPDATE programs SET etc2_nm = ? WHERE program_id = ? AND (etc2_nm IS NULL OR TRIM(etc2_nm) = '')",
+                CLOSE_LABEL, "trend-analysis");
+        int cancel = jdbcTemplate.update("UPDATE programs SET etc3_nm = ? WHERE program_id = ? AND (etc3_nm IS NULL OR TRIM(etc3_nm) = '')",
+                CANCEL_CLOSE_LABEL, "trend-analysis");
+        if (close + cancel > 0) {
+            log.info("트렌드 분석에 마감·마감 취소 버튼을 붙였습니다.");
         }
     }
 

@@ -5,11 +5,14 @@ import com.sjinc.trendanalysis.domain.SourceDocument;
 import com.sjinc.trendanalysis.domain.TrendItem;
 import com.sjinc.trendanalysis.domain.TrendItemValue;
 import com.sjinc.trendanalysis.domain.TrendWeeklyStat;
+import com.sjinc.trendanalysis.dto.trend.TrendCloseView;
 import com.sjinc.trendanalysis.dto.trend.TrendEvidenceView;
 import com.sjinc.trendanalysis.dto.trend.TrendView;
 import com.sjinc.trendanalysis.repository.ComCdRepository;
 import com.sjinc.trendanalysis.repository.SourceDocumentRepository;
 import com.sjinc.trendanalysis.repository.TrendItemRepository;
+import com.sjinc.trendanalysis.repository.TrendWeekCloseLogRepository;
+import com.sjinc.trendanalysis.repository.TrendWeekCloseRepository;
 import com.sjinc.trendanalysis.repository.TrendWeeklyStatRepository;
 import com.sjinc.trendanalysis.service.analysis.TrendCodes;
 import lombok.RequiredArgsConstructor;
@@ -41,9 +44,12 @@ public class TrendQueryService {
     static final int MAX_WEEKS = 52;
 
     private final TrendWeeklyStatRepository statRepository;
+    private final TrendWeekCloseRepository closeRepository;
+    private final TrendWeekCloseLogRepository closeLogRepository;
     private final TrendItemRepository trendItemRepository;
     private final SourceDocumentRepository sourceDocumentRepository;
     private final ComCdRepository comCdRepository;
+    private final TrendAggregationService aggregationService;
 
     /**
      * @param baseWeek 기준 주(아무 날짜나 주면 그 주 월요일로 맞춘다). 없으면 지난주 — 이번 주는 진행 중이라 전주보다 작게 나온다
@@ -75,10 +81,11 @@ public class TrendQueryService {
                         "Y".equals(s.getSurgeYn()), "Y".equals(s.getNewYn())))
                 .toList();
 
+        LocalDate lastClosed = closeRepository.findLastWeekStart();
         return new TrendView(base, weekList, rows, series(stats, weekList, labels),
                 (int) rows.stream().filter(TrendView.Row::surge).count(),
                 (int) rows.stream().filter(TrendView.Row::isNew).count(),
-                statRepository.findLastAggregatedAt());
+                statRepository.findLastAggregatedAt(), lastClosed != null && !base.isAfter(lastClosed), lastClosed);
     }
 
     /** 기간 안 언급량 합계 상위 값의 주별 언급량. */
@@ -100,7 +107,10 @@ public class TrendQueryService {
         return counts.values().stream().mapToInt(Integer::intValue).sum();
     }
 
-    /** 값 하나가 나온 원문(분석 완료) — 집계 날짜가 기간 안이고 카테고리가 맞는 것, 최신순. */
+    /**
+     * 값 하나가 나온 원문(분석 완료) — 집계 주가 기간(from~to가 걸친 주) 안이고 카테고리가 맞는 것, 최신순.
+     * 집계 주는 집계와 같은 기준이다(마감 때 고정한 원문은 그 주, 늦게 온 원문은 첫 열린 주 — TrendAggregationService.WeekAssignment).
+     */
     public List<TrendEvidenceView> getEvidence(String valueType, String value, String category, LocalDate from, LocalDate to) {
         checkValueType(valueType);
         if (value == null || value.isBlank() || from == null || to == null || to.isBefore(from)) {
@@ -115,16 +125,32 @@ public class TrendQueryService {
                 .filter(item -> mentions(item, valueType, target, scope))
                 .collect(Collectors.toMap(TrendItem::getDocumentId, Function.identity()));
 
+        TrendAggregationService.WeekAssignment assignment = aggregationService.assignment();
+        LocalDate fromWeek = TrendAggregator.weekStart(from);
+        LocalDate toWeek = TrendAggregator.weekStart(to);
         return sourceDocumentRepository.findAllById(byDocument.keySet()).stream()
                 .filter(doc -> SourceDocument.DONE.equals(doc.getStatus()))
                 .filter(doc -> {
-                    LocalDate date = TrendAggregationService.statDate(doc);
-                    return !date.isBefore(from) && !date.isAfter(to);
+                    LocalDate week = assignment.weekOf(doc);
+                    return !week.isBefore(fromWeek) && !week.isAfter(toWeek);
                 })
                 .sorted(Comparator.comparing(TrendAggregationService::statDate).reversed().thenComparing(SourceDocument::getDocId))
                 .map(doc -> new TrendEvidenceView(doc.getDocId(), doc.getDocType(), doc.getTitle(),
-                        byDocument.get(doc.getId()).getSummary(), doc.getMedia(), TrendAggregationService.statDate(doc), doc.getUrl()))
+                        byDocument.get(doc.getId()).getSummary(), doc.getMedia(), TrendAggregationService.statDate(doc),
+                        assignment.weekOf(doc), doc.getUrl()))
                 .toList();
+    }
+
+    /** 마감 현황 — 마지막 마감 주, 최근 마감 12주, 최근 마감·취소 이력 20건. */
+    public TrendCloseView getCloseStatus() {
+        LocalDate lastClosed = closeRepository.findLastWeekStart();
+        return new TrendCloseView(lastClosed, lastClosed == null ? null : lastClosed.plusWeeks(1),
+                closeRepository.findTop12ByOrderByWeekStartDesc().stream()
+                        .map(c -> new TrendCloseView.Close(c.getWeekStart(), c.getDocCount(), c.getRowCount(), c.getClosedAt(), c.getClosedBy()))
+                        .toList(),
+                closeLogRepository.findTop20ByOrderByIdDesc().stream()
+                        .map(l -> new TrendCloseView.Log(l.getWeekStart(), l.getAction(), l.getActor(), l.getReason(), l.getActedAt()))
+                        .toList());
     }
 
     /** 집계(TrendAggregationService.mentions)와 같은 기준 — 속성은 그 아이템의 카테고리로, 키워드는 문서의 아이템 카테고리로 거른다. */
