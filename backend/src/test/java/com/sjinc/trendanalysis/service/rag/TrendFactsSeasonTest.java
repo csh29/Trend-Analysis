@@ -96,10 +96,53 @@ class TrendFactsSeasonTest {
                 "OUTER_LEATHER_JACKET", "레더 재킷", sixMonths, List.of(), List.of(), TrendItemValue.ITEM_TYPE), TODAY);
         assertThat(typeScoped.dimensions()).extracting(TrendFactsService.Dimension::valueType).doesNotContain(TrendItemValue.ITEM_TYPE);
 
-        // 시즌을 정하지 않으면 다 센다
+        // 기간을 정하고 시즌을 정하지 않으면 다 센다
         TrendFactsService.Facts all = trendFactsService.count(new QuestionInterpreter.Interpretation(true, null, null, null, null,
                 sixMonths), TODAY);
         assertThat(all.docCount()).isEqualTo(5);
         assertThat(all.scopeLabel()).isEqualTo("전체");
+        assertThat(all.coverage()).noneMatch(l -> l.startsWith("[시즌]"));
+    }
+
+    @Test
+    void 지금_시즌은_그달의_계절과_계절_마지막_달이면_다음_계절이다() {
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2026, 10, 30))).containsExactly("FALL");
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2026, 11, 1))).containsExactly("FALL", "WINTER");
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2026, 12, 15))).containsExactly("WINTER"); // S/S 런웨이 기사가 섞이지 않게
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2027, 1, 10))).containsExactly("WINTER");
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2027, 2, 10))).containsExactly("WINTER", "SPRING");
+        assertThat(TrendFactsService.currentSeasons(LocalDate.of(2027, 7, 10))).containsExactly("SUMMER");
+    }
+
+    /**
+     * 기간·시즌을 정하지 않은 질문("요즘 유행하는 원피스는?")은 지금 시즌 원문만 센다 — 최근 4주에는 다음 시즌 런웨이 기사가 섞인다(2026-10-30).
+     * 지금 시즌 원문이 MIN_SEASON_DOCS보다 적으면 시즌 구분 없이 센다.
+     */
+    @Test
+    void 기간과_시즌이_없으면_지금_시즌으로_세고_적으면_시즌_없이_센다() {
+        List<String> now = TrendFactsService.currentSeasons(TODAY);
+        String off = now.contains("SUMMER") ? "WINTER" : "SUMMER"; // 지금 시즌이 아닌 계절
+        for (int i = 1; i <= TrendFactsService.MIN_SEASON_DOCS; i++) {
+            doc("NOW-" + i, now, new String[]{"DRESS", "DRESS_DRESS", "BLACK"});
+        }
+        doc("OFF-1", List.of(off), new String[]{"DRESS", "DRESS_JUMPSUIT", "WHITE"});
+        doc("OFF-2", List.of(), new String[]{"DRESS", "DRESS_JUMPSUIT", "WHITE"});
+
+        TrendFactsService.Facts dresses = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "DRESS", "원피스",
+                null, null, null), TODAY);
+        assertThat(dresses.docCount()).isEqualTo(TrendFactsService.MIN_SEASON_DOCS);
+        assertThat(dresses.period().label()).isEqualTo("최근 4주"); // 시즌 기간(6개월)이 아니라 최근 4주 그대로
+        assertThat(dresses.scopeLabel()).startsWith("원피스 · ").endsWith(" 시즌");
+        assertThat(dresses.coverage()).anyMatch(l -> l.startsWith("[시즌] 질문에 시즌이 없어 지금 시즌(") && l.endsWith("원문 2건은 뺐다"));
+        assertThat(dresses.dimensions().get(0).rows()).extracting(TrendFactsService.Row::value).containsExactly("DRESS_DRESS");
+
+        // 지금 시즌 원문이 적으면(셋업 1건) 시즌 구분 없이 센다
+        doc("NOW-SETUP", now, new String[]{"SETUP", "SETUP_SUIT", "BROWN"});
+        doc("OFF-SETUP", List.of(off), new String[]{"SETUP", "SETUP_TRACKSUIT", "BLACK"});
+        TrendFactsService.Facts setups = trendFactsService.count(new QuestionInterpreter.Interpretation(true, "SETUP", "셋업",
+                null, null, null), TODAY);
+        assertThat(setups.docCount()).isEqualTo(2);
+        assertThat(setups.scopeLabel()).isEqualTo("셋업");
+        assertThat(setups.lines()).anyMatch(l -> l.startsWith("[시즌] 지금 시즌(") && l.contains("원문이 1건뿐이라 시즌 구분 없이 셌다"));
     }
 }

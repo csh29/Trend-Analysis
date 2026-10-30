@@ -35,7 +35,7 @@ _SCOPE = {
 TOOLS = [
     {"name": "count_trend",
      "description": "범위의 원문을 세어 축별 상위 값(유행점수 순 — 원문 수·출처 수·직전 기간 대비 증감률·유행점수)과 예시 원문을 돌려준다. "
-                    "period가 없으면 최근 4주, seasons를 주면 그 시즌 원문만. focus를 주면 그 축이 첫 축이다. top은 축마다 받을 값 개수(기본 10).",
+                    "period가 없으면 최근 4주, seasons를 주면 그 시즌 원문만. 둘 다 없으면 최근 4주의 지금 시즌 원문만(적으면 시즌 구분 없이 — 결과의 [시즌] 줄).focus를 주면 그 축이 첫 축이다. top은 축마다 받을 값 개수(기본 10).",
      "input_schema": {"type": "object", "properties": {
          **_SCOPE,
          "focus": {"type": "string", "enum": interpret.FOCUS, "description": "주로 볼 축"},

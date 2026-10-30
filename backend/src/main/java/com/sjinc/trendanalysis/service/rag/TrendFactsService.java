@@ -52,7 +52,8 @@ import java.util.stream.Collectors;
  *       함께 나온 다른 옷 종류(매치)와 키워드(스타일)를 센다 — "레더 재킷 9건"만으로는 어떤 레더 재킷이 뜨는지 알 수 없었다(2026-10-26 사용자 요청).
  *       키워드에만 나온 원문은 대상 옷을 몰라 포인트에서 빠진다.</li>
  *   <li>시즌(질문이 F/W·올가을처럼 시즌을 가리킬 때): 원문의 시즌 값(정형화 seasons)이 그 시즌인 원문만 센다 — 게시일 기간(6개월)만으로는
- *       S/S 자료가 섞인다. 시즌 값이 없는 원문은 빠진다(2026-10-23 사용자 결정).</li>
+ *       S/S 자료가 섞인다. 시즌 값이 없는 원문은 빠진다(2026-10-23 사용자 결정). 기간·시즌을 모두 정하지 않은 질문은 지금 시즌
+ *       (currentSeasons)으로 세고, 그 원문이 적으면 시즌 구분 없이 센다 — 어느 쪽인지 "[시즌]" 줄로 알린다(2026-10-30).</li>
  *   <li>속성 조건(해석의 filters — "와이드 팬츠" → 하의 + 실루엣 WIDE, "여성 아우터" → 아우터 + 여성복): 그 값을 가진 의류 아이템만 범위로 센다. 종류마다 값 하나라도
  *       맞으면 되고(OR), 종류끼리는 모두 맞아야 한다(AND). 대상 이름 뒤에 " · 와이드"처럼 붙는다(2026-10-26 — 글자 비교로는 "와이드 데님 팬츠"가 빠졌다).</li>
  *   <li>묻는 축(해석의 focus — "요즘 유행하는 핏은?"이면 실루엣)이 있으면 그 축이 첫 축이 된다 — 화면의 막대와 예시 원문이 그 축의
@@ -158,6 +159,25 @@ public class TrendFactsService {
     static final double VOLUME_RATIO = 1.5;
     /** 증감 순위에 넣는 최소 원문 수(이번·직전 중 큰 쪽) — 1건짜리 변화는 우연이다. */
     static final int MIN_CHANGE_DOCS = 2;
+    /** 기간·시즌을 정하지 않은 질문을 지금 시즌으로 셀 때 필요한 최소 원문 수 — 이보다 적으면 시즌 구분 없이 센다. */
+    static final int MIN_SEASON_DOCS = 5;
+
+    /**
+     * 지금 시즌 — 그달의 계절(3~5 봄·6~8 여름·9~11 가을·12~2 겨울)과, 계절의 마지막 달이면 다음 계절까지.
+     * 반기(S/S·F/W)로 나누면 7월에 여름 옷이, 1월에 겨울 옷이 빠진다. 다음 계절을 늘 넣으면 12월에 S/S 런웨이 기사(봄·여름)가 섞인다.
+     */
+    static List<String> currentSeasons(LocalDate date) {
+        return switch (date.getMonthValue()) {
+            case 3, 4 -> List.of("SPRING");
+            case 5 -> List.of("SPRING", "SUMMER");
+            case 6, 7 -> List.of("SUMMER");
+            case 8 -> List.of("SUMMER", "FALL");
+            case 9, 10 -> List.of("FALL");
+            case 11 -> List.of("FALL", "WINTER");
+            case 12, 1 -> List.of("WINTER");
+            default -> List.of("WINTER", "SPRING"); // 2월
+        };
+    }
 
     /**
      * 수집량 주의 — 범위 원문 수가 직전과 크게 다르거나 직전이 적으면 증감률(원문 수 기준)이 유행 변화가 아니라 수집량 변화를 보인다
@@ -211,6 +231,14 @@ public class TrendFactsService {
     public record Facts(QuestionInterpreter.Period period, boolean stale, String scopeLabel, int docCount, int mediaCount,
                         int prevDocCount, List<Dimension> dimensions, List<TermRow> terms, List<String> evidenceDocIds,
                         boolean focused, String change, List<NameCount> combos, List<NameCount> keywords, List<String> coverage) {
+
+        /** 안내 줄 하나를 더한 것 — 집계 줄의 대상 줄 바로 뒤에 들어간다(조건 정보와 같은 자리). */
+        Facts withNote(String line) {
+            List<String> notes = new ArrayList<>(coverage);
+            notes.add(line);
+            return new Facts(period, stale, scopeLabel, docCount, mediaCount, prevDocCount, dimensions, terms, evidenceDocIds,
+                    focused, change, combos, keywords, List.copyOf(notes));
+        }
 
         /** 수집량 주의(TrendFactsService.volumeNote) — 없으면 null. */
         public String volumeNote() {
@@ -330,6 +358,21 @@ public class TrendFactsService {
         QuestionInterpreter.Period period = question.period() != null ? question.period()
                 : !question.seasons().isEmpty() ? QuestionInterpreter.seasonWindow(today) : QuestionInterpreter.recentWeeks(today);
         Facts facts = countIn(period, scope, question, false);
+        if (question.period() == null && question.seasons().isEmpty() && facts.docCount() > 0) {
+            // 기간·시즌을 정하지 않은 질문("요즘 유행하는 하의")은 지금 시즌 원문만 센다 — 최근 4주에는 다음 시즌 런웨이 기사가
+            // 섞여 10월에 반바지가 뜰 수 있다(2026-10-30 사용자 결정). 지금 시즌 원문이 적으면 시즌 구분 없이 센 것을 쓴다
+            List<String> now = currentSeasons(period.to());
+            Scope inSeason = new Scope(scope.category(), scope.itemType(), Set.copyOf(now), scope.focus(), scope.filters(), scope.top());
+            Facts seasoned = countIn(period, inSeason, question, false);
+            String names = seasonNames(now);
+            if (seasoned.docCount() >= MIN_SEASON_DOCS || seasoned.docCount() == facts.docCount()) {
+                int left = facts.docCount() - seasoned.docCount();
+                return seasoned.withNote("[시즌] 질문에 시즌이 없어 지금 시즌(" + names + ") 원문만 셌다"
+                        + (left > 0 ? " — 같은 기간 다른 시즌·시즌 값 없는 원문 " + left + "건은 뺐다" : ""));
+            }
+            return facts.withNote("[시즌] 지금 시즌(" + names + ") 원문이 " + seasoned.docCount() + "건뿐이라 시즌 구분 없이 셌다"
+                    + " — 다른 시즌 자료가 섞였을 수 있다");
+        }
         if (facts.docCount() == 0 && question.period() == null) {
             // 최근 4주에 없으면 범위 원문 중 가장 최근 게시일까지 4주로 옮긴다(오래된 자료라고 알린다)
             LocalDate latest = latestDate(scope);
@@ -694,10 +737,14 @@ public class TrendFactsService {
 
     /** 범위 이름 뒤에 붙는 시즌(예: " · 가을·겨울 시즌"). 시즌을 정하지 않았으면 빈 문자열. */
     private String seasonLabel(Scope scope) {
-        if (scope.seasons().isEmpty()) return "";
-        return " · " + comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.SEASON).stream()
-                .filter(c -> scope.seasons().contains(c.getCodeValue())).map(ComCd::getCodeName)
-                .collect(Collectors.joining("·")) + " 시즌";
+        return scope.seasons().isEmpty() ? "" : " · " + seasonNames(scope.seasons()) + " 시즌";
+    }
+
+    /** 시즌 코드 → 이름("가을·겨울"), 코드 순서대로. */
+    private String seasonNames(java.util.Collection<String> seasons) {
+        return comCdRepository.findByCodeGroupOrderBySortOrderAsc(TrendCodes.SEASON).stream()
+                .filter(c -> seasons.contains(c.getCodeValue())).map(ComCd::getCodeName)
+                .collect(Collectors.joining("·"));
     }
 
     /** 기타 묶음인지 — 카테고리 ETC, 아이템 종류 ETC·OUTER_ETC 같은 카테고리 기타. */
