@@ -27,7 +27,9 @@ py -m venv .venv
 
 - 워커는 1개로 띄운다(`--workers`를 주지 않는다). **내장형 Chroma 폴더(`chroma_data/`)는 한 프로세스만 연다** — 조회도 다른 프로세스로 폴더를 직접 열지 말고 실행 중인 서비스 API로 한다(아래).
 - 첫 색인 때 임베딩 모델 `Qwen/Qwen3-VL-Embedding-2B`(약 4GB)를 내려받는다(`~/.cache/huggingface`). 모델은 첫 색인·검색 때 올라가며 RAM을 약 4.5GB 쓴다.
-- 리랭커 `RERANK_MODEL`(기본 `BAAI/bge-reranker-v2-m3`, 약 2.3GB)은 리랭킹을 켠 첫 검색 때 내려받고 올린다(RAM 약 2.3GB 더, 올리는 데 약 30초). 이 PC(RAM 16GB)에서는 임베딩 모델과 합쳐 약 7GB라 Spring·브라우저와 함께면 빠듯하다.
+- 리랭커 `RERANK_MODEL`(기본 `BAAI/bge-reranker-v2-m3`, 약 2.3GB)은 처음 쓸 때 내려받는다(RAM 약 2.3GB 더). 이 PC(RAM 16GB)에서는 임베딩 모델과 합쳐 약 7GB라 Spring·브라우저와 함께면 빠듯하다.
+- **기동 때 모델을 미리 올린다**(`PRELOAD_MODELS`, 기본 true — 2026-10-30 사용자 결정): 기동 직후 백그라운드로 임베딩 모델·키워드 색인·리랭커를 올린다. 미리 올리지 않으면 켠 뒤 첫 질문이 torch 불러오기(약 45초)·임베딩 모델(14초)·리랭커(약 20초)로 80초 가까이 더 걸렸다. `/health`는 바로 응답하고, 올리는 중에 온 요청은 모델 잠금에서 기다린다. 리랭킹을 끄고 쓰며 메모리를 아끼려면 false.
+- **한 번 받은 모델은 로컬 캐시로만 올린다**(`core/hf_cache.py`): 캐시가 있어도 올릴 때마다 Hugging Face에 파일 확인 요청이 수십 번 나가 몇 초씩 걸렸다. 모델을 새 버전으로 받으려면 캐시(`~/.cache/huggingface`)에서 그 모델을 지운다.
 - torch는 CPU 빌드다(이 PC GPU는 VRAM 2GB라 모델이 안 올라간다). CPU 임베딩 시간은 글자 수에 따라 늘어 이 PC에서 100자 약 5초, 300자 약 14초, 500자(청크 최대 `CHUNK_SIZE`) 약 20초다(`GET /search` 질의 임베딩으로 잰 값, 모델을 처음 올리는 첫 호출은 약 1분 더). Spring의 AI 호출 대기 시간(3분)을 넘기면 색인 실패로 남으므로, 본문이 약 3,500자(500자 청크 약 9개)를 넘으면 색인 실패를 의심한다(제안값).
 
 ### 색인(Chroma) 데이터 조회
@@ -54,6 +56,7 @@ ai/
 │  ├─ main.py              FastAPI 앱·라우트(/structure, /index, /interpret, /answer, /agent/step, /brief, /search, /health …)
 │  ├─ core/                여러 기능이 같이 쓰는 것
 │  │  ├─ config.py         ai/.env + 환경변수 설정
+│  │  ├─ hf_cache.py       Hugging Face 모델을 받은 뒤에는 로컬 캐시로만 올리기
 │  │  ├─ prompt_loader.py  prompts/ 아래 md 읽기(이름 = 상대 경로, 예: "structure/common")
 │  │  └─ claude.py         Claude 호출·SDK 오류 분류(AiServiceError)·JSON 읽기·토큰 사용량
 │  ├─ structuring/         P-03 정형화

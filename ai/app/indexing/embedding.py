@@ -8,6 +8,8 @@ import threading
 
 from chromadb import Documents, EmbeddingFunction, Embeddings
 
+from app.core import hf_cache
+
 QWEN_VL_PREFIX = "Qwen/Qwen3-VL-Embedding"
 # 모델 카드 권장: 질의에만 영어 지시문을 붙이고 문서는 그대로 넣는다.
 QWEN_QUERY_PROMPT = "Retrieve relevant documents for the query."
@@ -34,7 +36,7 @@ class QwenVLEmbeddingFunction(EmbeddingFunction[Documents]):
                 from sentence_transformers import SentenceTransformer
                 self._model = SentenceTransformer(
                     self.model_name, device="cuda" if torch.cuda.is_available() else "cpu",
-                    model_kwargs={"torch_dtype": torch.bfloat16})
+                    model_kwargs={"torch_dtype": torch.bfloat16}, local_files_only=hf_cache.is_cached(self.model_name))
             return self._model
 
     def _encode(self, texts: list[str], prompt: str | None = None) -> Embeddings:

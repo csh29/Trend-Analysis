@@ -35,6 +35,7 @@ class Settings:
     chunk_overlap: int
     hybrid_search: bool = True  # P-06 검색에 키워드(BM25)를 RRF로 합친다. false면 벡터만
     rerank_model: str = "BAAI/bge-reranker-v2-m3"  # P-06 리랭커(켜기/끄기는 Spring 공통코드 RAG_SEARCH)
+    preload_models: bool = True  # 기동 때 임베딩·리랭커 모델을 백그라운드로 미리 올린다
 
 
 def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
@@ -60,6 +61,7 @@ def load_settings(env_file: Path = BASE_DIR / ".env") -> Settings:
         chunk_overlap=int(get("CHUNK_OVERLAP", "80")),
         hybrid_search=get("HYBRID_SEARCH", "true").lower() != "false",
         rerank_model=get("RERANK_MODEL", "BAAI/bge-reranker-v2-m3"),
+        preload_models=get("PRELOAD_MODELS", "true").lower() != "false",
     )
 
 

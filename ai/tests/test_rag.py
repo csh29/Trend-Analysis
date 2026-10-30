@@ -186,6 +186,22 @@ class RerankTest(unittest.TestCase):
         self.assertEqual(2, len(res.json()))
 
 
+class PreloadTest(unittest.TestCase):
+    """기동 때 모델 미리 올리기 — 실패해도 서비스 기동을 막지 않는다."""
+
+    def test_preload_warms_embedding_keyword_and_reranker(self):
+        collection = FakeQueryCollection(ROWS)
+        fake = FakeReranker("x")
+        with mock.patch.object(main.vector_store, "get_collection", return_value=collection),                 mock.patch.object(main.reranker, "get", return_value=fake):
+            main.preload_models()
+        self.assertEqual([main.PRELOAD_TEXT], [q for q, _ in fake.calls])
+        self.assertIs(collection, keyword_index._source)
+
+    def test_preload_failure_is_logged_not_raised(self):
+        with mock.patch.object(main.vector_store, "get_collection", side_effect=RuntimeError("chroma")),                 self.assertLogs("trend-ai", level="WARNING"):
+            main.preload_models()
+
+
 class RagTest(unittest.TestCase):
     def test_search_turns_distance_into_score(self):
         hits = rag.search(FakeQueryCollection(ROWS), "q", 2)

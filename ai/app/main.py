@@ -8,7 +8,9 @@
 import base64
 import binascii
 import logging
+import threading
 import time
+from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI, Header, HTTPException, Query
@@ -20,7 +22,8 @@ from app.rag import answer as rag
 from app.rag import interpret as interpreter
 from app.rag import agent
 from app.rag import brief as briefing
-from app.indexing import vector_store
+from app.indexing import keyword_index, vector_store
+from app.rag import reranker
 from app.core.config import settings
 from app.core.claude import AiServiceError
 from app.structuring.structurer import CodeOption, ImageInput, StructureInput, candidate_counts, structure
@@ -28,7 +31,33 @@ from app.structuring.structurer import CodeOption, ImageInput, StructureInput, c
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s - %(message)s")
 log = logging.getLogger("trend-ai")
 
-app = FastAPI(title="trend-analysis-ai")
+PRELOAD_TEXT = "모델 미리 올리기"
+
+
+def preload_models() -> None:
+    """임베딩 모델·키워드 색인·리랭커를 미리 올린다. AI 서비스를 켠 뒤 첫 질문이 라이브러리·모델 올리기로 80초 가까이 더 걸렸다
+    (2026-10-30 — torch 불러오기 약 45초, 임베딩 모델 14초, 리랭커 약 20초). 실패해도 서비스는 그대로 뜨고 첫 요청 때 다시 올린다."""
+    started = time.perf_counter()
+    try:
+        collection = vector_store.get_collection()
+        vector_store.embed_query(collection, PRELOAD_TEXT)
+        keyword_index.get(collection)
+        log.info("임베딩 모델·키워드 색인을 미리 올렸습니다(%.1f초)", time.perf_counter() - started)
+        reranker.get().score(PRELOAD_TEXT, [PRELOAD_TEXT])
+        log.info("리랭커 모델을 미리 올렸습니다(누적 %.1f초)", time.perf_counter() - started)
+    except Exception:
+        log.warning("모델을 미리 올리지 못했습니다 — 첫 요청 때 올립니다", exc_info=True)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # 기동을 막지 않게 백그라운드로 — /health는 바로 응답하고, 올리는 중에 온 요청은 모델 잠금에서 기다린다
+    if settings.preload_models:
+        threading.Thread(target=preload_models, name="preload-models", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="trend-analysis-ai", lifespan=lifespan)
 
 
 class CodeOptionModel(BaseModel):

@@ -6,6 +6,7 @@
 """
 import threading
 
+from app.core import hf_cache
 from app.core.config import settings
 
 MAX_LENGTH = 1024  # 청크는 최대 500자(CHUNK_SIZE)라 잘리지 않는다
@@ -29,7 +30,8 @@ class CrossEncoderReranker:
         with self._lock:
             if self._model is None:
                 from sentence_transformers import CrossEncoder
-                self._model = CrossEncoder(self.model_name, max_length=MAX_LENGTH, device="cpu")
+                self._model = CrossEncoder(self.model_name, max_length=MAX_LENGTH, device="cpu",
+                                           local_files_only=hf_cache.is_cached(self.model_name))
             return self._model
 
     def score(self, query: str, documents: list[str]) -> list[float]:
